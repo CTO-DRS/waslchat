@@ -46,6 +46,9 @@ class ForwardService {
       }
       if (bytes == null) return false;
       final enc = await E2eService.encryptBytes(key, conv, bytes);
+      final meta = (text != null && text.isNotEmpty)
+          ? await E2eService.encryptText(key, conv, text)
+          : '';
       final path = await MediaService.upload(
         conversationId: conv,
         bytes: enc,
@@ -56,7 +59,7 @@ class ForwardService {
         'conversation_id': conv,
         'sender_id': me,
         'type': type,
-        'content': '',
+        'content': meta,
         'media_url': path,
         'duration_ms': durationMs,
       });

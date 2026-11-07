@@ -80,6 +80,10 @@ Deno.serve(async (req) => {
     ? "📷 صورة"
     : m.type === "voice"
     ? "🎤 رسالة صوتية"
+    : m.type === "video"
+    ? "🎬 فيديو"
+    : m.type === "file"
+    ? "📎 ملف"
     : encrypted
     ? "🔒 رسالة مشفرة"
     : String(m.content ?? "").slice(0, 140);

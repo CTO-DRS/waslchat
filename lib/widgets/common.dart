@@ -8,6 +8,10 @@ String previewText(Map<String, dynamic> row, {String empty = 'لا توجد رس
       return '📷 صورة';
     case 'voice':
       return '🎤 رسالة صوتية';
+    case 'video':
+      return '🎬 فيديو';
+    case 'file':
+      return '📎 ملف';
     default:
       return (row['last_message'] as String?) ?? empty;
   }

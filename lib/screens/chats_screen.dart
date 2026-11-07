@@ -97,6 +97,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
         return '📷 صورة';
       case 'voice':
         return '🎤 رسالة صوتية';
+      case 'video':
+        return '🎬 فيديو';
+      case 'file':
+        return '📎 ملف';
       default:
         final raw = (c['last_message'] as String?) ?? 'ابدأ المحادثة';
         if (E2eService.isEncrypted(raw)) {

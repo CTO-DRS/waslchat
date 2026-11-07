@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:cryptography/cryptography.dart' show SecretKey;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -20,6 +24,7 @@ import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
+import 'video_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -134,12 +139,30 @@ class _ChatScreenState extends State<ChatScreen> {
   void _scheduleDecrypt(List<Map<String, dynamic>> msgs) {
     if (!_e2e) return;
     for (final m in msgs) {
-      if ((m['type'] ?? 'text') != 'text') continue;
+      final t = m['type'] ?? 'text';
+      if (t != 'text' && t != 'file' && t != 'video') continue;
       if (m['deleted_at'] != null) continue;
       final content = m['content'] as String? ?? '';
       if (!E2eService.isEncrypted(content) || _plain.containsKey(content)) continue;
       unawaited(_decryptInto(content));
     }
+  }
+
+  /// بيانات ملف/فيديو (الاسم والحجم) من content، بعد فكّها إن كانت مشفّرة
+  Map<String, dynamic>? _metaOf(Map<String, dynamic> m) {
+    final t = _textOf(m);
+    if (t == null || t.isEmpty || !t.startsWith('{')) return null;
+    try {
+      return Map<String, dynamic>.from(jsonDecode(t) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _sizeLabel(int? b) {
+    if (b == null) return '';
+    if (b < 1024 * 1024) return '${(b / 1024).ceil()} ك.ب';
+    return '${(b / (1024 * 1024)).toStringAsFixed(1)} م.ب';
   }
 
   // يكتب الآن + علامات القراءة
@@ -492,9 +515,11 @@ class _ChatScreenState extends State<ChatScreen> {
     required String ext,
     required String contentType,
     int? durationMs,
+    Map<String, dynamic>? meta,
   }) async {
     setState(() => _uploading = true);
     try {
+      var content = meta == null ? '' : jsonEncode(meta);
       var payload = bytes;
       var upExt = ext;
       var upType = contentType;
@@ -505,6 +530,9 @@ class _ChatScreenState extends State<ChatScreen> {
           return;
         }
         payload = await E2eService.encryptBytes(key, widget.conversationId, bytes);
+        if (content.isNotEmpty) {
+          content = await E2eService.encryptText(key, widget.conversationId, content);
+        }
         upExt = 'enc.bin';
         upType = 'application/octet-stream';
       }
@@ -519,7 +547,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'conversation_id': widget.conversationId,
         'sender_id': _me,
         'type': type,
-        'content': '',
+        'content': content,
         'media_url': path,
         'duration_ms': durationMs,
         if (replyTo != null) 'reply_to': replyTo['id'],
@@ -547,6 +575,78 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  static const _maxBytes = 24 * 1024 * 1024;
+
+  Future<void> _pickVideo() async {
+    final x = await _picker.pickVideo(
+        source: ImageSource.gallery, maxDuration: const Duration(minutes: 5));
+    if (x == null) return;
+    final size = await x.length();
+    if (size > _maxBytes) {
+      _snack('الفيديو أكبر من 24 ميغابايت');
+      return;
+    }
+    final bytes = await x.readAsBytes();
+    final ext = x.name.contains('.') ? x.name.split('.').last.toLowerCase() : 'mp4';
+    await _sendMedia(
+      type: 'video',
+      bytes: bytes,
+      ext: ext,
+      contentType: ext == 'mov' ? 'video/quicktime' : 'video/mp4',
+      meta: {'name': x.name, 'size': size},
+    );
+  }
+
+  Future<void> _pickFile() async {
+    final r = await FilePicker.pickFiles(withData: true);
+    final f = r?.files.single;
+    if (f == null) return;
+    if (f.size > _maxBytes || f.bytes == null) {
+      _snack(f.bytes == null ? 'تعذّر قراءة الملف' : 'الملف أكبر من 24 ميغابايت');
+      return;
+    }
+    final ext = (f.extension ?? 'bin').toLowerCase();
+    await _sendMedia(
+      type: 'file',
+      bytes: f.bytes!,
+      ext: ext.length > 8 ? 'bin' : ext,
+      contentType: 'application/octet-stream',
+      meta: {'name': f.name, 'size': f.size},
+    );
+  }
+
+  /// يفك الملف إلى مجلد مؤقت ثم يفتحه (الفيديو داخل التطبيق، وغيره بتطبيق مناسب)
+  Future<void> _openMedia(Map<String, dynamic> m) async {
+    if (kIsWeb) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await _mediaBytes(m['media_url'] as String);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الملف');
+        return;
+      }
+      final meta = _metaOf(m);
+      var name = (meta?['name'] as String?) ?? (m['type'] == 'video' ? 'video.mp4' : 'file');
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final dir = Directory('${(await getTemporaryDirectory()).path}/wasl_open');
+      await dir.create(recursive: true);
+      final file = File('${dir.path}/${DateTime.now().millisecondsSinceEpoch}_$name');
+      await file.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      if (m['type'] == 'video') {
+        await Navigator.push(
+            context, MaterialPageRoute(builder: (_) => VideoScreen(file: file)));
+      } else {
+        final res = await OpenFilex.open(file.path);
+        if (res.type != ResultType.done) _snack('لا يوجد تطبيق يفتح هذا الملف');
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الملف');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   void _showAttachSheet() {
     showModalBottomSheet(
       context: context,
@@ -572,6 +672,24 @@ class _ChatScreenState extends State<ChatScreen> {
                 _pickImage(ImageSource.camera);
               },
             ),
+          ListTile(
+            leading: const Icon(Icons.movie_outlined, color: WaslColors.violet),
+            title: const Text('فيديو'),
+            subtitle: const Text('حتى 24 ميغابايت'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickVideo();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.insert_drive_file_outlined, color: Colors.amber),
+            title: const Text('ملف'),
+            subtitle: const Text('PDF، مستندات، وغيرها حتى 24 ميغابايت'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickFile();
+            },
+          ),
         ]),
       ),
     );
@@ -661,6 +779,41 @@ class _ChatScreenState extends State<ChatScreen> {
         return VoiceBubble(
             loader: () => _mediaBytes(m['media_url'] as String),
             durationMs: m['duration_ms'] as int?);
+      case 'video':
+      case 'file':
+        final isVideo = m['type'] == 'video';
+        final meta = _metaOf(m);
+        final name = (meta?['name'] as String?) ?? (isVideo ? 'فيديو' : 'ملف');
+        return InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _openMedia(m),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(isVideo ? Icons.play_circle_fill : Icons.insert_drive_file_rounded,
+                  size: 36, color: Colors.white),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  Text(
+                      [
+                        isVideo ? 'فيديو' : 'ملف',
+                        _sizeLabel((meta?['size'] as num?)?.toInt()),
+                      ].where((e) => e.isNotEmpty).join(' · '),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
+            ]),
+          ),
+        );
       default:
         final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
         return Text(text,
@@ -690,6 +843,10 @@ class _ChatScreenState extends State<ChatScreen> {
         what = '[صورة]';
       } else if (type == 'voice') {
         what = '[رسالة صوتية]';
+      } else if (type == 'video') {
+        what = '[فيديو]';
+      } else if (type == 'file') {
+        what = '[ملف]';
       } else {
         final raw = (m['content'] ?? '') as String;
         if (E2eService.isEncrypted(raw)) {
@@ -776,6 +933,10 @@ class _ChatScreenState extends State<ChatScreen> {
         return '📷 صورة';
       case 'voice':
         return '🎤 رسالة صوتية';
+      case 'video':
+        return '🎬 فيديو';
+      case 'file':
+        return '📎 ${(_metaOf(m)?['name'] as String?) ?? 'ملف'}';
       default:
         final t = _textOf(m) ?? '🔒 رسالة مشفرة';
         return t.length > 120 ? '${t.substring(0, 120)}…' : t;
@@ -890,6 +1051,7 @@ class _ChatScreenState extends State<ChatScreen> {
               target: target,
               type: type,
               bytes: bytes,
+              text: (type == 'file' || type == 'video') ? _textOf(m) : null,
               durationMs: m['duration_ms'] as int?);
     }
     if (mounted) setState(() => _uploading = false);

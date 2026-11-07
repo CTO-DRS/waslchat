@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.1.7+14
+version: 0.1.8+15
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -21,6 +21,9 @@ dependencies:
   qr_flutter: ^4.1.0
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.2
+  file_picker: ^11.0.3
+  video_player: ^2.14.1
+  open_filex: ^5.0.0
 
 dev_dependencies:
   flutter_test:
