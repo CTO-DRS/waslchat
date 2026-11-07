@@ -21,7 +21,7 @@ dependencies:
   qr_flutter: ^4.1.0
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.2
-  file_picker: ^11.0.3
+  file_picker: 8.3.7
   video_player: ^2.14.1
   open_filex: ^5.0.0
 
