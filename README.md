@@ -1,6 +1,10 @@
-# وصل شات — الإصدار 0.4
+# وصل شات — الإصدار 0.1.0
 
 تطبيق مراسلة حقيقي يعمل على أندرويد وآيفون والويب بكود واحد (Flutter) مع خادم مجاني (Supabase).
+
+[![ادعم وصل شات / Support Wasl Chat](https://img.shields.io/badge/PayPal-ادعم%20وصل%20شات%20%2F%20Support%20Wasl%20Chat-0070ba?logo=paypal)](https://www.paypal.com/ncp/payment/9QVZ2Y7A5X3GN)
+
+سياسة الخصوصية والشروط: https://cto-drs.github.io/waslchat/
 
 ## ما يعمل الآن
 - إنشاء حساب وتسجيل دخول بالبريد وكلمة المرور
