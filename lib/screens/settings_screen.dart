@@ -4,6 +4,7 @@ import '../config.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
+import 'security_screens.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -46,6 +47,19 @@ class SettingsScreen extends StatelessWidget {
             subtitle: Text('صلاحيات وصول على مستوى الصفوف (RLS)'),
           ),
           ListTile(
+            leading: const Icon(Icons.shield_outlined, color: WaslColors.indigo),
+            title: const Text('التحقق بخطوتين'),
+            subtitle: const Text('رمز من تطبيق المصادقة عند الدخول'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const TwoFactorScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.password, color: WaslColors.teal),
+            title: const Text('تغيير كلمة المرور'),
+            onTap: () => openChangePassword(context),
+          ),
+          ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('تسجيل الخروج'),
             onTap: () async {
@@ -56,7 +70,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Center(
-              child: Text('وصل شات · الإصدار 0.4.0', style: TextStyle(color: Colors.white38))),
+              child: Text('وصل شات · الإصدار 0.6.0', style: TextStyle(color: Colors.white38))),
         ],
       ),
     );

@@ -65,6 +65,37 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  Future<void> _google() async {
+    setState(() => _loading = true);
+    try {
+      await supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: AppConfig.authRedirect,
+        authScreenLaunchMode: LaunchMode.externalApplication,
+      );
+    } on AuthException catch (e) {
+      _show(e.message);
+    } catch (_) {
+      _show('تعذّر فتح تسجيل الدخول بجوجل');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _forgot() async {
+    final email = _email.text.trim();
+    if (!email.contains('@')) {
+      _show('اكتب بريدك أولاً ثم اضغط «نسيت كلمة المرور»');
+      return;
+    }
+    try {
+      await supabase.auth.resetPasswordForEmail(email, redirectTo: AppConfig.authRedirect);
+      _show('أرسلنا رابط استعادة كلمة المرور إلى بريدك');
+    } on AuthException catch (e) {
+      _show(e.message);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -132,6 +163,36 @@ class _AuthScreenState extends State<AuthScreen> {
                           : Text(_isSignUp ? 'إنشاء حساب' : 'تسجيل الدخول',
                               style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
                     ),
+                  ),
+                ),
+                if (!_isSignUp)
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton(onPressed: _forgot, child: const Text('نسيت كلمة المرور؟')),
+                  ),
+                const SizedBox(height: 4),
+                Row(children: const [
+                  Expanded(child: Divider(color: Colors.white24)),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('أو', style: TextStyle(color: Colors.white54)),
+                  ),
+                  Expanded(child: Divider(color: Colors.white24)),
+                ]),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: OutlinedButton.icon(
+                    onPressed: _loading ? null : _google,
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white24),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    ),
+                    icon: const Text('G',
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
+                    label: const Text('المتابعة باستخدام Google',
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 TextButton(
