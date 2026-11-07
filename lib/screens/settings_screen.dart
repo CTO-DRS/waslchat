@@ -4,6 +4,8 @@ import '../config.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
+import '../services/e2e_service.dart';
+import 'e2e_key_screen.dart';
 import 'security_screens.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -55,6 +57,13 @@ class SettingsScreen extends StatelessWidget {
                 .push(MaterialPageRoute(builder: (_) => const TwoFactorScreen())),
           ),
           ListTile(
+            leading: const Icon(Icons.key_outlined, color: WaslColors.violet),
+            title: const Text('مفتاح التشفير'),
+            subtitle: const Text('النسخة الاحتياطية واستعادتها على جوال جديد'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => checkE2eKeys(context, fromSettings: true),
+          ),
+          ListTile(
             leading: const Icon(Icons.password, color: WaslColors.teal),
             title: const Text('تغيير كلمة المرور'),
             onTap: () => openChangePassword(context),
@@ -63,6 +72,33 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('تسجيل الخروج'),
             onTap: () async {
+              // بلا نسخة احتياطية سيضيع المفتاح عند الخروج: ننبّه أولاً
+              final st = await E2eService.checkKeys();
+              if (!context.mounted) return;
+              if (st == E2eKeyState.needsBackup) {
+                final go = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Text('مفتاح التشفير غير محفوظ'),
+                    content: const Text(
+                        'إن خرجت الآن فلن تقرأ رسائلك المشفّرة عند الدخول مجدداً. احفظ نسخة احتياطية أولاً؟'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text('اخرج على أي حال')),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('احفظ النسخة')),
+                    ],
+                  ),
+                );
+                if (!context.mounted) return;
+                if (go != true) {
+                  await checkE2eKeys(context, fromSettings: true);
+                  return;
+                }
+              }
+              await E2eService.wipeLocal();
               await PushService.unregister();
               await PresenceService.stop();
               await supabase.auth.signOut();
@@ -70,7 +106,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Center(
-              child: Text('وصل شات · الإصدار 0.1.0', style: TextStyle(color: Colors.white38))),
+              child: Text('وصل شات · الإصدار 0.1.4', style: TextStyle(color: Colors.white38))),
         ],
       ),
     );

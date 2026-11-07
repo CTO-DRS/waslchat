@@ -1,17 +1,29 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
 
-import '../services/media_service.dart';
+/// تُحمّل بايتات الوسيط (بعد فك التشفير إن كان مشفّراً)
+typedef MediaLoader = Future<Uint8List?> Function();
 
-/// فقاعة صورة: تُحمَّل برابط آمن، والضغط يفتحها بملء الشاشة
-class ImageBubble extends StatelessWidget {
-  const ImageBubble({super.key, required this.path});
-  final String path;
+/// فقاعة صورة: تُحمّل مرة واحدة، والضغط يفتحها بملء الشاشة
+class ImageBubble extends StatefulWidget {
+  const ImageBubble({super.key, required this.loader});
+  final MediaLoader loader;
+
+  @override
+  State<ImageBubble> createState() => _ImageBubbleState();
+}
+
+class _ImageBubbleState extends State<ImageBubble> {
+  late final Future<Uint8List?> _future = widget.loader();
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String>(
-      future: MediaService.signedUrl(path),
+    return FutureBuilder<Uint8List?>(
+      future: _future,
       builder: (context, snap) {
         if (!snap.hasData) {
           return const SizedBox(
@@ -20,15 +32,28 @@ class ImageBubble extends StatelessWidget {
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-        final url = snap.data!;
+        final bytes = snap.data;
+        if (bytes == null) {
+          return Container(
+            width: 220,
+            height: 120,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Text('🔒 تعذّر فك تشفير الصورة',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+          );
+        }
         return GestureDetector(
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => _FullImage(url: url)),
+            MaterialPageRoute(builder: (_) => _FullImage(bytes: bytes)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Image.network(url, width: 220, fit: BoxFit.cover),
+            child: Image.memory(bytes, width: 220, fit: BoxFit.cover),
           ),
         );
       },
@@ -37,23 +62,25 @@ class ImageBubble extends StatelessWidget {
 }
 
 class _FullImage extends StatelessWidget {
-  const _FullImage({required this.url});
-  final String url;
+  const _FullImage({required this.bytes});
+  final Uint8List bytes;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(backgroundColor: Colors.black),
-      body: Center(child: InteractiveViewer(child: Image.network(url))),
+      body: Center(
+          child: InteractiveViewer(child: Image.memory(bytes, fit: BoxFit.contain))),
     );
   }
 }
 
 /// فقاعة رسالة صوتية: تشغيل/إيقاف وشريط تقدم ومدة
+/// (يُفكّ تشفير الملف ويُكتب مؤقتاً ثم يُشغّل محلياً)
 class VoiceBubble extends StatefulWidget {
-  const VoiceBubble({super.key, required this.path, this.durationMs});
-  final String path;
+  const VoiceBubble({super.key, required this.loader, this.durationMs});
+  final MediaLoader loader;
   final int? durationMs;
 
   @override
@@ -77,7 +104,13 @@ class _VoiceBubbleState extends State<VoiceBubble> {
         return;
       }
       if (!_ready) {
-        await _player.setUrl(await MediaService.signedUrl(widget.path));
+        final bytes = await widget.loader();
+        if (bytes == null) throw Exception('no bytes');
+        final dir = await getTemporaryDirectory();
+        final f =
+            File('${dir.path}/voice_enc_${DateTime.now().millisecondsSinceEpoch}.m4a');
+        await f.writeAsBytes(bytes, flush: true);
+        await _player.setFilePath(f.path);
         _ready = true;
       }
       if (_player.processingState == ProcessingState.completed) {

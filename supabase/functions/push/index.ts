@@ -70,10 +70,14 @@ Deno.serve(async (req) => {
 
   const name = sender?.display_name ?? sender?.username ?? "وصل شات";
   const title = conv?.is_group ? `${name} · ${conv.title ?? "مجموعة"}` : name;
+  // الرسائل المشفرة بين الطرفين (بادئة v1.) لا يفكها السيرفر أبداً: نص إشعار عام
+  const encrypted = typeof m.content === "string" && m.content.startsWith("v1.");
   const body = m.type === "image"
     ? "📷 صورة"
     : m.type === "voice"
     ? "🎤 رسالة صوتية"
+    : encrypted
+    ? "🔒 رسالة مشفرة"
     : String(m.content ?? "").slice(0, 140);
 
   const access = await googleAccessToken();

@@ -1,4 +1,4 @@
-# وصل شات — الإصدار 0.1.0
+# وصل شات — الإصدار 0.1.3
 
 تطبيق مراسلة حقيقي يعمل على أندرويد وآيفون والويب بكود واحد (Flutter) مع خادم مجاني (Supabase).
 
@@ -30,7 +30,7 @@
 
 1. **ثبّت Flutter**: من flutter.dev > Get started، ثم شغّل `flutter doctor`.
 2. **أنشئ مشروع Supabase مجاني**: supabase.com > New project.
-3. **قاعدة البيانات**: افتح SQL Editor، الصق `supabase/001_schema.sql` واضغط Run، ثم `002_groups_media.sql`، ثم `003_receipts_push.sql`، ثم `004_communities_channels.sql` (كل ملف وحده ثم Run).
+3. **قاعدة البيانات**: افتح SQL Editor، الصق `supabase/001_schema.sql` واضغط Run، ثم `002_groups_media.sql`، ثم `003_receipts_push.sql`، ثم `004_communities_channels.sql`، ثم `005_push_trigger.sql` (بقيم حقيقية)، ثم `006_e2e_keys.sql` (كل ملف وحده ثم Run).
    (إذا شغّلت إصداراً سابقاً، شغّل الملفات الجديدة فقط.)
 4. **للتجربة السريعة**: Authentication > Providers > Email، أطفئ "Confirm email".
 5. **اربط التطبيق**: من Project Settings > API انسخ Project URL و anon key وضعهما في `lib/config.dart`.
@@ -103,4 +103,8 @@
 3. ✅ الإشعارات (Firebase Cloud Messaging مجاني)
 4. المكالمات الصوتية والمرئية (LiveKit / WebRTC)
 5. ✅ المجتمعات والقنوات والمساعد الذكي
-6. التشفير التام بين الطرفين
+6. 🔜 التشفير التام بين الطرفين — المرحلتان 1 (المحادثات الخاصة) و2 (المجموعات الخاصة) منفّذتان في الكود وتنتظران الاختبار على أجهزة حقيقية
+
+## مستندات المطوّر
+- `docs/RUNBOOK_URGENT.md` — مهام المالك العاجلة: تدوير رموز GitHub/Supabase، ربط Brevo SMTP، إضافة بصمات Firebase، قائمة اختبار الجهاز الحقيقي.
+- `docs/E2EE_PLAN.md` — خطة التشفير بين الطرفين (X25519 + AES-GCM): الحالة والحدود والمراحل القادمة.

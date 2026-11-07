@@ -17,6 +17,10 @@ class AiService {
   static Future<String> summarize(String conversationId) =>
       _call({'mode': 'summarize', 'conversation_id': conversationId});
 
+  /// التلخيص بعد E2E: التطبيق يفك التشفير محلياً ويرسل الأسطر جاهزة
+  static Future<String> summarizeLines(List<String> lines) =>
+      _call({'mode': 'summarize_lines', 'lines': lines});
+
   /// target: 'ar' أو 'en'
   static Future<String> translate(String text, String target) =>
       _call({'mode': 'translate', 'text': text, 'target': target});

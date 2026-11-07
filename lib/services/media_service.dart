@@ -33,4 +33,9 @@ class MediaService {
     _cache[path] = (url, DateTime.now().add(const Duration(minutes: 50)));
     return url;
   }
+
+  /// تنزيل بايتات ملف مباشرة (تخزين خاص — RLS تتحقق من العضوية)
+  static Future<Uint8List> download(String path) async {
+    return supabase.storage.from(bucket).download(path);
+  }
 }

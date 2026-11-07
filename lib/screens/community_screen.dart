@@ -74,6 +74,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
           isGroup: true,
           isChannel: isChannel,
           canPost: !isChannel || role == 'owner' || role == 'admin',
+          encrypted: false, // غرف المجتمعات غير مشفّرة في هذه المرحلة (خطة E2EE §6)
         ),
       ),
     );

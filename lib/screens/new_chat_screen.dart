@@ -53,6 +53,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
             conversationId: convId as String,
             title: (user['display_name'] ?? user['username']) as String,
             otherId: user['id'] as String,
+            encrypted: true,
           ),
         ),
       );

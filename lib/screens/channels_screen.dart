@@ -84,6 +84,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           isGroup: true,
           isChannel: true,
           canPost: role == 'owner' || role == 'admin',
+          encrypted: false,
         ),
       ),
     );

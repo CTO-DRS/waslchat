@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/e2e_service.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
 
@@ -55,12 +56,15 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         'p_title': title,
         'p_members': _selected.keys.toList(),
       });
+      // تثبيت مبكر لمفتاح المجموعة وتغليفه للأعضاء (في الخلفية — لا يعطّل التنقل)
+      final convId = id as String;
+      E2eService.initGroupKey(convId);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              ChatScreen(conversationId: id as String, title: title, isGroup: true),
+          builder: (_) => ChatScreen(
+              conversationId: convId, title: title, isGroup: true, encrypted: true),
         ),
       );
     } catch (_) {

@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     }
 
     if (mode === "summarize") {
-      // نقرأ الرسائل بصلاحيات المستخدم نفسه: لا يلخص إلا محادثة هو عضو فيها
+      // (توافق رجعي مع النسخ القديمة) نقرأ الرسائل بصلاحيات المستخدم نفسه
       const db = createClient(
         Deno.env.get("SUPABASE_URL")!,
         Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -89,6 +89,20 @@ Deno.serve(async (req) => {
         const what = m.type === "image" ? "[صورة]" : m.type === "voice" ? "[رسالة صوتية]" : m.content;
         return `${who}: ${what}`;
       });
+      if (!lines.length) return json({ reply: "لا توجد رسائل لتلخيصها بعد." });
+      const reply = await gemini(
+        "لخّص هذه المحادثة بالعربية في نقاط قصيرة: أهم ما قيل، والقرارات، وأي مهام أو مواعيد مطلوبة. لا تخترع شيئاً غير موجود.",
+        [{ role: "user", text: lines.join("\n") }],
+      );
+      return json({ reply });
+    }
+
+    if (mode === "summarize_lines") {
+      // التشفير بين الطرفين: التطبيق يفك التشفير محلياً ويرسل الأسطر جاهزة بعد موافقة المستخدم.
+      // تنبيه: هذه الأسطر نص صريح يمر عبر هذه الدالة إلى Gemini — لا تُخزَّن ولا تُسجَّل هنا.
+      const lines: string[] = (Array.isArray(body.lines) ? body.lines : [])
+        .map((l: unknown) => String(l).slice(0, 500))
+        .slice(0, 200);
       if (!lines.length) return json({ reply: "لا توجد رسائل لتلخيصها بعد." });
       const reply = await gemini(
         "لخّص هذه المحادثة بالعربية في نقاط قصيرة: أهم ما قيل، والقرارات، وأي مهام أو مواعيد مطلوبة. لا تخترع شيئاً غير موجود.",

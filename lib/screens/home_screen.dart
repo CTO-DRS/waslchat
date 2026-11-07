@@ -8,6 +8,7 @@ import '../theme.dart';
 import 'channels_screen.dart';
 import 'chats_screen.dart';
 import 'communities_screen.dart';
+import 'e2e_key_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -25,6 +26,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
+    // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) checkE2eKeys(context);
+    });
   }
 
   @override

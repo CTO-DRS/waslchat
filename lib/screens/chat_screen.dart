@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cryptography/cryptography.dart' show SecretKey;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/ai_service.dart';
+import '../services/e2e_service.dart';
 import '../services/media_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
@@ -24,6 +26,7 @@ class ChatScreen extends StatefulWidget {
     this.otherId,
     this.isChannel = false,
     this.canPost = true,
+    this.encrypted = false,
   });
   final String conversationId;
   final String title;
@@ -31,6 +34,9 @@ class ChatScreen extends StatefulWidget {
   final String? otherId;
   final bool isChannel;
   final bool canPost;
+
+  /// تشفير بين الطرفين (خاص + مجموعات خاصة فقط؛ القنوات وغرف المجتمعات لا)
+  final bool encrypted;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -48,6 +54,52 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _uploading = false;
   DateTime? _recStart;
   Timer? _ticker;
+
+  // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
+  // نص فك التشفير لكل رسالة: msgId -> النص الصريح
+  final Map<String, String> _plain = {};
+  bool get _e2e => widget.encrypted && !widget.isChannel;
+
+  /// مفتاح المحادثة: اشتقاق ECDH للخاص، أو مفتاح المجموعة للمجموعة الخاصة
+  Future<SecretKey?> _convKey() async {
+    if (!widget.isGroup) {
+      final other = widget.otherId;
+      if (other == null) return null;
+      return E2eService.dmKey(widget.conversationId, other);
+    }
+    return E2eService.groupKey(widget.conversationId);
+  }
+
+  /// يفك نص رسالة واحدة ويكتبه في _plain (مع إعادة محاولة للمجموعات بعد تحديث المفتاح)
+  Future<void> _decryptInto(String id, String content) async {
+    var key = await _convKey();
+    var plain =
+        key == null ? null : await E2eService.decryptText(key, widget.conversationId, content);
+    if (plain == null && widget.isGroup && key != null) {
+      // ربما أُعيد تثبيت مفتاح المجموعة من جهاز آخر: نجرّب بظرف حديث
+      E2eService.invalidateGroupKey(widget.conversationId);
+      key = await _convKey();
+      plain =
+          key == null ? null : await E2eService.decryptText(key, widget.conversationId, content);
+    }
+    if (mounted && !_plain.containsKey(id)) {
+      setState(() {
+        _plain[id] = plain ?? (key == null ? '🔒 رسالة مشفرة' : '🔒 تعذّر فك التشفير');
+      });
+    }
+  }
+
+  /// يفك تشفير الرسائل النصية المشفّرة الجديدة في الخلفية
+  void _scheduleDecrypt(List<Map<String, dynamic>> msgs) {
+    if (!_e2e) return;
+    for (final m in msgs) {
+      if ((m['type'] ?? 'text') != 'text') continue;
+      final content = m['content'] as String? ?? '';
+      final id = m['id'] as String;
+      if (!E2eService.isEncrypted(content) || _plain.containsKey(id)) continue;
+      unawaited(_decryptInto(id, content));
+    }
+  }
 
   // يكتب الآن + علامات القراءة
   late final RealtimeChannel _room;
@@ -186,17 +238,106 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
+  String _keyMissingMsg() {
+    if (!E2eService.isReady) {
+      return 'مفتاح التشفير غير مفعّل على هذا الجهاز: الإعدادات ← مفتاح التشفير';
+    }
+    if (widget.isGroup) {
+      return 'بانتظار عضو في المجموعة يفتحها ليشارك مفتاح التشفير معك';
+    }
+    return 'التشفير غير جاهز: الطرف الآخر يحتاج تحديث التطبيق وفتحه';
+  }
+
+  // ---------- رمز الأمان ----------
+  bool get _showSafety => _e2e && !widget.isGroup && widget.otherId != null;
+
+  Future<void> _showSafetyNumber() async {
+    final other = widget.otherId!;
+    final number = await E2eService.safetyNumber(other);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('رمز الأمان'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+              'قارن هذا الرمز مع جوال الطرف الآخر وجهاً لوجه أو بمكالمة. إن تطابق فمحادثتكما مشفّرة ولا أحد في المنتصف.',
+              style: TextStyle(height: 1.6)),
+          const SizedBox(height: 16),
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: SelectableText(number ?? 'المفاتيح غير جاهزة بعد',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 18, letterSpacing: 1.5, height: 1.7)),
+          ),
+        ]),
+        actions: [
+          if (number != null && E2eService.peerKeyChanged(other))
+            TextButton(
+              onPressed: () {
+                E2eService.acknowledgePeerKey(other);
+                Navigator.pop(c);
+              },
+              child: const Text('تحققت، أخفِ التنبيه'),
+            ),
+          FilledButton(onPressed: () => Navigator.pop(c), child: const Text('تم')),
+        ],
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// موافقة صريحة قبل إرسال نص محادثة مشفّرة إلى الذكاء الاصطناعي
+  Future<void> _confirmSummarize() async {
+    if (_e2e) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('تلخيص محادثة مشفّرة'),
+          content: const Text(
+              'للتلخيص، يفك جوالك آخر 80 رسالة ويرسل نصها إلى خادم وصل ثم إلى Google Gemini. هذا النص لن يكون مشفّراً بين الطرفين أثناء التلخيص. تتابع؟',
+              style: TextStyle(height: 1.6)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('لخّص')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    _showAiResult('ملخص المحادثة', _summarize());
+  }
+
   // ---------- إرسال ----------
   Future<void> _sendText() async {
     final content = _text.text.trim();
     if (content.isEmpty) return;
+    var payload = content;
+    if (_e2e) {
+      if (!E2eService.withinPlainLimit(content)) {
+        _snack('الرسالة طويلة جداً');
+        return;
+      }
+      final key = await _convKey();
+      if (key == null) {
+        _snack(_keyMissingMsg());
+        return;
+      }
+      try {
+        payload = await E2eService.encryptText(key, widget.conversationId, content);
+      } catch (_) {
+        _snack('تعذّر تشفير الرسالة');
+        return;
+      }
+    }
     _text.clear();
     try {
       await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
         'type': 'text',
-        'content': content,
+        'content': payload,
       });
     } catch (_) {
       _snack('تعذّر إرسال الرسالة');
@@ -212,11 +353,24 @@ class _ChatScreenState extends State<ChatScreen> {
   }) async {
     setState(() => _uploading = true);
     try {
+      var payload = bytes;
+      var upExt = ext;
+      var upType = contentType;
+      if (_e2e) {
+        final key = await _convKey();
+        if (key == null) {
+          _snack(_keyMissingMsg());
+          return;
+        }
+        payload = await E2eService.encryptBytes(key, widget.conversationId, bytes);
+        upExt = 'enc.bin';
+        upType = 'application/octet-stream';
+      }
       final path = await MediaService.upload(
         conversationId: widget.conversationId,
-        bytes: bytes,
-        ext: ext,
-        contentType: contentType,
+        bytes: payload,
+        ext: upExt,
+        contentType: upType,
       );
       await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
@@ -325,20 +479,83 @@ class _ChatScreenState extends State<ChatScreen> {
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  /// تنزيل وسيط وفكّ تشفيره إن كان مشفّراً (null = فشل)
+  Future<Uint8List?> _mediaBytes(String path) async {
+    try {
+      final raw = await MediaService.download(path);
+      if (!E2eService.isEncryptedPath(path) || !_e2e) return raw;
+      var key = await _convKey();
+      if (key == null) return null;
+      var out = await E2eService.decryptBytes(key, widget.conversationId, raw);
+      if (out == null && widget.isGroup) {
+        E2eService.invalidateGroupKey(widget.conversationId);
+        key = await _convKey();
+        if (key == null) return null;
+        out = await E2eService.decryptBytes(key, widget.conversationId, raw);
+      }
+      return out;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Widget _body(Map<String, dynamic> m) {
     switch (m['type'] as String? ?? 'text') {
       case 'image':
-        return ImageBubble(path: m['media_url'] as String);
+        return ImageBubble(loader: () => _mediaBytes(m['media_url'] as String));
       case 'voice':
         return VoiceBubble(
-            path: m['media_url'] as String, durationMs: m['duration_ms'] as int?);
+            loader: () => _mediaBytes(m['media_url'] as String),
+            durationMs: m['duration_ms'] as int?);
       default:
-        return Text(m['content'] as String,
+        final content = m['content'] as String? ?? '';
+        final text = E2eService.isEncrypted(content)
+            ? (_plain[m['id'] as String] ?? '🔒 جارٍ فك التشفير…')
+            : content;
+        return Text(text,
             style: const TextStyle(color: Colors.white, fontSize: 16));
     }
   }
 
   // ---------- وصل AI ----------
+  /// التلخيص بعد E2E: التطبيق يجلب آخر 80 رسالة، يفك تشفيرها محلياً، ويرسل الأسطر للدالة
+  Future<String> _summarize() async {
+    final rows = await supabase
+        .from('messages')
+        .select('id, content, type, profiles(display_name, username)')
+        .eq('conversation_id', widget.conversationId)
+        .order('created_at', ascending: false)
+        .limit(80);
+    final msgs = rows.reversed.toList();
+    final key = _e2e ? await _convKey() : null;
+    final lines = <String>[];
+    for (final item in msgs) {
+      final m = item;
+      final p = m['profiles'] as Map<String, dynamic>?;
+      final who = (p?['display_name'] ?? p?['username'] ?? '؟') as String;
+      final type = m['type'] ?? 'text';
+      String what;
+      if (type == 'image') {
+        what = '[صورة]';
+      } else if (type == 'voice') {
+        what = '[رسالة صوتية]';
+      } else {
+        final raw = (m['content'] ?? '') as String;
+        if (E2eService.isEncrypted(raw)) {
+          if (key == null) continue;
+          final plain = await E2eService.decryptText(key, widget.conversationId, raw);
+          if (plain == null) continue;
+          what = plain;
+        } else {
+          what = raw;
+        }
+      }
+      lines.add('$who: $what');
+    }
+    if (lines.isEmpty) return 'لا توجد رسائل لتلخيصها بعد.';
+    return AiService.summarizeLines(lines);
+  }
+
   void _showAiResult(String title, Future<String> job) {
     showModalBottomSheet(
       context: context,
@@ -401,7 +618,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _messageActions(Map<String, dynamic> m) {
     if ((m['type'] ?? 'text') != 'text') return;
-    final text = m['content'] as String;
+    final raw = m['content'] as String? ?? '';
+    final text = E2eService.isEncrypted(raw) ? _plain[m['id'] as String] : raw;
+    if (text == null) {
+      _snack('جارٍ فك التشفير… حاول بعد لحظة');
+      return;
+    }
     final arabic = RegExp(r'[\u0600-\u06FF]').hasMatch(text);
     showModalBottomSheet(
       context: context,
@@ -461,16 +683,41 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ]),
         actions: [
+          if (_showSafety)
+            IconButton(
+              tooltip: 'رمز الأمان',
+              onPressed: _showSafetyNumber,
+              icon: Icon(Icons.verified_user_outlined,
+                  color: E2eService.peerKeyChanged(widget.otherId!)
+                      ? Colors.amber
+                      : WaslColors.teal),
+            ),
           IconButton(
             tooltip: 'لخّص المحادثة',
-            onPressed: () => _showAiResult(
-                'ملخص المحادثة', AiService.summarize(widget.conversationId)),
+            onPressed: _confirmSummarize,
             icon: const Icon(Icons.auto_awesome, color: WaslColors.violet),
           ),
         ],
       ),
       body: Column(
         children: [
+          if (_showSafety && E2eService.peerKeyChanged(widget.otherId!))
+            Material(
+              color: const Color(0x33FFC107),
+              child: InkWell(
+                onTap: _showSafetyNumber,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.amber),
+                    SizedBox(width: 10),
+                    Expanded(
+                        child: Text(
+                            'تغيّر رمز الأمان لهذا الشخص (ربما غيّر جواله). اضغط للتحقق.')),
+                  ]),
+                ),
+              ),
+            ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _stream,
@@ -480,6 +727,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
                 final msgs = snap.data!.reversed.toList();
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(msgs));
+                _scheduleDecrypt(msgs);
                 return ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),

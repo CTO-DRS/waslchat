@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
 import 'ai_screen.dart';
@@ -20,6 +21,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   List<Map<String, dynamic>> _chats = [];
   bool _loading = true;
   RealtimeChannel? _channel;
+  // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
+  final Map<String, String> _previews = {};
 
   @override
   void initState() {
@@ -47,12 +50,36 @@ class _ChatsScreenState extends State<ChatsScreen> {
     try {
       final data = await supabase.rpc('my_chats');
       if (!mounted) return;
+      final chats = List<Map<String, dynamic>>.from(data as List);
       setState(() {
-        _chats = List<Map<String, dynamic>>.from(data as List);
+        _chats = chats;
         _loading = false;
       });
+      _decryptPreviews(chats);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// يفك تشفير المعاينات المشفّرة في الخلفية (المحادثات الخاصة والمجموعات الخاصة)
+  void _decryptPreviews(List<Map<String, dynamic>> chats) {
+    for (final c in chats) {
+      final lm = c['last_message'] as String?;
+      if (lm == null || !E2eService.isEncrypted(lm) || _previews.containsKey(lm)) {
+        continue;
+      }
+      _previews[lm] = '🔒 رسالة مشفرة';
+      final cid = c['conversation_id'] as String;
+      final Future<String> job = c['is_group'] == true
+          ? E2eService.previewGroup(conversationId: cid, content: lm)
+          : E2eService.preview(
+              conversationId: cid,
+              otherId: c['other_id'] as String?,
+              content: lm,
+            );
+      job.then((plain) {
+        if (mounted) setState(() => _previews[lm] = plain);
+      });
     }
   }
 
@@ -69,7 +96,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
       case 'voice':
         return '🎤 رسالة صوتية';
       default:
-        return (c['last_message'] as String?) ?? 'ابدأ المحادثة';
+        final raw = (c['last_message'] as String?) ?? 'ابدأ المحادثة';
+        if (E2eService.isEncrypted(raw)) {
+          return _previews[raw] ?? '🔒 رسالة مشفرة';
+        }
+        return raw;
     }
   }
 
@@ -220,6 +251,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             title: name,
                             isGroup: isGroup,
                             otherId: otherId,
+                            encrypted: true,
                           )),
                         );
                       },
