@@ -27,7 +27,7 @@ import '../config.dart';
 /// - فشل فك رسالة مجموعة يعيد جلب الظرف مرة واحدة (شفاء بعد إعادة تثبيت).
 ///
 /// النسخة الاحتياطية: المفتاح الخاص يُشفَّر بكلمة سر (PBKDF2-SHA256 + AES-GCM) ويُخزَّن في
-/// e2e_key_backups، فيستعيده الجهاز الجديد. حدود موثّقة: لا سرّية تقدّم، والقنوات/غرف المجتمعات غير مشفّرة، والخروج من مجموعة لا يسحب المفتاح السابق.
+/// e2e_key_backups، فيستعيده الجهاز الجديد. حدود موثّقة: لا سرّية تقدّم، والقنوات/غرف المجتمعات غير مشفّرة، وعند إزالة عضو أو مغادرته يُدوَّر مفتاح المجموعة (إصدار جديد للأعضاء الباقين فقط).
 class E2eService {
   E2eService._();
 
@@ -102,6 +102,8 @@ class E2eService {
     _dmKeyCache.clear();
     _groupKeyCache.clear();
     _previewCache.clear();
+    _verCache.clear();
+    _allLoaded.clear();
   }
 
   /// بصمة قصيرة للمفتاح العام (16 hex)
@@ -406,9 +408,7 @@ class E2eService {
     if (!isEncrypted(raw)) return raw;
     final hit = _previewCache[raw];
     if (hit != null) return hit;
-    final key = await groupKey(conversationId);
-    if (key == null) return '🔒 رسالة مشفرة';
-    final plain = await decryptText(key, conversationId, raw);
+    final plain = await decryptGroupText(conversationId, raw);
     final out = plain ?? '🔒 رسالة مشفرة';
     if (_previewCache.length > 300) _previewCache.clear();
     _previewCache[raw] = out;
@@ -467,13 +467,14 @@ class E2eService {
     }
   }
 
-  /// ظرفي في محادثة: (المغلَّف، مُغلِّفي)
-  static Future<(String, String)?> _fetchMyEnvelope(String convId, String me) async {
+  /// ظرفي في محادثة لإصدار مفتاح معيّن: (المغلَّف، مُغلِّفي)
+  static Future<(String, String)?> _fetchMyEnvelope(String convId, String me, int version) async {
     final row = await supabase
         .from('conversation_key_envelopes')
         .select('wrapped_key, wrapped_by')
         .eq('conversation_id', convId)
         .eq('user_id', me)
+        .eq('key_version', version)
         .maybeSingle();
     if (row == null) return null;
     final w = row['wrapped_key'] as String?;
@@ -498,81 +499,163 @@ class E2eService {
     return rows.map((r) => r['user_id'] as String).toList();
   }
 
-  /// من يملك المفتاح يغلّفه لمن بلا ظرف (انضمام لاحق) — صامتة دائماً
-  static Future<void> _topUpForMissingMembers(String convId, SecretKey key) async {
+  /// يغلّف مفتاحاً لقائمة أعضاء (من بلا مفتاح عام يُتخطّى ويُغلَّف له لاحقاً)
+  static Future<List<Map<String, dynamic>>> _wrapForAll(
+      String convId, SecretKey key, Iterable<String> memberIds) async {
+    final me = supabase.auth.currentUser?.id;
+    final my = await _loadMyPair();
+    final myPub = await my.extractPublicKey();
+    final payload = <Map<String, dynamic>>[];
+    for (final id in memberIds) {
+      final pub = id == me ? myPub : await _publicKeyOf(id);
+      if (pub == null) continue;
+      payload.add({
+        'user_id': id,
+        'wrapped_key': await wrapGroupKey(
+            groupKey: key, conversationId: convId, wrapperPair: my, memberPub: pub),
+      });
+    }
+    return payload;
+  }
+
+  /// من يملك المفتاح الحالي يغلّفه لمن بلا ظرف لهذا الإصدار (انضمام لاحق) — صامتة دائماً
+  static Future<void> _topUpForMissingMembers(String convId, SecretKey key, int version) async {
     try {
-      final me = supabase.auth.currentUser?.id;
-      if (me == null) return;
       final members = (await _memberIds(convId)).toSet();
       final envRows = await supabase
           .from('conversation_key_envelopes')
           .select('user_id')
-          .eq('conversation_id', convId);
+          .eq('conversation_id', convId)
+          .eq('key_version', version);
       final covered = envRows.map((r) => r['user_id'] as String).toSet();
       final missing = members.difference(covered);
       if (missing.isEmpty) return;
-      final my = await _loadMyPair();
-      final payload = <Map<String, dynamic>>[];
-      for (final id in missing) {
-        final pub = await _publicKeyOf(id);
-        if (pub == null) continue; // بلا مفاتيح بعد — سيُغلَّف له بعد تحديث تطبيقه
-        payload.add({
-          'user_id': id,
-          'wrapped_key': await wrapGroupKey(
-              groupKey: key,
-              conversationId: convId,
-              wrapperPair: my,
-              memberPub: pub),
-        });
-      }
+      final payload = await _wrapForAll(convId, key, missing);
       if (payload.isEmpty) return;
       await supabase.rpc('e2e_wrap_for_members',
           params: {'p_conv': convId, 'p_envelopes': payload});
     } catch (_) {}
   }
 
-  static Future<void> _persistGroupKey(String convId, SecretKey key) async {
-    await _storage.write(
-        key: '$_groupKeyPrefix$convId', value: base64Encode(await key.extractBytes()));
+  // ---------- تخزين المفاتيح محلياً (كل الإصدارات) ----------
+
+  /// الإصدار 1 يبقى بالمفتاح القديم (توافق مع 0.1.4)، والإصدارات اللاحقة بلاحقة #v<n>
+  static String _localKeyName(String convId, int version) =>
+      version == 1 ? '$_groupKeyPrefix$convId' : '$_groupKeyPrefix$convId#v$version';
+  static String _versionsName(String convId) => '$_groupKeyPrefix$convId#versions';
+
+  static Future<Set<int>> _localVersions(String convId) async {
+    final v = await _storage.read(key: _versionsName(convId));
+    final out = <int>{};
+    if (v != null) {
+      for (final s in v.split(',')) {
+        final n = int.tryParse(s);
+        if (n != null) out.add(n);
+      }
+    }
+    // مفتاح 0.1.4 المحفوظ بلا قائمة إصدارات
+    if (!out.contains(1) && await _storage.containsKey(key: _localKeyName(convId, 1))) {
+      out.add(1);
+    }
+    return out;
   }
 
-  static Future<SecretKey?> _localGroupKey(String convId) async {
-    final v = await _storage.read(key: '$_groupKeyPrefix$convId');
+  static Future<void> _persistGroupKey(String convId, int version, SecretKey key) async {
+    await _storage.write(
+        key: _localKeyName(convId, version), value: base64Encode(await key.extractBytes()));
+    final vs = await _localVersions(convId)
+      ..add(version);
+    await _storage.write(key: _versionsName(convId), value: (vs.toList()..sort()).join(','));
+  }
+
+  static Future<SecretKey?> _localGroupKey(String convId, int version) async {
+    final v = await _storage.read(key: _localKeyName(convId, version));
     return v == null ? null : SecretKeyData(base64Decode(v));
   }
 
-  /// مفتاح مجموعة خاصة.
-  /// الترتيب: الذاكرة ← ظرفي من الخادم ← نسخة محفوظة على الجهاز ← تثبيت أول (فقط إن لم يوجد أي ظرف).
-  /// لا يستبدل أحدٌ مفتاحَ مجموعة قائماً أبداً؛ العضو بلا ظرف ينتظر عضواً يملك المفتاح ليغلّفه له.
+  // ---------- حالة مفتاح المجموعة على الخادم ----------
+
+  static final Map<String, (int, DateTime)> _verCache = {};
+
+  /// (الإصدار الحالي، هل يحتاج تدويراً)
+  static Future<(int, bool)> _keyState(String convId, {bool fresh = false}) async {
+    final hit = _verCache[convId];
+    if (!fresh && hit != null && DateTime.now().difference(hit.$2).inSeconds < 30) {
+      return (hit.$1, false);
+    }
+    final row = await supabase
+        .from('conversations')
+        .select('group_key_version, needs_rekey')
+        .eq('id', convId)
+        .maybeSingle();
+    final v = (row?['group_key_version'] as int?) ?? 1;
+    final pending = (row?['needs_rekey'] as bool?) ?? false;
+    if (!pending) _verCache[convId] = (v, DateTime.now());
+    return (v, pending);
+  }
+
+  /// تدوير المفتاح بعد إزالة عضو أو مغادرته: مفتاح جديد يُغلَّف للأعضاء الحاليين فقط.
+  /// يعيد المفتاح الجديد إن نجحنا، وnull إن سبقنا عضو آخر.
+  static Future<SecretKey?> _rotate(String convId, int current) async {
+    final members = await _memberIds(convId);
+    final key = await _aes.newSecretKey();
+    final payload = await _wrapForAll(convId, key, members);
+    final me = supabase.auth.currentUser?.id;
+    if (!payload.any((e) => e['user_id'] == me)) return null;
+    final next = current + 1;
+    final ok = await supabase.rpc('e2e_rotate_group_key',
+        params: {'p_conv': convId, 'p_version': next, 'p_envelopes': payload});
+    if (ok != true) return null;
+    _groupKeyCache['$convId#v$next'] = key;
+    await _persistGroupKey(convId, next, key);
+    _verCache[convId] = (next, DateTime.now());
+    return key;
+  }
+
+  /// مفتاح إصدار معيّن: الذاكرة ← ظرفي ← نسخة محلية
+  static Future<SecretKey?> _keyForVersion(String convId, String me, int version) async {
+    final ck = '$convId#v$version';
+    final hit = _groupKeyCache[ck];
+    if (hit != null) return hit;
+    final env = await _fetchMyEnvelope(convId, me, version);
+    if (env != null) {
+      final key = await _unwrapEnvelope(convId, env);
+      if (key != null) {
+        _groupKeyCache[ck] = key;
+        await _persistGroupKey(convId, version, key);
+        return key;
+      }
+    }
+    final local = await _localGroupKey(convId, version);
+    if (local != null) _groupKeyCache[ck] = local;
+    return local;
+  }
+
+  /// المفتاح الحالي لمجموعة خاصة (للإرسال).
+  /// يدوّر المفتاح إن طُلب ذلك بعد إزالة/مغادرة، ثم: ظرفي ← نسخة محلية ← تثبيت أول (الإصدار 1 فقط).
+  /// لا يستبدل أحدٌ مفتاحَ إصدار قائماً أبداً؛ العضو بلا ظرف ينتظر عضواً يملك المفتاح ليغلّفه له.
   static Future<SecretKey?> groupKey(String conversationId) async {
     if (!_ready) return null;
-    final hit = _groupKeyCache[conversationId];
-    if (hit != null) return hit;
     try {
       final me = supabase.auth.currentUser?.id;
       if (me == null) return null;
 
-      // 1) ظرفي الحالي
-      final mine = await _fetchMyEnvelope(conversationId, me);
-      if (mine != null) {
-        final key = await _unwrapEnvelope(conversationId, mine);
-        if (key != null) {
-          _groupKeyCache[conversationId] = key;
-          await _persistGroupKey(conversationId, key);
-          unawaited(_topUpForMissingMembers(conversationId, key));
-          return key;
-        }
+      var (version, pending) = await _keyState(conversationId);
+      if (pending) {
+        final rotated = await _rotate(conversationId, version);
+        if (rotated != null) return rotated;
+        (version, pending) = await _keyState(conversationId, fresh: true);
+        if (pending) return null; // التدوير لم يكتمل بعد: لا نرسل بالمفتاح القديم
       }
 
-      // 2) نسخة محفوظة محلياً (تبقى صالحة حتى لو تغيّر مفتاح من غلّف لي)
-      final local = await _localGroupKey(conversationId);
-      if (local != null) {
-        _groupKeyCache[conversationId] = local;
-        unawaited(_topUpForMissingMembers(conversationId, local));
-        return local;
+      final key = await _keyForVersion(conversationId, me, version);
+      if (key != null) {
+        unawaited(_topUpForMissingMembers(conversationId, key, version));
+        return key;
       }
+      if (version != 1) return null;
 
-      // 3) هل للمجموعة مفتاح أصلاً؟ إن وُجد أي ظرف فلا تثبيت: ننتظر عضواً يغلّف لنا
+      // هل للمجموعة مفتاح أصلاً؟ إن وُجد أي ظرف فلا تثبيت: ننتظر عضواً يغلّف لنا
       final envAny = await supabase
           .from('conversation_key_envelopes')
           .select('user_id')
@@ -580,7 +663,7 @@ class E2eService {
           .limit(1);
       if (envAny.isNotEmpty) return null;
 
-      // 4) لا مفتاح بعد: المؤسس يثبّت (أو أي عضو في مجموعة قديمة بلا مؤسس)
+      // لا مفتاح بعد: المؤسس يثبّت (أو أي عضو في مجموعة قديمة بلا مؤسس)
       final conv = await supabase
           .from('conversations')
           .select('created_by')
@@ -591,45 +674,86 @@ class E2eService {
 
       final members = await _memberIds(conversationId);
       if (!members.contains(me) || members.length < 2) return null;
-      final my = await _loadMyPair();
-      final myPub = await my.extractPublicKey();
-      final pubs = <String, SimplePublicKey>{};
-      for (final id in members) {
-        final p = id == me ? myPub : await _publicKeyOf(id);
-        if (p != null) pubs[id] = p; // من بلا مفتاح يُغلَّف له لاحقاً تلقائياً
-      }
-
-      final key = await _aes.newSecretKey();
-      final payload = <Map<String, dynamic>>[];
-      for (final e in pubs.entries) {
-        payload.add({
-          'user_id': e.key,
-          'wrapped_key': await wrapGroupKey(
-              groupKey: key,
-              conversationId: conversationId,
-              wrapperPair: my,
-              memberPub: e.value),
-        });
-      }
+      final fresh = await _aes.newSecretKey();
+      final payload = await _wrapForAll(conversationId, fresh, members);
       await supabase.rpc('e2e_set_group_key',
           params: {'p_conv': conversationId, 'p_envelopes': payload});
 
-      // 5) الحقيقة النهائية من القاعدة (إن سبقنا متسابق فمفتاحه هو المعتمد)
-      final fresh = await _fetchMyEnvelope(conversationId, me);
-      if (fresh == null) return null;
-      final truth = await _unwrapEnvelope(conversationId, fresh);
+      // الحقيقة النهائية من القاعدة (إن سبقنا متسابق فمفتاحه هو المعتمد)
+      final env = await _fetchMyEnvelope(conversationId, me, 1);
+      if (env == null) return null;
+      final truth = await _unwrapEnvelope(conversationId, env);
       if (truth == null) return null;
-      _groupKeyCache[conversationId] = truth;
-      await _persistGroupKey(conversationId, truth);
+      _groupKeyCache['$conversationId#v1'] = truth;
+      await _persistGroupKey(conversationId, 1, truth);
       return truth;
     } catch (_) {
       return null;
     }
   }
 
-  /// مسح ذاكرة مفتاح مجموعة (عند فشل فك رسالة — يُعاد جلب الظرف)
+  static final Set<String> _allLoaded = {};
+
+  /// كل مفاتيح المجموعة المعروفة لهذا الجهاز (الحالي أولاً) — لقراءة الرسائل القديمة بعد التدوير
+  static Future<List<SecretKey>> groupKeys(String conversationId) async {
+    if (!_ready) return const [];
+    final me = supabase.auth.currentUser?.id;
+    if (me == null) return const [];
+    final out = <SecretKey>[];
+    final current = await groupKey(conversationId);
+    if (current != null) out.add(current);
+    try {
+      if (!_allLoaded.contains(conversationId)) {
+        _allLoaded.add(conversationId);
+        final rows = await supabase
+            .from('conversation_key_envelopes')
+            .select('key_version')
+            .eq('conversation_id', conversationId)
+            .eq('user_id', me);
+        final versions = rows.map((r) => r['key_version'] as int).toSet()
+          ..addAll(await _localVersions(conversationId));
+        for (final v in versions) {
+          await _keyForVersion(conversationId, me, v);
+        }
+      }
+    } catch (_) {
+      _allLoaded.remove(conversationId);
+    }
+    final prefix = '$conversationId#v';
+    final versions = _groupKeyCache.keys
+        .where((k) => k.startsWith(prefix))
+        .map((k) => int.tryParse(k.substring(prefix.length)) ?? 0)
+        .toList()
+      ..sort((a, b) => b.compareTo(a));
+    for (final v in versions) {
+      final k = _groupKeyCache['$prefix$v']!;
+      if (!identical(k, current)) out.add(k);
+    }
+    return out;
+  }
+
+  /// يفك نص مجموعة بتجربة كل الإصدارات المعروفة (AES-GCM يرفض المفتاح الخطأ)
+  static Future<String?> decryptGroupText(String conversationId, String content) async {
+    if (!isEncrypted(content)) return content;
+    for (final k in await groupKeys(conversationId)) {
+      final p = await decryptText(k, conversationId, content);
+      if (p != null) return p;
+    }
+    return null;
+  }
+
+  static Future<Uint8List?> decryptGroupBytes(String conversationId, Uint8List data) async {
+    for (final k in await groupKeys(conversationId)) {
+      final p = await decryptBytes(k, conversationId, data);
+      if (p != null) return p;
+    }
+    return null;
+  }
+
+  /// مسح ذاكرة مفاتيح مجموعة (عند فشل فك رسالة أو تغيّر الأعضاء — يُعاد الجلب)
   static void invalidateGroupKey(String conversationId) {
-    _groupKeyCache.remove(conversationId);
+    _verCache.remove(conversationId);
+    _allLoaded.remove(conversationId);
   }
 
   /// تثبيت مبكر لمفتاح مجموعة عند إنشائها (ناريَ ونسيان — لا يعطّل الواجهة)

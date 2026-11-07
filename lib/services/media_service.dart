@@ -38,4 +38,12 @@ class MediaService {
   static Future<Uint8List> download(String path) async {
     return supabase.storage.from(bucket).download(path);
   }
+
+  /// حذف ملف (لصاحبه فقط — سياسة التخزين) — صامتة عند الفشل
+  static Future<void> remove(String path) async {
+    try {
+      await supabase.storage.from(bucket).remove([path]);
+      _cache.remove(path);
+    } catch (_) {}
+  }
 }

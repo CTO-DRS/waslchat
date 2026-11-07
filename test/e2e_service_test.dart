@@ -192,4 +192,24 @@ void main() {
     );
     expect(out, isNull);
   });
+
+  test('تدوير المفتاح: رسالة الإصدار القديم تُفك بالقديم فقط، والجديد لا يفك القديم', () async {
+    const conv = 'group-rotate-1';
+    final v1 = await AesGcm.with256bits().newSecretKey();
+    final v2 = await AesGcm.with256bits().newSecretKey();
+    final oldMsg = await E2eService.encryptText(v1, conv, 'رسالة قبل الإزالة');
+    final newMsg = await E2eService.encryptText(v2, conv, 'رسالة بعد الإزالة');
+    // تجربة كل الإصدارات المعروفة (الحالي أولاً) كما يفعل decryptGroupText
+    Future<String?> tryAll(List<SecretKey> keys, String c) async {
+      for (final k in keys) {
+        final p = await E2eService.decryptText(k, conv, c);
+        if (p != null) return p;
+      }
+      return null;
+    }
+    expect(await tryAll([v2, v1], oldMsg), 'رسالة قبل الإزالة');
+    expect(await tryAll([v2, v1], newMsg), 'رسالة بعد الإزالة');
+    // العضو المُزال يملك v1 فقط: لا يفك الجديد
+    expect(await tryAll([v1], newMsg), isNull);
+  });
 }

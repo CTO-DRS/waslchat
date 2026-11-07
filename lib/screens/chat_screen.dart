@@ -16,6 +16,7 @@ import '../services/media_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
 import '../widgets/media_bubbles.dart';
+import 'group_info_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -50,13 +51,22 @@ class _ChatScreenState extends State<ChatScreen> {
   final String _me = supabase.auth.currentUser!.id;
 
   Map<String, String> _names = {};
+  late String _title = widget.title;
+
+  // الرد والتعديل والتفاعلات
+  Map<String, dynamic>? _replyTo;
+  Map<String, dynamic>? _editing;
+  Map<String, Map<String, dynamic>> _byId = {};
+  StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
+  Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
+  static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
   bool _uploading = false;
   DateTime? _recStart;
   Timer? _ticker;
 
   // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
-  // نص فك التشفير لكل رسالة: msgId -> النص الصريح
+  // نص فك التشفير لكل نص مشفّر: ciphertext -> النص الصريح (يتغيّر النص المشفّر عند التعديل)
   final Map<String, String> _plain = {};
   bool get _e2e => widget.encrypted && !widget.isChannel;
 
@@ -70,23 +80,36 @@ class _ChatScreenState extends State<ChatScreen> {
     return E2eService.groupKey(widget.conversationId);
   }
 
-  /// يفك نص رسالة واحدة ويكتبه في _plain (مع إعادة محاولة للمجموعات بعد تحديث المفتاح)
-  Future<void> _decryptInto(String id, String content) async {
-    var key = await _convKey();
-    var plain =
-        key == null ? null : await E2eService.decryptText(key, widget.conversationId, content);
-    if (plain == null && widget.isGroup && key != null) {
-      // ربما أُعيد تثبيت مفتاح المجموعة من جهاز آخر: نجرّب بظرف حديث
+  /// يفك نصاً مشفّراً واحداً (للمجموعات: يجرّب كل إصدارات المفتاح المعروفة)
+  Future<String?> _decrypt(String content) async {
+    if (!widget.isGroup) {
+      final key = await _convKey();
+      return key == null ? null : E2eService.decryptText(key, widget.conversationId, content);
+    }
+    var plain = await E2eService.decryptGroupText(widget.conversationId, content);
+    if (plain == null) {
+      // ربما دُوِّر المفتاح أو وصل ظرف جديد: نعيد الجلب مرة
       E2eService.invalidateGroupKey(widget.conversationId);
-      key = await _convKey();
-      plain =
-          key == null ? null : await E2eService.decryptText(key, widget.conversationId, content);
+      plain = await E2eService.decryptGroupText(widget.conversationId, content);
     }
-    if (mounted && !_plain.containsKey(id)) {
-      setState(() {
-        _plain[id] = plain ?? (key == null ? '🔒 رسالة مشفرة' : '🔒 تعذّر فك التشفير');
-      });
+    return plain;
+  }
+
+  final Set<String> _decrypting = {};
+
+  Future<void> _decryptInto(String content) async {
+    if (!_decrypting.add(content)) return;
+    final plain = await _decrypt(content);
+    if (mounted && !_plain.containsKey(content)) {
+      setState(() => _plain[content] = plain ?? '🔒 تعذّر فك التشفير');
     }
+    _decrypting.remove(content);
+  }
+
+  /// النص المعروض لرسالة نصية (null إن كانت ما زالت قيد فك التشفير)
+  String? _textOf(Map<String, dynamic> m) {
+    final raw = m['content'] as String? ?? '';
+    return E2eService.isEncrypted(raw) ? _plain[raw] : raw;
   }
 
   /// يفك تشفير الرسائل النصية المشفّرة الجديدة في الخلفية
@@ -94,10 +117,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!_e2e) return;
     for (final m in msgs) {
       if ((m['type'] ?? 'text') != 'text') continue;
+      if (m['deleted_at'] != null) continue;
       final content = m['content'] as String? ?? '';
-      final id = m['id'] as String;
-      if (!E2eService.isEncrypted(content) || _plain.containsKey(id)) continue;
-      unawaited(_decryptInto(id, content));
+      if (!E2eService.isEncrypted(content) || _plain.containsKey(content)) continue;
+      unawaited(_decryptInto(content));
     }
   }
 
@@ -156,6 +179,18 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) setState(() => _othersReadUpTo = minRead);
     });
 
+    _reactSub = supabase
+        .from('message_reactions')
+        .stream(primaryKey: ['message_id', 'user_id'])
+        .eq('conversation_id', widget.conversationId)
+        .listen((rows) {
+      final map = <String, Map<String, String>>{};
+      for (final r in rows) {
+        (map[r['message_id'] as String] ??= {})[r['user_id'] as String] = r['emoji'] as String;
+      }
+      if (mounted) setState(() => _reactions = map);
+    }, onError: (_) {});
+
     PresenceService.online.addListener(_onPresence);
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
   }
@@ -209,6 +244,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _ticker?.cancel();
     _typingSweep?.cancel();
     _partsSub?.cancel();
+    _reactSub?.cancel();
     PresenceService.online.removeListener(_onPresence);
     supabase.removeChannel(_room);
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
@@ -313,6 +349,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _sendText() async {
     final content = _text.text.trim();
     if (content.isEmpty) return;
+    final editing = _editing;
+    final replyTo = _replyTo;
     var payload = content;
     if (_e2e) {
       if (!E2eService.withinPlainLimit(content)) {
@@ -332,12 +370,26 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
     _text.clear();
+    setState(() {
+      _editing = null;
+      _replyTo = null;
+    });
+    if (editing != null) {
+      try {
+        await supabase
+            .rpc('edit_message', params: {'p_id': editing['id'], 'p_content': payload});
+      } catch (_) {
+        _snack('تعذّر تعديل الرسالة (التعديل متاح خلال 48 ساعة)');
+      }
+      return;
+    }
     try {
       await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
         'type': 'text',
         'content': payload,
+        if (replyTo != null) 'reply_to': replyTo['id'],
       });
     } catch (_) {
       _snack('تعذّر إرسال الرسالة');
@@ -372,6 +424,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ext: upExt,
         contentType: upType,
       );
+      final replyTo = _replyTo;
       await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
@@ -379,7 +432,9 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': '',
         'media_url': path,
         'duration_ms': durationMs,
+        if (replyTo != null) 'reply_to': replyTo['id'],
       });
+      if (mounted) setState(() => _replyTo = null);
     } catch (_) {
       _snack('تعذّر رفع الملف');
     } finally {
@@ -484,14 +539,15 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final raw = await MediaService.download(path);
       if (!E2eService.isEncryptedPath(path) || !_e2e) return raw;
-      var key = await _convKey();
-      if (key == null) return null;
-      var out = await E2eService.decryptBytes(key, widget.conversationId, raw);
-      if (out == null && widget.isGroup) {
-        E2eService.invalidateGroupKey(widget.conversationId);
-        key = await _convKey();
+      if (!widget.isGroup) {
+        final key = await _convKey();
         if (key == null) return null;
-        out = await E2eService.decryptBytes(key, widget.conversationId, raw);
+        return await E2eService.decryptBytes(key, widget.conversationId, raw);
+      }
+      var out = await E2eService.decryptGroupBytes(widget.conversationId, raw);
+      if (out == null) {
+        E2eService.invalidateGroupKey(widget.conversationId);
+        out = await E2eService.decryptGroupBytes(widget.conversationId, raw);
       }
       return out;
     } catch (_) {
@@ -500,6 +556,14 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _body(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) {
+      return const Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.block, size: 16, color: Colors.white60),
+        SizedBox(width: 6),
+        Text('حُذفت هذه الرسالة',
+            style: TextStyle(color: Colors.white60, fontStyle: FontStyle.italic)),
+      ]);
+    }
     switch (m['type'] as String? ?? 'text') {
       case 'image':
         return ImageBubble(loader: () => _mediaBytes(m['media_url'] as String));
@@ -508,10 +572,7 @@ class _ChatScreenState extends State<ChatScreen> {
             loader: () => _mediaBytes(m['media_url'] as String),
             durationMs: m['duration_ms'] as int?);
       default:
-        final content = m['content'] as String? ?? '';
-        final text = E2eService.isEncrypted(content)
-            ? (_plain[m['id'] as String] ?? '🔒 جارٍ فك التشفير…')
-            : content;
+        final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
         return Text(text,
             style: const TextStyle(color: Colors.white, fontSize: 16));
     }
@@ -522,18 +583,18 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<String> _summarize() async {
     final rows = await supabase
         .from('messages')
-        .select('id, content, type, profiles(display_name, username)')
+        .select('id, content, type, deleted_at, profiles(display_name, username)')
         .eq('conversation_id', widget.conversationId)
         .order('created_at', ascending: false)
         .limit(80);
     final msgs = rows.reversed.toList();
-    final key = _e2e ? await _convKey() : null;
     final lines = <String>[];
     for (final item in msgs) {
       final m = item;
       final p = m['profiles'] as Map<String, dynamic>?;
       final who = (p?['display_name'] ?? p?['username'] ?? '؟') as String;
       final type = m['type'] ?? 'text';
+      if (m['deleted_at'] != null) continue;
       String what;
       if (type == 'image') {
         what = '[صورة]';
@@ -542,8 +603,8 @@ class _ChatScreenState extends State<ChatScreen> {
       } else {
         final raw = (m['content'] ?? '') as String;
         if (E2eService.isEncrypted(raw)) {
-          if (key == null) continue;
-          final plain = await E2eService.decryptText(key, widget.conversationId, raw);
+          if (!_e2e) continue;
+          final plain = _plain[raw] ?? await _decrypt(raw);
           if (plain == null) continue;
           what = plain;
         } else {
@@ -616,15 +677,90 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  // ---------- الرد / التعديل / الحذف / التفاعل ----------
+
+  String _previewOf(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) return 'حُذفت هذه الرسالة';
+    switch (m['type'] as String? ?? 'text') {
+      case 'image':
+        return '📷 صورة';
+      case 'voice':
+        return '🎤 رسالة صوتية';
+      default:
+        final t = _textOf(m) ?? '🔒 رسالة مشفرة';
+        return t.length > 120 ? '${t.substring(0, 120)}…' : t;
+    }
+  }
+
+  String _senderName(String? id) {
+    if (id == _me) return 'أنت';
+    return _names[id] ?? (widget.isGroup ? '' : _title);
+  }
+
+  bool _canEdit(Map<String, dynamic> m) {
+    if (m['sender_id'] != _me || m['deleted_at'] != null) return false;
+    if ((m['type'] ?? 'text') != 'text') return false;
+    final created = DateTime.parse(m['created_at'] as String);
+    return DateTime.now().toUtc().difference(created.toUtc()).inHours < 48;
+  }
+
+  Future<void> _react(Map<String, dynamic> m, String emoji) async {
+    final mine = _reactions[m['id']]?[_me];
+    try {
+      await supabase.rpc('react_message',
+          params: {'p_id': m['id'], 'p_emoji': mine == emoji ? '' : emoji});
+    } catch (_) {
+      _snack('تعذّر إرسال التفاعل');
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('حذف للجميع؟'),
+        content: const Text('ستُحذف الرسالة عند كل أعضاء المحادثة.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('حذف')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final media = await supabase.rpc('delete_message', params: {'p_id': m['id']});
+      if (media is String && media.isNotEmpty) unawaited(MediaService.remove(media));
+      if (_replyTo?['id'] == m['id']) setState(() => _replyTo = null);
+    } catch (_) {
+      _snack('تعذّر حذف الرسالة');
+    }
+  }
+
+  void _startEdit(Map<String, dynamic> m) {
+    final t = _textOf(m);
+    if (t == null) return;
+    setState(() {
+      _editing = m;
+      _replyTo = null;
+      _text.text = t;
+      _text.selection = TextSelection.collapsed(offset: t.length);
+    });
+  }
+
   void _messageActions(Map<String, dynamic> m) {
-    if ((m['type'] ?? 'text') != 'text') return;
-    final raw = m['content'] as String? ?? '';
-    final text = E2eService.isEncrypted(raw) ? _plain[m['id'] as String] : raw;
-    if (text == null) {
+    if (m['deleted_at'] != null) return;
+    final isText = (m['type'] ?? 'text') == 'text';
+    final text = isText ? _textOf(m) : null;
+    if (isText && text == null) {
       _snack('جارٍ فك التشفير… حاول بعد لحظة');
       return;
     }
-    final arabic = RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+    final arabic = text != null && RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+    final mine = m['sender_id'] == _me;
+    final myReaction = _reactions[m['id']]?[_me];
     showModalBottomSheet(
       context: context,
       backgroundColor: WaslColors.darkSurface,
@@ -632,26 +768,192 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
         child: Wrap(children: [
-          ListTile(
-            leading: const Icon(Icons.copy_rounded),
-            title: const Text('نسخ'),
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: text));
-              Navigator.pop(ctx);
-              _snack('تم النسخ');
-            },
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 14, 12, 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final e in _quickEmojis)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _react(m, e);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: myReaction == e ? WaslColors.glass : null,
+                      ),
+                      child: Text(e, style: const TextStyle(fontSize: 26)),
+                    ),
+                  ),
+              ],
+            ),
           ),
-          ListTile(
-            leading: const Icon(Icons.translate_rounded, color: WaslColors.violet),
-            title: Text(arabic ? 'ترجمة إلى الإنجليزية' : 'ترجمة إلى العربية'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
-            },
-          ),
+          if (widget.canPost)
+            ListTile(
+              leading: const Icon(Icons.reply_rounded),
+              title: const Text('رد'),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _replyTo = m;
+                  _editing = null;
+                });
+              },
+            ),
+          if (text != null)
+            ListTile(
+              leading: const Icon(Icons.copy_rounded),
+              title: const Text('نسخ'),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: text));
+                Navigator.pop(ctx);
+                _snack('تم النسخ');
+              },
+            ),
+          if (_canEdit(m))
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('تعديل'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _startEdit(m);
+              },
+            ),
+          if (text != null)
+            ListTile(
+              leading: const Icon(Icons.translate_rounded, color: WaslColors.violet),
+              title: Text(arabic ? 'ترجمة إلى الإنجليزية' : 'ترجمة إلى العربية'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
+              },
+            ),
+          if (mine)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title: const Text('حذف للجميع', style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _delete(m);
+              },
+            ),
         ]),
       ),
     );
+  }
+
+  /// اقتباس الرسالة المردود عليها داخل الفقاعة
+  Widget _quote(String replyId, bool mine) {
+    final r = _byId[replyId];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(12),
+        border: const BorderDirectional(start: BorderSide(color: WaslColors.teal, width: 3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (r != null && _senderName(r['sender_id'] as String?).isNotEmpty)
+          Text(_senderName(r['sender_id'] as String?),
+              style: const TextStyle(
+                  color: WaslColors.teal, fontSize: 12, fontWeight: FontWeight.bold)),
+        Text(r == null ? 'رسالة غير متاحة' : _previewOf(r),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+      ]),
+    );
+  }
+
+  /// شارات التفاعلات تحت الفقاعة
+  Widget? _reactionChips(Map<String, dynamic> m) {
+    final r = _reactions[m['id']];
+    if (r == null || r.isEmpty) return null;
+    final counts = <String, int>{};
+    for (final e in r.values) {
+      counts[e] = (counts[e] ?? 0) + 1;
+    }
+    final mineEmoji = r[_me];
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 2),
+      child: Wrap(spacing: 4, children: [
+        for (final e in counts.entries)
+          GestureDetector(
+            onTap: () => _react(m, e.key),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: mineEmoji == e.key ? WaslColors.teal.withValues(alpha: 0.35) : WaslColors.darkSurface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Text(e.value > 1 ? '${e.key} ${e.value}' : e.key,
+                  style: const TextStyle(fontSize: 13)),
+            ),
+          ),
+      ]),
+    );
+  }
+
+  /// شريط الرد/التعديل فوق حقل الكتابة
+  Widget? _composeBanner() {
+    final m = _editing ?? _replyTo;
+    if (m == null) return null;
+    final editing = _editing != null;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: WaslColors.glass,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(children: [
+        Icon(editing ? Icons.edit_outlined : Icons.reply_rounded, color: WaslColors.teal),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(editing ? 'تعديل الرسالة' : 'رد على ${_senderName(m['sender_id'] as String?)}',
+                style: const TextStyle(
+                    color: WaslColors.teal, fontSize: 12, fontWeight: FontWeight.bold)),
+            Text(_previewOf(m),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          ]),
+        ),
+        IconButton(
+          icon: const Icon(Icons.close_rounded),
+          onPressed: () => setState(() {
+            if (editing) _text.clear();
+            _editing = null;
+            _replyTo = null;
+          }),
+        ),
+      ]),
+    );
+  }
+
+  // ---------- معلومات المجموعة ----------
+  bool get _isPrivateGroup => widget.isGroup && !widget.isChannel && widget.encrypted;
+
+  Future<void> _openGroupInfo() async {
+    final r = await Navigator.push<GroupInfoResult>(
+      context,
+      MaterialPageRoute(
+          builder: (_) => GroupInfoScreen(conversationId: widget.conversationId, title: _title)),
+    );
+    if (!mounted || r == null) return;
+    if (r.left) {
+      Navigator.pop(context);
+      return;
+    }
+    if (r.title != null && r.title != _title) setState(() => _title = r.title!);
+    _loadMembers();
   }
 
   @override
@@ -660,18 +962,21 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Row(children: [
+        title: GestureDetector(
+         onTap: _isPrivateGroup ? _openGroupInfo : null,
+         behavior: HitTestBehavior.opaque,
+         child: Row(children: [
           CircleAvatar(
             backgroundColor: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
             child: widget.isGroup
                 ? Icon(widget.isChannel ? Icons.campaign : Icons.groups_2, color: Colors.white)
-                : Text(widget.title.isNotEmpty ? widget.title.characters.first : '?',
+                : Text(_title.isNotEmpty ? _title.characters.first : '?',
                     style: const TextStyle(color: Colors.white)),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.title,
+              Text(_title,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
               if (_statusLine() != null)
@@ -681,8 +986,15 @@ class _ChatScreenState extends State<ChatScreen> {
                         color: _typing.isNotEmpty ? WaslColors.teal : Colors.white60)),
             ]),
           ),
-        ]),
+         ]),
+        ),
         actions: [
+          if (_isPrivateGroup)
+            IconButton(
+              tooltip: 'معلومات المجموعة',
+              onPressed: _openGroupInfo,
+              icon: const Icon(Icons.info_outline_rounded),
+            ),
           if (_showSafety)
             IconButton(
               tooltip: 'رمز الأمان',
@@ -726,6 +1038,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final msgs = snap.data!.reversed.toList();
+                _byId = {for (final m in msgs) m['id'] as String: m};
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(msgs));
                 _scheduleDecrypt(msgs);
                 return ListView.builder(
@@ -736,6 +1049,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     final m = msgs[i];
                     final mine = m['sender_id'] == _me;
                     final sender = _names[m['sender_id']];
+                    final replyId = m['reply_to'] as String?;
+                    final chips = _reactionChips(m);
                     return Align(
                       alignment: mine
                           ? AlignmentDirectional.centerEnd
@@ -765,9 +1080,17 @@ class _ChatScreenState extends State<ChatScreen> {
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold)),
                               ),
+                            if (replyId != null && m['deleted_at'] == null)
+                              _quote(replyId, mine),
                             _body(m),
+                            if (chips != null) chips,
                             const SizedBox(height: 2),
                             Row(mainAxisSize: MainAxisSize.min, children: [
+                              if (m['edited_at'] != null && m['deleted_at'] == null) ...[
+                                const Text('معدّلة',
+                                    style: TextStyle(color: Colors.white60, fontSize: 11)),
+                                const SizedBox(width: 4),
+                              ],
                               Text(_time(m['created_at'] as String),
                                   style: const TextStyle(color: Colors.white70, fontSize: 11)),
                               if (mine) ...[const SizedBox(width: 4), _ticks(m)],
@@ -783,6 +1106,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
+          if (widget.canPost && _composeBanner() != null) _composeBanner()!,
           if (!widget.canPost)
             SafeArea(
               top: false,
