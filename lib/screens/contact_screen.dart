@@ -83,12 +83,109 @@ class _ContactScreenState extends State<ContactScreen> {
   Map<String, dynamic>? _p;
   bool _muted = false;
   int? _disappear;
+  bool _blockedByMe = false;
 
   @override
   void initState() {
     super.initState();
     _disappear = widget.disappearSeconds;
     _load();
+    _loadBlocked();
+  }
+
+  Future<void> _loadBlocked() async {
+    try {
+      final row = await supabase
+          .from('user_blocks')
+          .select('blocked_id')
+          .eq('blocker_id', supabase.auth.currentUser?.id ?? '')
+          .eq('blocked_id', widget.otherId)
+          .maybeSingle();
+      if (mounted) setState(() => _blockedByMe = row != null);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleBlock() async {
+    if (_blockedByMe) {
+      try {
+        await supabase.rpc('unblock_user', params: {'p_target': widget.otherId});
+        if (mounted) setState(() => _blockedByMe = false);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('تعذّر إلغاء الحظر')));
+        }
+      }
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('حظر المستخدم؟'),
+        content: const Text(
+            'لن يستطيع مراسلتك في المحادثة الفردية بينكما، ولن يظهر في البحث عن أسماء المستخدمين. يمكنك إلغاء الحظر في أي وقت من هذه الصفحة.',
+            style: TextStyle(height: 1.6)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('حظر')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await supabase.rpc('block_user', params: {'p_target': widget.otherId});
+      if (mounted) {
+        setState(() => _blockedByMe = true);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تم حظر المستخدم')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تعذّر تنفيذ الحظر')));
+      }
+    }
+  }
+
+  Future<void> _reportUser() async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('لماذا تُبلّغ عن هذا المستخدم؟'),
+        children: [
+          for (final (v, label) in const [
+            ('spam', 'محتوى مزعج أو إعلانات'),
+            ('inappropriate', 'محتوى غير لائق'),
+            ('harassment', 'تنمر أو مضايقة'),
+            ('fraud', 'احتيال أو انتحال'),
+            ('other', 'سبب آخر'),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, v),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(label),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (reason == null || !mounted) return;
+    try {
+      await supabase.from('abuse_reports').insert({
+        'target_user_id': widget.otherId,
+        'conversation_id': widget.conversationId,
+        'reason': reason,
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('تم إرسال البلاغ. شكراً لك')));
+    } catch (_) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('تعذّر إرسال البلاغ')));
+    }
   }
 
   Future<void> _load() async {
@@ -103,7 +200,7 @@ class _ContactScreenState extends State<ContactScreen> {
             .from('conversation_participants')
             .select('muted_until')
             .eq('conversation_id', widget.conversationId)
-            .eq('user_id', supabase.auth.currentUser!.id)
+            .eq('user_id', supabase.auth.currentUser?.id ?? '')
             .single(),
       ]);
       final mu = results[1]['muted_until'] as String?;
@@ -184,6 +281,24 @@ class _ContactScreenState extends State<ContactScreen> {
             title: const Text('كتم الإشعارات'),
             value: _muted,
             onChanged: (_) => _toggleMute(),
+          ),
+          const Divider(height: 32),
+          ListTile(
+            leading: Icon(_blockedByMe ? Icons.lock_open_rounded : Icons.block_rounded,
+                color: _blockedByMe ? WaslColors.teal : Colors.redAccent),
+            title: Text(_blockedByMe ? 'إلغاء الحظر' : 'حظر المستخدم',
+                style: TextStyle(color: _blockedByMe ? null : Colors.redAccent)),
+            subtitle: _blockedByMe
+                ? const Text('يمكنه مراسلتك في المحادثة الفردية من جديد')
+                : const Text('يمنعه من مراسلتك هنا ومن ظهورك له في البحث'),
+            onTap: _toggleBlock,
+          ),
+          ListTile(
+            leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+            title: const Text('إبلاغ عن المستخدم',
+                style: TextStyle(color: Colors.orangeAccent)),
+            subtitle: const Text('يُراجع البلاغ يدوياً من فريق التطبيق'),
+            onTap: _reportUser,
           ),
         ],
       ),

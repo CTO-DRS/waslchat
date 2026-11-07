@@ -43,8 +43,14 @@ android {
 
     buildTypes {
         release {
+            // لا إصدار بمفتاح debug إطلاقاً: إما keystore الإصدار (CI يكتبه من KEYSTORE_BASE64)
+            // أو فشل البناء برسالة واضحة — يمنع نشر APK موقّع بمفتاح تجريبي دون قصد.
             signingConfig = if (file("wasl-release.jks").exists())
-                signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+                signingConfigs.getByName("release")
+            else throw GradleException(
+                "wasl-release.jks not found: CI provides it via KEYSTORE_BASE64. " +
+                    "Do NOT fall back to the debug key for release builds."
+            )
         }
     }
 }

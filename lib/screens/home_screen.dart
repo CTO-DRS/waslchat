@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../config.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
@@ -27,9 +28,50 @@ class _HomeScreenState extends State<HomeScreen> {
     PresenceService.start();
     PushService.register();
     // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) checkE2eKeys(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await checkE2eKeys(context);
+      // شاشة «تحديث متوفر» تقرأ آخر إصدار من الخادم (جدول app_releases)
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) await _checkUpdate();
     });
+  }
+
+  /// يعرض تنبيهاً إن وُجد إصدار أحدث من إصدار هذا الجهاز
+  Future<void> _checkUpdate() async {
+    try {
+      final rows = await supabase.rpc('check_app_update',
+          params: {'p_version_code': AppConfig.versionCode});
+      if (!mounted || rows is! List || rows.isEmpty) return;
+      final r = rows.first as Map<String, dynamic>;
+      final notes = (r['notes'] as String?) ?? '';
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('تحديث متوفر'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('الإصدار الجديد: ${r['version_name'] ?? ''}',
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(notes, style: const TextStyle(height: 1.5)),
+              ],
+              const SizedBox(height: 12),
+              const Text('حمّله من هنا:', style: TextStyle(color: Colors.white60)),
+              SelectableText((r['url'] as String?) ?? '',
+                  style: const TextStyle(color: WaslColors.teal, fontSize: 13)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('لاحقاً')),
+            FilledButton(onPressed: () => Navigator.pop(c), child: const Text('حسناً')),
+          ],
+        ),
+      );
+    } catch (_) {}
   }
 
   @override

@@ -14,6 +14,20 @@ const db = createClient(
 
 let cached: { token: string; exp: number } | null = null;
 
+// مقارنة سرّية بزمن ثابت (تمنع تسريب السر حرفاً حرفاً عبر قياس زمن الاستجابة)
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const va = new Uint8Array(ha);
+  const vb = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
+  return diff === 0;
+}
+
 async function googleAccessToken(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (cached && cached.exp - 60 > now) return cached.token;
@@ -42,8 +56,9 @@ async function googleAccessToken(): Promise<string> {
 }
 
 Deno.serve(async (req) => {
-  // حماية: لا يقبل إلا طلبات الـ Webhook التي تحمل السر
-  if (!webhookSecret || req.headers.get("x-webhook-secret") !== webhookSecret) {
+  // حماية: لا يقبل إلا طلبات الـ Webhook التي تحمل السر (مقارنة بزمن ثابت)
+  const provided = req.headers.get("x-webhook-secret") ?? "";
+  if (!webhookSecret || !(await timingSafeEqual(provided, webhookSecret))) {
     return new Response("unauthorized", { status: 401 });
   }
 
@@ -90,24 +105,41 @@ Deno.serve(async (req) => {
 
   const access = await googleAccessToken();
   await Promise.all(tokens.map(async ({ token }) => {
-    const r = await fetch(
-      `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: { title, body },
-            data: { conversation_id: m.conversation_id },
-            android: { priority: "high" },
-            apns: { payload: { aps: { sound: "default" } } },
-          },
-        }),
-      },
-    );
-    // جهاز لم يعد مسجلاً: نحذف رمزه
-    if (r.status === 404) await db.from("device_tokens").delete().eq("token", token);
+    let r: Response;
+    try {
+      r = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: {
+              token,
+              notification: { title, body },
+              data: { conversation_id: m.conversation_id },
+              android: { priority: "high" },
+              apns: { payload: { aps: { sound: "default" } } },
+            },
+          }),
+        },
+      );
+    } catch (e) {
+      // انقطاع مؤقت مع Google: لا نحذف الرمز، ولا نُفشل بقية الأجهزة
+      console.error("fcm fetch failed:", e);
+      return;
+    }
+    // جهاز لم يعد مسجلاً (404/410) أو رمز غير صالح (400 UNREGISTERED/INVALID_ARGUMENT):
+    // نحذف رمزه حتى لا تتكرر محاولات الفشل وتتراكم التكلفة
+    if (r.status === 404 || r.status === 410) {
+      await db.from("device_tokens").delete().eq("token", token);
+      return;
+    }
+    if (r.status === 400) {
+      const t = await r.text().catch(() => "");
+      if (t.includes("UNREGISTERED") || t.includes("INVALID_ARGUMENT")) {
+        await db.from("device_tokens").delete().eq("token", token);
+      }
+    }
   }));
 
   return new Response("ok");

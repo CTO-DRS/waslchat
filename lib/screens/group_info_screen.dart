@@ -24,7 +24,7 @@ class GroupInfoScreen extends StatefulWidget {
 }
 
 class _GroupInfoScreenState extends State<GroupInfoScreen> {
-  final String _me = supabase.auth.currentUser!.id;
+  final String _me = supabase.auth.currentUser?.id ?? '';
   late String _title = widget.title;
   List<Map<String, dynamic>> _members = [];
   String _myRole = 'member';

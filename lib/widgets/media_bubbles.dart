@@ -90,10 +90,14 @@ class VoiceBubble extends StatefulWidget {
 class _VoiceBubbleState extends State<VoiceBubble> {
   final _player = AudioPlayer();
   bool _ready = false;
+  File? _file; // النسخة المفكوكة التشفير على القرص — تُحذف عند مغادرة الشاشة
 
   @override
   void dispose() {
     _player.dispose();
+    try {
+      _file?.deleteSync();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -108,8 +112,9 @@ class _VoiceBubbleState extends State<VoiceBubble> {
         if (bytes == null) throw Exception('no bytes');
         final dir = await getTemporaryDirectory();
         final f =
-            File('${dir.path}/voice_enc_${DateTime.now().millisecondsSinceEpoch}.m4a');
+            File('${dir.path}/voice_plain_${DateTime.now().millisecondsSinceEpoch}.m4a');
         await f.writeAsBytes(bytes, flush: true);
+        _file = f;
         await _player.setFilePath(f.path);
         _ready = true;
       }

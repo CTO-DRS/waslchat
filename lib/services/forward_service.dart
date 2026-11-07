@@ -11,10 +11,10 @@ import 'media_service.dart';
 class ForwardService {
   ForwardService._();
 
-  /// مفتاح محادثة هدف (صف من my_chats)
+  /// مفتاح محادثة هدف (صف من my_chats) — fresh لأن إعادة التوجيه إرسال
   static Future<SecretKey?> _keyFor(Map<String, dynamic> chat) {
     final conv = chat['conversation_id'] as String;
-    if (chat['is_group'] == true) return E2eService.groupKey(conv);
+    if (chat['is_group'] == true) return E2eService.groupKey(conv, fresh: true);
     final other = chat['other_id'] as String?;
     if (other == null) return Future.value(null);
     return E2eService.dmKey(conv, other);
@@ -30,7 +30,8 @@ class ForwardService {
   }) async {
     try {
       final conv = target['conversation_id'] as String;
-      final me = supabase.auth.currentUser!.id;
+      final me = supabase.auth.currentUser?.id;
+      if (me == null) return false;
       final key = await _keyFor(target);
       if (key == null) return false;
       if (type == 'text') {

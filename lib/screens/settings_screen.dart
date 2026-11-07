@@ -94,7 +94,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Center(
-              child: Text('وصل شات · الإصدار 0.1.8', style: TextStyle(color: Colors.white38))),
+              child: Text('وصل شات · الإصدار 0.1.9', style: TextStyle(color: Colors.white38))),
         ],
       ),
     );

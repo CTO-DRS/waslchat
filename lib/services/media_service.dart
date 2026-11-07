@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,8 +16,13 @@ class MediaService {
     required String ext,
     required String contentType,
   }) async {
-    final uid = supabase.auth.currentUser!.id.substring(0, 8);
-    final path = '$conversationId/${DateTime.now().millisecondsSinceEpoch}_$uid.$ext';
+    final me = supabase.auth.currentUser?.id ?? '';
+    final uid = me.isEmpty ? 'anon' : me.substring(0, 8);
+    // لاحقة عشوائية: رسالتان في نفس الميلي ثانية لنفس المستخدم لا تتشاركان المسار
+    final rnd = List.generate(4, (_) => Random.secure().nextInt(256))
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    final path = '$conversationId/${DateTime.now().millisecondsSinceEpoch}_${uid}_$rnd.$ext';
     await supabase.storage.from(bucket).uploadBinary(
           path,
           bytes,

@@ -17,7 +17,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _name = TextEditingController();
   final _bio = TextEditingController();
-  final String _me = supabase.auth.currentUser!.id;
+  final String _me = supabase.auth.currentUser?.id ?? '';
   String _username = '';
   String? _avatar;
   bool _loading = true;
@@ -66,6 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final x = await ImagePicker()
         .pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 85);
     if (x == null) return;
+    if (!mounted) return; // قد يغادر المستخدم الشاشة أثناء اختيار الصورة
     setState(() => _uploading = true);
     try {
       final bytes = await x.readAsBytes();

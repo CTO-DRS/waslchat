@@ -60,7 +60,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _recorder = AudioRecorder();
   final _picker = ImagePicker();
   late final Stream<List<Map<String, dynamic>>> _stream;
-  final String _me = supabase.auth.currentUser!.id;
+  final String _me = supabase.auth.currentUser?.id ?? '';
 
   Map<String, String> _names = {};
   late String _title = widget.title;
@@ -88,26 +88,42 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime? _recStart;
   Timer? _ticker;
 
+  /// ملفات الوسائط المفكوكة التشفير المؤقتة — تُحذف عند مغادرة الشاشة
+  final List<File> _openedFiles = [];
+
   // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
   // نص فك التشفير لكل نص مشفّر: ciphertext -> النص الصريح (يتغيّر النص المشفّر عند التعديل)
   final Map<String, String> _plain = {};
   bool get _e2e => widget.encrypted && !widget.isChannel;
 
-  /// مفتاح المحادثة: اشتقاق ECDH للخاص، أو مفتاح المجموعة للمجموعة الخاصة
-  Future<SecretKey?> _convKey() async {
+  /// مفتاح المحادثة: اشتقاق ECDH للخاص، أو مفتاح المجموعة للمجموعة الخاصة.
+  /// fresh = تحقق طازج من حالة مفتاح المجموعة (يُستخدم عند الإرسال — يُغلق نافذة
+  /// الـ30 ثانية التي كانت تسمح بالإرسال بمفتاح قديم بعد إزالة عضو).
+  Future<SecretKey?> _convKey({bool fresh = false}) async {
     if (!widget.isGroup) {
       final other = widget.otherId;
       if (other == null) return null;
       return E2eService.dmKey(widget.conversationId, other);
     }
-    return E2eService.groupKey(widget.conversationId);
+    return E2eService.groupKey(widget.conversationId, fresh: fresh);
   }
 
   /// يفك نصاً مشفّراً واحداً (للمجموعات: يجرّب كل إصدارات المفتاح المعروفة)
   Future<String?> _decrypt(String content) async {
     if (!widget.isGroup) {
-      final key = await _convKey();
-      return key == null ? null : E2eService.decryptText(key, widget.conversationId, content);
+      final other = widget.otherId;
+      if (other == null) return null;
+      var key = await _convKey();
+      var plain =
+          key == null ? null : await E2eService.decryptText(key, widget.conversationId, content);
+      if (plain == null) {
+        // ربما بدّل الطرف الآخر مفتاحه: نُبطل الكاش ونعيد الاشتقاق من أحدث مفتاح منشور مرة واحدة
+        E2eService.invalidateDmKey(widget.conversationId, other);
+        key = await _convKey();
+        plain =
+            key == null ? null : await E2eService.decryptText(key, widget.conversationId, content);
+      }
+      return plain;
     }
     var plain = await E2eService.decryptGroupText(widget.conversationId, content);
     if (plain == null) {
@@ -360,7 +376,21 @@ class _ChatScreenState extends State<ChatScreen> {
     PresenceService.online.removeListener(_onPresence);
     supabase.removeChannel(_room);
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
-    _recorder.dispose();
+    // إيقاف أي تسجيل جارٍ ثم تحرير الميكروفون
+    unawaited(() async {
+      try {
+        if (await _recorder.isRecording()) await _recorder.stop();
+      } catch (_) {}
+      try {
+        await _recorder.dispose();
+      } catch (_) {}
+    }());
+    // حذف الوسائط المفكوكة التشفير من القرص
+    for (final f in _openedFiles) {
+      try {
+        f.deleteSync();
+      } catch (_) {}
+    }
     _text.dispose();
     _searchCtrl.dispose();
     super.dispose();
@@ -470,7 +500,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _snack('الرسالة طويلة جداً');
         return;
       }
-      final key = await _convKey();
+      final key = await _convKey(fresh: true);
       if (key == null) {
         _snack(_keyMissingMsg());
         return;
@@ -504,8 +534,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': payload,
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
-    } catch (_) {
-      _snack('تعذّر إرسال الرسالة');
+    } catch (e) {
+      _snack(e.toString().contains('blocked')
+          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
+          : 'تعذّر إرسال الرسالة');
     }
   }
 
@@ -517,6 +549,7 @@ class _ChatScreenState extends State<ChatScreen> {
     int? durationMs,
     Map<String, dynamic>? meta,
   }) async {
+    if (!mounted) return; // قد يغادر المستخدم الشاشة أثناء اختيار الملف
     setState(() => _uploading = true);
     try {
       var content = meta == null ? '' : jsonEncode(meta);
@@ -524,7 +557,7 @@ class _ChatScreenState extends State<ChatScreen> {
       var upExt = ext;
       var upType = contentType;
       if (_e2e) {
-        final key = await _convKey();
+        final key = await _convKey(fresh: true);
         if (key == null) {
           _snack(_keyMissingMsg());
           return;
@@ -553,8 +586,10 @@ class _ChatScreenState extends State<ChatScreen> {
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
       if (mounted) setState(() => _replyTo = null);
-    } catch (_) {
-      _snack('تعذّر رفع الملف');
+    } catch (e) {
+      _snack(e.toString().contains('blocked')
+          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
+          : 'تعذّر رفع الملف');
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -632,10 +667,14 @@ class _ChatScreenState extends State<ChatScreen> {
       await dir.create(recursive: true);
       final file = File('${dir.path}/${DateTime.now().millisecondsSinceEpoch}_$name');
       await file.writeAsBytes(bytes, flush: true);
+      _openedFiles.add(file);
       if (!mounted) return;
       if (m['type'] == 'video') {
         await Navigator.push(
             context, MaterialPageRoute(builder: (_) => VideoScreen(file: file)));
+        // حذف فوري بعد إغلاق العارض (وdispose يحذفه أيضاً لو أُغلقت الشاشة فجأة)
+        _openedFiles.remove(file);
+        _deleteQuietly(file.path);
       } else {
         final res = await OpenFilex.open(file.path);
         if (res.type != ResultType.done) _snack('لا يوجد تطبيق يفتح هذا الملف');
@@ -719,9 +758,13 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!_recording) return;
     _ticker?.cancel();
     final path = await _recorder.stop();
-    final ms = DateTime.now().difference(_recStart!).inMilliseconds;
-    setState(() => _recording = false);
-    if (cancel || path == null || ms < 700) return;
+    final start = _recStart;
+    final ms = start == null ? 0 : DateTime.now().difference(start).inMilliseconds;
+    if (mounted) setState(() => _recording = false);
+    if (cancel || path == null || ms < 700) {
+      _deleteQuietly(path);
+      return;
+    }
     final bytes = await XFile(path).readAsBytes();
     await _sendMedia(
       type: 'voice',
@@ -730,6 +773,15 @@ class _ChatScreenState extends State<ChatScreen> {
       contentType: 'audio/mp4',
       durationMs: ms,
     );
+    _deleteQuietly(path);
+  }
+
+  /// حذف ملف مؤقت بصمت (تسجيل أُلغي أو بُعِث)
+  void _deleteQuietly(String? path) {
+    if (path == null) return;
+    try {
+      File(path).deleteSync();
+    } catch (_) {}
   }
 
   String _recLabel() {
@@ -748,9 +800,20 @@ class _ChatScreenState extends State<ChatScreen> {
       final raw = await MediaService.download(path);
       if (!E2eService.isEncryptedPath(path) || !_e2e) return raw;
       if (!widget.isGroup) {
-        final key = await _convKey();
-        if (key == null) return null;
-        return await E2eService.decryptBytes(key, widget.conversationId, raw);
+        final other = widget.otherId;
+        var key = other == null ? null : await _convKey();
+        var out = key == null
+            ? null
+            : await E2eService.decryptBytes(key, widget.conversationId, raw);
+        if (out == null && other != null) {
+          // ربما بدّل الطرف الآخر مفتاحه: نُبطل الكاش ونعيد الاشتقاق مرة واحدة
+          E2eService.invalidateDmKey(widget.conversationId, other);
+          key = await _convKey();
+          out = key == null
+              ? null
+              : await E2eService.decryptBytes(key, widget.conversationId, raw);
+        }
+        return out;
       }
       var out = await E2eService.decryptGroupBytes(widget.conversationId, raw);
       if (out == null) {
@@ -1182,9 +1245,57 @@ class _ChatScreenState extends State<ChatScreen> {
                 _delete(m);
               },
             ),
+          if (!mine)
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
+              title: const Text('إبلاغ عن الرسالة',
+                  style: TextStyle(color: Colors.orangeAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _report(m);
+              },
+            ),
         ]),
       ),
     );
+  }
+
+  /// إبلاغ عن رسالة (مطلوب لمتاجر التطبيقات) — يُسجَّل للمراجعة اليدوية فقط
+  Future<void> _report(Map<String, dynamic> m) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('لماذا تُبلّغ عن هذه الرسالة؟'),
+        children: [
+          for (final (v, label) in const [
+            ('spam', 'محتوى مزعج أو إعلانات'),
+            ('inappropriate', 'محتوى غير لائق'),
+            ('harassment', 'تنمر أو مضايقة'),
+            ('fraud', 'احتيال أو انتحال'),
+            ('other', 'سبب آخر'),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, v),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(label),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (reason == null || !mounted) return;
+    try {
+      await supabase.from('abuse_reports').insert({
+        'target_user_id': m['sender_id'],
+        'target_message_id': m['id'],
+        'conversation_id': m['conversation_id'],
+        'reason': reason,
+      });
+      _snack('تم إرسال البلاغ. شكراً لك');
+    } catch (_) {
+      _snack('تعذّر إرسال البلاغ');
+    }
   }
 
   /// اقتباس الرسالة المردود عليها داخل الفقاعة

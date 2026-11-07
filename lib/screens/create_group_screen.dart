@@ -37,7 +37,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           .from('profiles')
           .select('id, username, display_name')
           .ilike('username', '%$q%')
-          .neq('id', supabase.auth.currentUser!.id)
+          .neq('id', supabase.auth.currentUser?.id ?? '')
           .limit(20);
       if (mounted) setState(() => _results = List<Map<String, dynamic>>.from(data));
     } catch (_) {}

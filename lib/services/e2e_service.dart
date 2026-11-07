@@ -41,7 +41,10 @@ class E2eService {
   static final Hkdf _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   static const _storage = FlutterSecureStorage();
 
-  static final Map<String, SimplePublicKey> _pubCache = {};
+  /// ذاكرة المفاتيح العامة للأقران مع وقت الجلب — تُجلب من جديد كل 5 دقائق
+  /// حتى لا تبقى الرسائل تُشفَّر بمفتاح قديم بعد أن يبدّل الطرف الآخر مفتاحه.
+  static const _pubCacheTtl = Duration(minutes: 5);
+  static final Map<String, (SimplePublicKey, DateTime)> _pubCache = {};
   static final Map<String, SecretKey> _dmKeyCache = {};
   static final Map<String, SecretKey> _groupKeyCache = {};
   static final Map<String, String> _previewCache = {};
@@ -89,7 +92,8 @@ class E2eService {
   }
 
   static Future<void> _publishMyKey() async {
-    final uid = supabase.auth.currentUser!.id;
+    final uid = supabase.auth.currentUser?.id;
+    if (uid == null) return;
     final pub = await (await _loadMyPair()).extractPublicKey();
     await supabase.from('profiles').update({
       'identity_public_key': base64Encode(pub.bytes),
@@ -173,7 +177,8 @@ class E2eService {
   /// يشفّر المفتاح الخاص بكلمة سر يختارها المستخدم ويخزّنه في الحساب.
   /// الخادم لا يرى كلمة السر ولا المفتاح.
   static Future<void> createBackup(String passphrase) async {
-    final uid = supabase.auth.currentUser!.id;
+    final uid = supabase.auth.currentUser?.id;
+    if (uid == null) throw StateError('not authenticated');
     final seed = base64Decode((await _storage.read(key: _privKeyStoreKey))!);
     final salt = _aes.newNonce() + _aes.newNonce(); // 24 بايت عشوائية
     final kek = await _backupKek(passphrase, salt, _backupIterations);
@@ -191,7 +196,8 @@ class E2eService {
 
   /// يستعيد المفتاح من النسخة الاحتياطية. false إن كانت كلمة السر خاطئة.
   static Future<bool> restoreBackup(String passphrase) async {
-    final uid = supabase.auth.currentUser!.id;
+    final uid = supabase.auth.currentUser?.id;
+    if (uid == null) return false;
     final row = await supabase
         .from('e2e_key_backups')
         .select('salt, iterations, wrapped')
@@ -275,7 +281,7 @@ class E2eService {
 
   static Future<SimplePublicKey?> _publicKeyOf(String userId) async {
     final hit = _pubCache[userId];
-    if (hit != null) return hit;
+    if (hit != null && DateTime.now().difference(hit.$2) < _pubCacheTtl) return hit.$1;
     final row = await supabase
         .from('profiles')
         .select('identity_public_key')
@@ -285,10 +291,14 @@ class E2eService {
     if (v == null || v.isEmpty) return null;
     // تنبيه عند تغيّر مفتاح طرف رأيناه سابقاً
     final seen = await _storage.read(key: '$_peerPubPrefix$userId');
-    if (seen != null && seen != v) _changedPeers.add(userId);
+    if (seen != null && seen != v) {
+      _changedPeers.add(userId);
+      // المفتاح تغيّر: نُبطل مفاتيح المحادثات الخاصة معه فوراً (تُعاد الاشتقاق)
+      _dmKeyCache.removeWhere((k, _) => k.endsWith(':$userId'));
+    }
     if (seen != v) await _storage.write(key: '$_peerPubPrefix$userId', value: v);
     final pub = SimplePublicKey(base64Decode(v), type: KeyPairType.x25519);
-    _pubCache[userId] = pub;
+    _pubCache[userId] = (pub, DateTime.now());
     return pub;
   }
 
@@ -309,6 +319,13 @@ class E2eService {
     );
     _dmKeyCache[cacheKey] = derived;
     return derived;
+  }
+
+  /// إبطال مفتاح محادثة خاصة ومفتاح الطرف الآخر (يُستدعى عند فشل الفك)
+  /// — يُعاد الاشتقاق من أحدث مفتاح منشور للطرف الآخر في المحاولة التالية.
+  static void invalidateDmKey(String conversationId, String otherUserId) {
+    _dmKeyCache.remove('$conversationId:$otherUserId');
+    _pubCache.remove(otherUserId);
   }
 
   // ---------- النص ----------
@@ -632,15 +649,17 @@ class E2eService {
   }
 
   /// المفتاح الحالي لمجموعة خاصة (للإرسال).
-  /// يدوّر المفتاح إن طُلب ذلك بعد إزالة/مغادرة، ثم: ظرفي ← نسخة محلية ← تثبيت أول (الإصدار 1 فقط).
+  /// يدوّر المفتاح إن طُلب ذلك بعد إزالة/مغادرته، ثم: ظرفي ← نسخة محلية ← تثبيت أول (الإصدار 1 فقط).
   /// لا يستبدل أحدٌ مفتاحَ إصدار قائماً أبداً؛ العضو بلا ظرف ينتظر عضواً يملك المفتاح ليغلّفه له.
-  static Future<SecretKey?> groupKey(String conversationId) async {
+  /// [fresh] يجلب حالة المفتاح من القاعدة مباشرة (بدون ذاكرة الـ30 ثانية) — يُستخدم
+  /// عند الإرسال حتى لا تُشفَّر رسالة جديدة بمفتاح قديم بعد إزالة عضو وتدوير المفتاح.
+  static Future<SecretKey?> groupKey(String conversationId, {bool fresh = false}) async {
     if (!_ready) return null;
     try {
       final me = supabase.auth.currentUser?.id;
       if (me == null) return null;
 
-      var (version, pending) = await _keyState(conversationId);
+      var (version, pending) = await _keyState(conversationId, fresh: fresh);
       if (pending) {
         final rotated = await _rotate(conversationId, version);
         if (rotated != null) return rotated;
@@ -674,8 +693,8 @@ class E2eService {
 
       final members = await _memberIds(conversationId);
       if (!members.contains(me) || members.length < 2) return null;
-      final fresh = await _aes.newSecretKey();
-      final payload = await _wrapForAll(conversationId, fresh, members);
+      final newKey = await _aes.newSecretKey();
+      final payload = await _wrapForAll(conversationId, newKey, members);
       await supabase.rpc('e2e_set_group_key',
           params: {'p_conv': conversationId, 'p_envelopes': payload});
 

@@ -46,19 +46,35 @@ class WaslApp extends StatelessWidget {
 }
 
 /// يعرض شاشة الدخول أو الشاشة الرئيسية حسب حالة تسجيل الدخول
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  /// ضمان دفع شاشة كلمة المرور الجديدة مرة واحدة لكل حدث استرداد
+  /// (الحدث يبقى في البثّ ويُعاد البناء عند أي تغيير في MediaQuery — بلا هذا العلم
+  ///  تُدفع الشاشة مراراً فوق نفسها)
+  bool _recoveryPushed = false;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AuthState>(
       stream: supabase.auth.onAuthStateChange,
       builder: (context, snap) {
-        if (snap.data?.event == AuthChangeEvent.passwordRecovery) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            navigatorKey.currentState
-                ?.push(MaterialPageRoute(builder: (_) => const NewPasswordScreen()));
-          });
+        final event = snap.data?.event;
+        if (event == AuthChangeEvent.passwordRecovery) {
+          if (!_recoveryPushed) {
+            _recoveryPushed = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              navigatorKey.currentState
+                  ?.push(MaterialPageRoute(builder: (_) => const NewPasswordScreen()));
+            });
+          }
+        } else if (event != null) {
+          _recoveryPushed = false;
         }
         final session = supabase.auth.currentSession;
         if (session == null) return const AuthScreen();
