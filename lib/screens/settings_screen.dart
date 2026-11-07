@@ -5,7 +5,9 @@ import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
+import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
+import 'profile_screen.dart';
 import 'security_screens.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -13,35 +15,13 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = supabase.auth.currentUser;
     return Scaffold(
       appBar: AppBar(
           title: const Text('الإعدادات', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: WaslColors.glass,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Row(children: [
-              const CircleAvatar(
-                radius: 30,
-                backgroundColor: WaslColors.indigo,
-                child: Icon(Icons.person, color: Colors.white, size: 32),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(user?.userMetadata?['username']?.toString() ?? 'مستخدم',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text(user?.email ?? '', style: const TextStyle(color: Colors.white60)),
-                ]),
-              ),
-            ]),
-          ),
+          const _ProfileCard(),
           const SizedBox(height: 16),
           const ListTile(
             leading: Icon(Icons.lock_outline, color: WaslColors.teal),
@@ -106,8 +86,77 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Center(
-              child: Text('وصل شات · الإصدار 0.1.5', style: TextStyle(color: Colors.white38))),
+              child: Text('وصل شات · الإصدار 0.1.6', style: TextStyle(color: Colors.white38))),
         ],
+      ),
+    );
+  }
+}
+
+/// بطاقة الملف الشخصي أعلى الإعدادات (اضغط للتعديل)
+class _ProfileCard extends StatefulWidget {
+  const _ProfileCard();
+
+  @override
+  State<_ProfileCard> createState() => _ProfileCardState();
+}
+
+class _ProfileCardState extends State<_ProfileCard> {
+  Map<String, dynamic>? _p;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final uid = supabase.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      final p = await supabase
+          .from('profiles')
+          .select('username, display_name, bio, avatar_url')
+          .eq('id', uid)
+          .single();
+      if (mounted) setState(() => _p = p);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (_p?['display_name'] ?? _p?['username'] ?? 'مستخدم') as String;
+    final bio = _p?['bio'] as String?;
+    return Material(
+      color: WaslColors.glass,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () async {
+          await Navigator.push(
+              context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+          _load();
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            UserAvatar(name: name, url: _p?['avatar_url'] as String?, radius: 30),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                    (bio != null && bio.isNotEmpty)
+                        ? bio
+                        : (supabase.auth.currentUser?.email ?? ''),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white60)),
+              ]),
+            ),
+            const Icon(Icons.edit_outlined, color: Colors.white54),
+          ]),
+        ),
       ),
     );
   }

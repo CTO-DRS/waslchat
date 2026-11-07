@@ -58,11 +58,15 @@ Deno.serve(async (req) => {
   const [{ data: sender }, { data: conv }, { data: members }] = await Promise.all([
     db.from("profiles").select("username, display_name").eq("id", m.sender_id).single(),
     db.from("conversations").select("is_group, title").eq("id", m.conversation_id).single(),
-    db.from("conversation_participants").select("user_id")
+    db.from("conversation_participants").select("user_id, muted_until")
       .eq("conversation_id", m.conversation_id).neq("user_id", m.sender_id),
   ]);
 
-  const ids = (members ?? []).map((r) => r.user_id);
+  // المكتومون لا يصلهم إشعار (muted_until في المستقبل، أو "infinity" = دائماً)
+  const now = Date.now();
+  const isMuted = (u: string | null) =>
+    !!u && (u === "infinity" || new Date(u).getTime() > now);
+  const ids = (members ?? []).filter((r) => !isMuted(r.muted_until)).map((r) => r.user_id);
   if (!ids.length) return new Response("no recipients");
 
   const { data: tokens } = await db.from("device_tokens").select("token").in("user_id", ids);

@@ -12,9 +12,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config.dart';
 import '../services/ai_service.dart';
 import '../services/e2e_service.dart';
+import '../services/forward_service.dart';
 import '../services/media_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
 import 'group_info_screen.dart';
 
@@ -59,6 +61,11 @@ class _ChatScreenState extends State<ChatScreen> {
   Map<String, Map<String, dynamic>> _byId = {};
   StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
   Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
+  // البحث داخل المحادثة
+  bool _searching = false;
+  final _searchCtrl = TextEditingController();
+  String get _query => _searchCtrl.text.trim().toLowerCase();
+
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
   bool _uploading = false;
@@ -250,6 +257,7 @@ class _ChatScreenState extends State<ChatScreen> {
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
     _recorder.dispose();
     _text.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -739,6 +747,75 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _forward(Map<String, dynamic> m) async {
+    List<Map<String, dynamic>> chats;
+    try {
+      chats = List<Map<String, dynamic>>.from(await supabase.rpc('my_chats') as List)
+          .where((c) => c['conversation_id'] != widget.conversationId)
+          .toList();
+    } catch (_) {
+      _snack('تعذّر تحميل المحادثات');
+      return;
+    }
+    if (!mounted) return;
+    final target = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: WaslColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.6,
+          child: Column(children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('إعادة توجيه إلى…',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            ),
+            Expanded(
+              child: chats.isEmpty
+                  ? const Center(child: Text('لا توجد محادثات أخرى'))
+                  : ListView(children: [
+                      for (final c in chats)
+                        ListTile(
+                          leading: UserAvatar(
+                            name: (c['title'] ?? '') as String,
+                            url: c['avatar_url'] as String?,
+                            radius: 22,
+                            color: c['is_group'] == true ? WaslColors.teal : WaslColors.indigo,
+                            icon: c['is_group'] == true ? Icons.groups_2 : null,
+                          ),
+                          title: Text((c['title'] ?? '') as String),
+                          onTap: () => Navigator.pop(ctx, c),
+                        ),
+                    ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (target == null || !mounted) return;
+    setState(() => _uploading = true);
+    final type = m['type'] as String? ?? 'text';
+    bool ok;
+    if (type == 'text') {
+      ok = await ForwardService.send(target: target, type: 'text', text: _textOf(m));
+    } else {
+      final bytes = await _mediaBytes(m['media_url'] as String);
+      ok = bytes != null &&
+          await ForwardService.send(
+              target: target,
+              type: type,
+              bytes: bytes,
+              durationMs: m['duration_ms'] as int?);
+    }
+    if (mounted) setState(() => _uploading = false);
+    _snack(ok
+        ? 'أُرسلت إلى ${target['title']}'
+        : 'تعذّرت إعادة التوجيه (قد لا يكون التشفير جاهزاً في المحادثة الأخرى)');
+  }
+
   void _startEdit(Map<String, dynamic> m) {
     final t = _textOf(m);
     if (t == null) return;
@@ -812,6 +889,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 Clipboard.setData(ClipboardData(text: text));
                 Navigator.pop(ctx);
                 _snack('تم النسخ');
+              },
+            ),
+          if (_e2e && !widget.isChannel)
+            ListTile(
+              leading: const Icon(Icons.shortcut_rounded),
+              title: const Text('إعادة توجيه'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _forward(m);
               },
             ),
           if (_canEdit(m))
@@ -960,7 +1046,24 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final hasText = _text.text.trim().isNotEmpty;
     return Scaffold(
-      appBar: AppBar(
+      appBar: _searching
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() {
+                  _searching = false;
+                  _searchCtrl.clear();
+                }),
+              ),
+              title: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                    hintText: 'ابحث في المحادثة…', border: InputBorder.none, filled: false),
+              ),
+            )
+          : AppBar(
         titleSpacing: 0,
         title: GestureDetector(
          onTap: _isPrivateGroup ? _openGroupInfo : null,
@@ -989,6 +1092,11 @@ class _ChatScreenState extends State<ChatScreen> {
          ]),
         ),
         actions: [
+          IconButton(
+            tooltip: 'بحث',
+            onPressed: () => setState(() => _searching = true),
+            icon: const Icon(Icons.search_rounded),
+          ),
           if (_isPrivateGroup)
             IconButton(
               tooltip: 'معلومات المجموعة',
@@ -1037,10 +1145,24 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final msgs = snap.data!.reversed.toList();
-                _byId = {for (final m in msgs) m['id'] as String: m};
-                WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(msgs));
-                _scheduleDecrypt(msgs);
+                final all = snap.data!.reversed.toList();
+                _byId = {for (final m in all) m['id'] as String: m};
+                final q = _query;
+                final msgs = q.isEmpty
+                    ? all
+                    : all.where((m) {
+                        if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') {
+                          return false;
+                        }
+                        return (_textOf(m) ?? '').toLowerCase().contains(q);
+                      }).toList();
+                if (q.isNotEmpty && msgs.isEmpty) {
+                  _scheduleDecrypt(all);
+                  return const Center(
+                      child: Text('لا نتائج', style: TextStyle(color: Colors.white60)));
+                }
+                WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
+                _scheduleDecrypt(all);
                 return ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),

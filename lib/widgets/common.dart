@@ -94,3 +94,35 @@ class SectionTitle extends StatelessWidget {
             style: const TextStyle(color: Colors.white60, fontWeight: FontWeight.w700, fontSize: 13)),
       );
 }
+
+/// صورة شخصية دائرية: الصورة إن وُجدت، وإلا أول حرف من الاسم
+class UserAvatar extends StatelessWidget {
+  const UserAvatar({
+    super.key,
+    required this.name,
+    this.url,
+    this.radius = 26,
+    this.color = WaslColors.indigo,
+    this.icon,
+  });
+  final String name;
+  final String? url;
+  final double radius;
+  final Color color;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasUrl = url != null && url!.isNotEmpty;
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: color,
+      foregroundImage: hasUrl ? NetworkImage(url!) : null,
+      onForegroundImageError: hasUrl ? (_, __) {} : null,
+      child: icon != null
+          ? Icon(icon, color: Colors.white, size: radius)
+          : Text(name.isNotEmpty ? name.characters.first : '?',
+              style: TextStyle(color: Colors.white, fontSize: radius * 0.75)),
+    );
+  }
+}

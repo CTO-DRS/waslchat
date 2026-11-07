@@ -5,6 +5,7 @@ import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
@@ -23,6 +24,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   RealtimeChannel? _channel;
   // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
   final Map<String, String> _previews = {};
+  bool _showArchived = false;
 
   @override
   void initState() {
@@ -138,11 +140,101 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
+  Future<void> _setPrefs(Map<String, dynamic> c,
+      {bool? pinned, int? muteHours, bool? archived}) async {
+    try {
+      await supabase.rpc('set_chat_prefs', params: {
+        'p_conv': c['conversation_id'],
+        'p_pinned': pinned,
+        'p_mute_hours': muteHours,
+        'p_archived': archived,
+      });
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().contains('pin limit')
+          ? 'يمكن تثبيت 5 محادثات فقط'
+          : 'تعذّر الحفظ';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  void _chatMenu(Map<String, dynamic> c) {
+    final pinned = c['pinned'] == true;
+    final muted = c['muted'] == true;
+    final archived = c['archived'] == true;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: WaslColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Wrap(children: [
+          ListTile(
+            title: Text((c['title'] ?? '') as String,
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          ListTile(
+            leading: Icon(pinned ? Icons.push_pin_outlined : Icons.push_pin, color: WaslColors.teal),
+            title: Text(pinned ? 'إلغاء التثبيت' : 'تثبيت في الأعلى'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _setPrefs(c, pinned: !pinned);
+            },
+          ),
+          if (muted)
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined, color: WaslColors.indigo),
+              title: const Text('إلغاء الكتم'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _setPrefs(c, muteHours: 0);
+              },
+            )
+          else ...[
+            for (final o in const [(8, 'كتم 8 ساعات'), (168, 'كتم أسبوعاً'), (-1, 'كتم دائماً')])
+              ListTile(
+                leading: const Icon(Icons.notifications_off_outlined, color: WaslColors.indigo),
+                title: Text(o.$2),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _setPrefs(c, muteHours: o.$1);
+                },
+              ),
+          ],
+          ListTile(
+            leading: Icon(archived ? Icons.unarchive_outlined : Icons.archive_outlined,
+                color: WaslColors.violet),
+            title: Text(archived ? 'إخراج من الأرشيف' : 'أرشفة'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _setPrefs(c, archived: !archived);
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final archivedCount = _chats.where((c) => c['archived'] == true).length;
+    final visible =
+        _chats.where((c) => (c['archived'] == true) == _showArchived).toList();
+    return PopScope(
+      canPop: !_showArchived,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _showArchived = false);
+      },
+      child: Scaffold(
       appBar: AppBar(
-        title: const Text('المحادثات', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
+        leading: _showArchived
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() => _showArchived = false))
+            : null,
+        title: Text(_showArchived ? 'المؤرشفة' : 'المحادثات',
+            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
         actions: [
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 8),
@@ -167,7 +259,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _load,
-              child: _chats.isEmpty
+              child: visible.isEmpty && archivedCount == 0
                   ? ListView(children: const [
                       SizedBox(height: 160),
                       Center(
@@ -177,22 +269,39 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),
-                      itemCount: _chats.length,
+                      itemCount: visible.length + (!_showArchived && archivedCount > 0 ? 1 : 0),
                       itemBuilder: (context, i) {
-                        final c = _chats[i];
+                        if (!_showArchived && archivedCount > 0) {
+                          if (i == 0) {
+                            return ListTile(
+                              leading: const CircleAvatar(
+                                radius: 26,
+                                backgroundColor: WaslColors.glass,
+                                child: Icon(Icons.archive_outlined, color: WaslColors.violet),
+                              ),
+                              title: const Text('المؤرشفة',
+                                  style: TextStyle(fontWeight: FontWeight.w700)),
+                              trailing: Text('$archivedCount',
+                                  style: const TextStyle(color: Colors.white60)),
+                              onTap: () => setState(() => _showArchived = true),
+                            );
+                          }
+                          i -= 1;
+                        }
+                        final c = visible[i];
+                        final pinned = c['pinned'] == true;
+                        final muted = c['muted'] == true;
                         final name = (c['title'] ?? '') as String;
                         final isGroup = c['is_group'] == true;
                         final unread = (c['unread'] as num?)?.toInt() ?? 0;
                         final otherId = c['other_id'] as String?;
                         return ListTile(
                           leading: Stack(clipBehavior: Clip.none, children: [
-                            CircleAvatar(
-                              radius: 26,
-                              backgroundColor: isGroup ? WaslColors.teal : WaslColors.indigo,
-                              child: isGroup
-                                  ? const Icon(Icons.groups_2, color: Colors.white)
-                                  : Text(name.isNotEmpty ? name.characters.first : '?',
-                                      style: const TextStyle(color: Colors.white, fontSize: 20)),
+                            UserAvatar(
+                              name: name,
+                              url: c['avatar_url'] as String?,
+                              color: isGroup ? WaslColors.teal : WaslColors.indigo,
+                              icon: isGroup ? Icons.groups_2 : null,
                             ),
                             if (!isGroup)
                               ValueListenableBuilder<Set<String>>(
@@ -216,7 +325,23 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                     : const SizedBox.shrink(),
                               ),
                           ]),
-                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          title: Row(children: [
+                            Flexible(
+                              child: Text(name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                            ),
+                            if (muted) ...[
+                              const SizedBox(width: 4),
+                              const Icon(Icons.notifications_off_outlined,
+                                  size: 16, color: Colors.white54),
+                            ],
+                            if (pinned) ...[
+                              const SizedBox(width: 4),
+                              const Icon(Icons.push_pin, size: 15, color: Colors.white54),
+                            ],
+                          ]),
+                          onLongPress: () => _chatMenu(c),
                           subtitle: Text(_preview(c), maxLines: 1, overflow: TextOverflow.ellipsis),
                           subtitleTextStyle: unread > 0
                               ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)
@@ -234,7 +359,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
-                                    gradient: WaslColors.gradient,
+                                    gradient: muted ? null : WaslColors.gradient,
+                                    color: muted ? Colors.white24 : null,
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(unread > 99 ? '99+' : '$unread',
@@ -257,6 +383,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       },
                     ),
             ),
+    ),
     );
   }
 }
