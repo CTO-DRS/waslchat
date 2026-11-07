@@ -18,6 +18,7 @@ import '../services/presence_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
+import 'contact_screen.dart';
 import 'group_info_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -30,6 +31,7 @@ class ChatScreen extends StatefulWidget {
     this.isChannel = false,
     this.canPost = true,
     this.encrypted = false,
+    this.starredOnly = false,
   });
   final String conversationId;
   final String title;
@@ -40,6 +42,9 @@ class ChatScreen extends StatefulWidget {
 
   /// تشفير بين الطرفين (خاص + مجموعات خاصة فقط؛ القنوات وغرف المجتمعات لا)
   final bool encrypted;
+
+  /// يفتح المحادثة على الرسائل المميزة بنجمة فقط
+  final bool starredOnly;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -61,6 +66,12 @@ class _ChatScreenState extends State<ChatScreen> {
   Map<String, Map<String, dynamic>> _byId = {};
   StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
   Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
+  // الرسائل المختفية والنجوم وصورة الطرف الآخر
+  int? _disappear;
+  Set<String> _stars = {};
+  late bool _starredOnly = widget.starredOnly;
+  String? _otherAvatar;
+
   // البحث داخل المحادثة
   bool _searching = false;
   final _searchCtrl = TextEditingController();
@@ -150,6 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
         .order('created_at', ascending: true);
     _text.addListener(_onTextChanged);
     if (widget.isGroup) _loadMembers();
+    _loadMeta();
 
     // بث «يكتب الآن» بين أعضاء المحادثة
     _room = supabase.channel('room:${widget.conversationId}');
@@ -224,6 +236,76 @@ class _ChatScreenState extends State<ChatScreen> {
     if (id == _lastMarkedId || last['sender_id'] == _me) return;
     _lastMarkedId = id;
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+  }
+
+  Future<void> _loadMeta() async {
+    try {
+      final conv = await supabase
+          .from('conversations')
+          .select('disappear_seconds')
+          .eq('id', widget.conversationId)
+          .maybeSingle();
+      final stars = await supabase
+          .from('message_stars')
+          .select('message_id')
+          .eq('conversation_id', widget.conversationId);
+      String? avatar;
+      if (!widget.isGroup && widget.otherId != null) {
+        final p = await supabase
+            .from('profiles')
+            .select('avatar_url')
+            .eq('id', widget.otherId!)
+            .maybeSingle();
+        avatar = p?['avatar_url'] as String?;
+      }
+      if (!mounted) return;
+      setState(() {
+        _disappear = conv?['disappear_seconds'] as int?;
+        _stars = {for (final r in stars) r['message_id'] as String};
+        _otherAvatar = avatar;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleStar(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    final starred = _stars.contains(id);
+    setState(() => starred ? _stars.remove(id) : _stars.add(id));
+    try {
+      if (starred) {
+        await supabase.from('message_stars').delete().eq('message_id', id).eq('user_id', _me);
+      } else {
+        await supabase.from('message_stars').insert({
+          'message_id': id,
+          'conversation_id': widget.conversationId,
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => starred ? _stars.add(id) : _stars.remove(id));
+      _snack('تعذّر الحفظ');
+    }
+  }
+
+  Future<void> _changeDisappearing() async {
+    final v = await pickDisappearing(context, widget.conversationId, _disappear);
+    if (v != null && mounted) setState(() => _disappear = v == 0 ? null : v);
+  }
+
+  void _openContact() {
+    if (widget.otherId == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContactScreen(
+          otherId: widget.otherId!,
+          conversationId: widget.conversationId,
+          title: _title,
+          disappearSeconds: _disappear,
+          onSafetyNumber: _showSafety ? _showSafetyNumber : null,
+          onShowStarred: () => setState(() => _starredOnly = true),
+        ),
+      ),
+    ).then((_) => _loadMeta());
   }
 
   String? _statusLine() {
@@ -891,6 +973,17 @@ class _ChatScreenState extends State<ChatScreen> {
                 _snack('تم النسخ');
               },
             ),
+          if (m['deleted_at'] == null)
+            ListTile(
+              leading: Icon(
+                  _stars.contains(m['id']) ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: Colors.amber),
+              title: Text(_stars.contains(m['id']) ? 'إزالة النجمة' : 'تمييز بنجمة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _toggleStar(m);
+              },
+            ),
           if (_e2e && !widget.isChannel)
             ListTile(
               leading: const Icon(Icons.shortcut_rounded),
@@ -1066,15 +1159,17 @@ class _ChatScreenState extends State<ChatScreen> {
           : AppBar(
         titleSpacing: 0,
         title: GestureDetector(
-         onTap: _isPrivateGroup ? _openGroupInfo : null,
+         onTap: _isPrivateGroup
+             ? _openGroupInfo
+             : (!widget.isGroup && widget.otherId != null ? _openContact : null),
          behavior: HitTestBehavior.opaque,
          child: Row(children: [
-          CircleAvatar(
-            backgroundColor: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
-            child: widget.isGroup
-                ? Icon(widget.isChannel ? Icons.campaign : Icons.groups_2, color: Colors.white)
-                : Text(_title.isNotEmpty ? _title.characters.first : '?',
-                    style: const TextStyle(color: Colors.white)),
+          UserAvatar(
+            name: _title,
+            url: _otherAvatar,
+            radius: 20,
+            color: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
+            icon: widget.isGroup ? (widget.isChannel ? Icons.campaign : Icons.groups_2) : null,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1117,10 +1212,51 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: _confirmSummarize,
             icon: const Icon(Icons.auto_awesome, color: WaslColors.violet),
           ),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'disappear') _changeDisappearing();
+              if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'starred',
+                child: Text(_starredOnly ? 'كل الرسائل' : 'الرسائل المميزة بنجمة'),
+              ),
+              if (!widget.isChannel)
+                PopupMenuItem(
+                  value: 'disappear',
+                  child: Text('الرسائل المختفية: ${disappearLabel(_disappear)}'),
+                ),
+            ],
+          ),
         ],
       ),
       body: Column(
         children: [
+          if (_disappear != null || _starredOnly)
+            Material(
+              color: WaslColors.glass,
+              child: InkWell(
+                onTap: _starredOnly
+                    ? () => setState(() => _starredOnly = false)
+                    : _changeDisappearing,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(children: [
+                    Icon(_starredOnly ? Icons.star_rounded : Icons.timer_outlined,
+                        size: 18, color: _starredOnly ? Colors.amber : WaslColors.violet),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                          _starredOnly
+                              ? 'تعرض الرسائل المميزة بنجمة فقط. اضغط لعرض الكل.'
+                              : 'الرسائل الجديدة تختفي بعد ${disappearLabel(_disappear)}',
+                          style: const TextStyle(fontSize: 13)),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
           if (_showSafety && E2eService.peerKeyChanged(widget.otherId!))
             Material(
               color: const Color(0x33FFC107),
@@ -1145,12 +1281,25 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final all = snap.data!.reversed.toList();
+                final now = DateTime.now();
+                final all = snap.data!.reversed.where((m) {
+                  final e = m['expires_at'] as String?;
+                  return e == null || DateTime.parse(e).isAfter(now);
+                }).toList();
                 _byId = {for (final m in all) m['id'] as String: m};
                 final q = _query;
+                final base = _starredOnly
+                    ? all.where((m) => _stars.contains(m['id'])).toList()
+                    : all;
+                if (_starredOnly && base.isEmpty) {
+                  _scheduleDecrypt(all);
+                  return const Center(
+                      child: Text('لا رسائل مميزة بنجمة هنا',
+                          style: TextStyle(color: Colors.white60)));
+                }
                 final msgs = q.isEmpty
-                    ? all
-                    : all.where((m) {
+                    ? base
+                    : base.where((m) {
                         if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') {
                           return false;
                         }
@@ -1208,6 +1357,14 @@ class _ChatScreenState extends State<ChatScreen> {
                             if (chips != null) chips,
                             const SizedBox(height: 2),
                             Row(mainAxisSize: MainAxisSize.min, children: [
+                              if (_stars.contains(m['id'])) ...[
+                                const Icon(Icons.star_rounded, size: 13, color: Colors.amber),
+                                const SizedBox(width: 3),
+                              ],
+                              if (m['expires_at'] != null) ...[
+                                const Icon(Icons.timer_outlined, size: 12, color: Colors.white60),
+                                const SizedBox(width: 3),
+                              ],
                               if (m['edited_at'] != null && m['deleted_at'] == null) ...[
                                 const Text('معدّلة',
                                     style: TextStyle(color: Colors.white60, fontSize: 11)),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 import 'chat_screen.dart';
 
 class NewChatScreen extends StatefulWidget {
@@ -32,7 +33,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
     try {
       final data = await supabase
           .from('profiles')
-          .select('id, username, display_name')
+          .select('id, username, display_name, avatar_url, bio')
           .ilike('username', '%$q%')
           .neq('id', supabase.auth.currentUser!.id)
           .limit(20);
@@ -87,12 +88,15 @@ class _NewChatScreenState extends State<NewChatScreen> {
               final u = _results[i];
               final name = (u['display_name'] ?? u['username']) as String;
               return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: WaslColors.teal,
-                  child: Text(name.characters.first, style: const TextStyle(color: Colors.white)),
-                ),
+                leading: UserAvatar(
+                    name: name, url: u['avatar_url'] as String?, color: WaslColors.teal, radius: 22),
                 title: Text(name),
-                subtitle: Text('@${u['username']}'),
+                subtitle: Text(
+                    (u['bio'] as String?)?.isNotEmpty == true
+                        ? '@${u['username']} · ${u['bio']}'
+                        : '@${u['username']}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 onTap: () => _open(u),
               );
             },

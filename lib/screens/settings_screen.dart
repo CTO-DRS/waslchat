@@ -8,6 +8,7 @@ import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
 import 'profile_screen.dart';
+import 'starred_screen.dart';
 import 'security_screens.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -27,6 +28,13 @@ class SettingsScreen extends StatelessWidget {
             leading: Icon(Icons.lock_outline, color: WaslColors.teal),
             title: Text('الرسائل محمية'),
             subtitle: Text('صلاحيات وصول على مستوى الصفوف (RLS)'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
+            title: const Text('الرسائل المميزة بنجمة'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const StarredScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.shield_outlined, color: WaslColors.indigo),
@@ -86,7 +94,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Center(
-              child: Text('وصل شات · الإصدار 0.1.6', style: TextStyle(color: Colors.white38))),
+              child: Text('وصل شات · الإصدار 0.1.7', style: TextStyle(color: Colors.white38))),
         ],
       ),
     );
