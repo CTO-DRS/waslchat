@@ -31,6 +31,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   int _keyVersion = 1;
   bool _loading = true;
   bool _busy = false;
+  bool _screenshotBlock = false;
 
   bool get _isAdmin => _myRole == 'owner' || _myRole == 'admin';
 
@@ -49,7 +50,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     try {
       final conv = await supabase
           .from('conversations')
-          .select('title, group_key_version')
+          .select('title, group_key_version, screenshot_block')
           .eq('id', widget.conversationId)
           .maybeSingle();
       final rows = await supabase
@@ -67,6 +68,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       setState(() {
         _title = (conv?['title'] as String?) ?? _title;
         _keyVersion = (conv?['group_key_version'] as int?) ?? 1;
+        _screenshotBlock = conv?['screenshot_block'] as bool? ?? false;
         _members = list;
         _myRole = (list.firstWhere((m) => m['user_id'] == _me,
                 orElse: () => {'role': 'member'})['role'] as String?) ??
@@ -107,6 +109,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   void _rotateNow() {
     E2eService.invalidateGroupKey(widget.conversationId);
     unawaited(E2eService.groupKey(widget.conversationId).then((_) => _load()));
+  }
+
+  Future<void> _toggleScreenshotBlock() async {
+    final v = !_screenshotBlock;
+    setState(() => _screenshotBlock = v);
+    try {
+      await supabase.rpc('set_screenshot_block',
+          params: {'p_conv': widget.conversationId, 'p_block': v});
+    } catch (_) {
+      setState(() => _screenshotBlock = !v);
+      _snack('تعذّر الحفظ');
+    }
   }
 
   Future<bool> _confirm(String title, String body, String ok) async {
@@ -282,6 +296,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     leading: const Icon(Icons.lock_outline, color: WaslColors.teal),
                     title: const Text('الرسائل مشفّرة بين الأعضاء'),
                     subtitle: Text('إصدار مفتاح المجموعة: $_keyVersion — يتغيّر عند خروج أي عضو'),
+                  ),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.screenshot_monitor_outlined,
+                        color: WaslColors.teal),
+                    title: const Text('منع لقطات الشاشة'),
+                    subtitle: Text(_isAdmin
+                        ? 'يخفي المجموعة من لقطات الشاشة على أندرويد (المالك والمشرفون)'
+                        : 'المالك والمشرفون فقط يغيّرون هذا الإعداد'),
+                    value: _screenshotBlock,
+                    onChanged: _isAdmin ? (_) => _toggleScreenshotBlock() : null,
                   ),
                   const Divider(),
                   if (_isAdmin)

@@ -84,6 +84,7 @@ class _ContactScreenState extends State<ContactScreen> {
   bool _muted = false;
   int? _disappear;
   bool _blockedByMe = false;
+  bool _screenshotBlock = false;
 
   @override
   void initState() {
@@ -202,15 +203,35 @@ class _ContactScreenState extends State<ContactScreen> {
             .eq('conversation_id', widget.conversationId)
             .eq('user_id', supabase.auth.currentUser?.id ?? '')
             .single(),
+        supabase
+            .from('conversations')
+            .select('screenshot_block')
+            .eq('id', widget.conversationId)
+            .maybeSingle(),
       ]);
-      final mu = results[1]['muted_until'] as String?;
+      final mu = results[1]?['muted_until'] as String?;
       if (!mounted) return;
       setState(() {
         _p = results[0];
         _muted = mu != null &&
             (mu == 'infinity' || (DateTime.tryParse(mu)?.isAfter(DateTime.now()) ?? false));
+        _screenshotBlock = results[2]?['screenshot_block'] as bool? ?? false;
       });
     } catch (_) {}
+  }
+
+  Future<void> _toggleScreenshotBlock(bool v) async {
+    setState(() => _screenshotBlock = v);
+    try {
+      await supabase.rpc('set_screenshot_block',
+          params: {'p_conv': widget.conversationId, 'p_block': v});
+    } catch (_) {
+      if (mounted) {
+        setState(() => _screenshotBlock = !v);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تعذّر الحفظ')));
+      }
+    }
   }
 
   Future<void> _toggleMute() async {
@@ -266,6 +287,14 @@ class _ContactScreenState extends State<ContactScreen> {
               final v = await pickDisappearing(context, widget.conversationId, _disappear);
               if (v != null && mounted) setState(() => _disappear = v == 0 ? null : v);
             },
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.screenshot_monitor_outlined, color: WaslColors.teal),
+            title: const Text('منع لقطات الشاشة'),
+            subtitle: const Text(
+                'يخفي هذه المحادثة من لقطات الشاشة ومعاينة التطبيقات على أندرويد'),
+            value: _screenshotBlock,
+            onChanged: _toggleScreenshotBlock,
           ),
           if (widget.onShowStarred != null)
             ListTile(
