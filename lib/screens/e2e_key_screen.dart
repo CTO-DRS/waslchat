@@ -114,7 +114,7 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           Icon(_mode == _Mode.reset ? Icons.warning_amber_rounded : Icons.lock_outline,
-              size: 56, color: _mode == _Mode.reset ? Colors.amber : WaslColors.teal),
+              size: 56, color: _mode == _Mode.reset ? context.wasl.warning : WaslColors.teal),
           const SizedBox(height: 16),
           Text(body, style: const TextStyle(fontSize: 15, height: 1.6)),
           const SizedBox(height: 20),
@@ -142,19 +142,19 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.08),
+                color: context.wasl.danger.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+                border: Border.all(color: context.wasl.danger.withValues(alpha: 0.5)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(children: [
-                    Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 22),
-                    SizedBox(width: 8),
+                  Row(children: [
+                    Icon(Icons.warning_amber_rounded, color: context.wasl.danger, size: 22),
+                    const SizedBox(width: 8),
                     Text('لا تُسترجع هذه الكلمة أبداً',
                         style: TextStyle(
-                            color: Colors.redAccent,
+                            color: context.wasl.danger,
                             fontWeight: FontWeight.bold,
                             fontSize: 15)),
                   ]),
@@ -180,7 +180,7 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
           ],
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+            Text(_error!, style: TextStyle(color: context.wasl.danger)),
           ],
           const SizedBox(height: 24),
           FilledButton(

@@ -41,7 +41,7 @@ Future<String?> showPinSetupDialog(BuildContext context) async {
           ),
           if (error != null) ...[
             const SizedBox(height: 10),
-            Text(error!, style: const TextStyle(color: Colors.redAccent)),
+            Text(error!, style: TextStyle(color: ctx.wasl.danger)),
           ],
         ]),
         actions: [
@@ -134,7 +134,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: WaslColors.darkBg,
+      backgroundColor: context.wasl.bg,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -160,7 +160,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
                   AppLockService.hasPin
                       ? 'أدخل رمز القفل للمتابعة'
                       : 'افتح بالبصمة أو رمز الجهاز',
-                  style: const TextStyle(color: Colors.white60),
+                  style: TextStyle(color: context.wasl.textFaint),
                 ),
                 const SizedBox(height: 28),
                 // نقاط الـPIN
@@ -178,8 +178,8 @@ class _AppLockScreenState extends State<AppLockScreen> {
                             shape: BoxShape.circle,
                             color: i < _pin.length
                                 ? WaslColors.teal
-                                : WaslColors.glass,
-                            border: Border.all(color: Colors.white24),
+                                : context.wasl.glass,
+                            border: Border.all(color: context.wasl.border),
                           ),
                         ),
                     ],
@@ -187,7 +187,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     Text(_error!,
-                        style: const TextStyle(color: Colors.redAccent)),
+                        style: TextStyle(color: context.wasl.danger)),
                   ],
                 ],
                 const SizedBox(height: 28),
@@ -274,14 +274,14 @@ class _Key extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: WaslColors.glass,
+      color: context.wasl.glass,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Center(
           child: label == '⌫'
-              ? const Icon(Icons.backspace_outlined, color: Colors.white70)
+              ? Icon(Icons.backspace_outlined, color: context.wasl.textSecondary)
               : Text(label,
                   style: const TextStyle(
                       fontSize: 24, fontWeight: FontWeight.w600)),

@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'screens/app_lock_screen.dart';
 import 'services/app_lock_service.dart';
+import 'services/deep_link_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
@@ -27,6 +28,10 @@ void main() {
     await PushService.init();
     // إعدادات قفل التطبيق (يبدأ مقفولاً إن كان مفعّلاً)
     await AppLockService.load();
+    // المظهر: الوضع (فاتح/داكن/النظام) وحجم الخط (المرحلة 1)
+    await ThemeService.load();
+    // روابط دعوة المجموعات app.waslchat://join/CODE
+    await DeepLinkService.init();
     _installCrashReporting();
     final uid = supabase.auth.currentUser?.id;
     if (uid != null) _setCrashUser(uid);
@@ -127,21 +132,32 @@ class WaslApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'وصل شات',
-      debugShowCheckedModeBanner: false,
-      theme: WaslTheme.light,
-      darkTheme: WaslTheme.dark,
-      themeMode: ThemeMode.dark,
-      locale: const Locale('ar'),
-      supportedLocales: const [Locale('ar'), Locale('en')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      navigatorKey: navigatorKey,
-      home: const AuthGate(),
+    // يستمع للوضع وحجم الخط معاً — التغيير من الإعدادات يسري فوراً بلا إعادة تشغيل
+    return ListenableBuilder(
+      listenable: Listenable.merge([ThemeService.mode, ThemeService.fontScale]),
+      builder: (context, _) => MaterialApp(
+        title: 'وصل شات',
+        debugShowCheckedModeBanner: false,
+        theme: WaslTheme.light,
+        darkTheme: WaslTheme.dark,
+        themeMode: ThemeService.mode.value,
+        locale: const Locale('ar'),
+        supportedLocales: const [Locale('ar'), Locale('en')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        navigatorKey: navigatorKey,
+        // تكبير الخط على مستوى التطبيق كله (شاشات ونوافذ حوارية)
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(ThemeService.fontScale.value),
+          ),
+          child: child!,
+        ),
+        home: const AuthGate(),
+      ),
     );
   }
 }

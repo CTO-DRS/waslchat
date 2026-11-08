@@ -9,6 +9,7 @@ import '../widgets/common.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
+import 'join_invite_screen.dart';
 import 'new_chat_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
@@ -118,7 +119,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   void _showNewSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -137,6 +138,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
             onTap: () {
               Navigator.pop(ctx);
               _open(const CreateGroupScreen());
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.link_rounded, color: WaslColors.violet),
+            title: const Text('الانضمام إلى مجموعة برمز دعوة'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _open(const JoinInviteScreen());
             },
           ),
         ]),
@@ -169,7 +178,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final archived = c['archived'] == true;
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -264,12 +273,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: visible.isEmpty && archivedCount == 0
-                  ? ListView(children: const [
-                      SizedBox(height: 160),
+                  ? ListView(children: [
+                      const SizedBox(height: 160),
                       Center(
                           child: Text('لا توجد محادثات بعد.\nاضغط ✏️ لبدء محادثة جديدة',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white60))),
+                              style: TextStyle(color: context.wasl.textFaint))),
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),
@@ -278,15 +287,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         if (!_showArchived && archivedCount > 0) {
                           if (i == 0) {
                             return ListTile(
-                              leading: const CircleAvatar(
+                              leading: CircleAvatar(
                                 radius: 26,
-                                backgroundColor: WaslColors.glass,
-                                child: Icon(Icons.archive_outlined, color: WaslColors.violet),
+                                backgroundColor: context.wasl.glass,
+                                child: const Icon(Icons.archive_outlined, color: WaslColors.violet),
                               ),
                               title: const Text('المؤرشفة',
                                   style: TextStyle(fontWeight: FontWeight.w700)),
                               trailing: Text('$archivedCount',
-                                  style: const TextStyle(color: Colors.white60)),
+                                  style: TextStyle(color: context.wasl.textFaint)),
                               onTap: () => setState(() => _showArchived = true),
                             );
                           }
@@ -318,7 +327,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                           width: 14,
                                           height: 14,
                                           decoration: BoxDecoration(
-                                            color: Colors.greenAccent.shade400,
+                                            color: context.wasl.success,
                                             shape: BoxShape.circle,
                                             border: Border.all(
                                                 color: Theme.of(context).scaffoldBackgroundColor,
@@ -337,18 +346,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             ),
                             if (muted) ...[
                               const SizedBox(width: 4),
-                              const Icon(Icons.notifications_off_outlined,
-                                  size: 16, color: Colors.white54),
+                              Icon(Icons.notifications_off_outlined,
+                                  size: 16, color: context.wasl.textFaint),
                             ],
                             if (pinned) ...[
                               const SizedBox(width: 4),
-                              const Icon(Icons.push_pin, size: 15, color: Colors.white54),
+                              Icon(Icons.push_pin, size: 15, color: context.wasl.textFaint),
                             ],
                           ]),
                           onLongPress: () => _chatMenu(c),
                           subtitle: Text(_preview(c), maxLines: 1, overflow: TextOverflow.ellipsis),
                           subtitleTextStyle: unread > 0
-                              ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)
+                              ? TextStyle(
+                                  color: context.wasl.textPrimary, fontWeight: FontWeight.w600)
                               : null,
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -356,7 +366,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             children: [
                               Text(_time(c['last_at'] as String?),
                                   style: TextStyle(
-                                      color: unread > 0 ? WaslColors.teal : Colors.white54,
+                                      color: unread > 0 ? WaslColors.teal : context.wasl.textFaint,
                                       fontSize: 12)),
                               if (unread > 0) ...[
                                 const SizedBox(height: 4),
@@ -364,12 +374,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
                                     gradient: muted ? null : WaslColors.gradient,
-                                    color: muted ? Colors.white24 : null,
+                                    color: muted ? context.wasl.border : null,
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(unread > 99 ? '99+' : '$unread',
-                                      style: const TextStyle(
-                                          color: Colors.white,
+                                      style: TextStyle(
+                                          color: muted ? context.wasl.textPrimary : Colors.white,
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold)),
                                 ),

@@ -58,7 +58,7 @@ Future<(String, String)?> askNameAndDescription(
   return showDialog<(String, String)>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       title: Text(title),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: name, autofocus: true, decoration: InputDecoration(hintText: nameHint)),
@@ -95,7 +95,10 @@ class SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
         child: Text(text,
-            style: const TextStyle(color: Colors.white60, fontWeight: FontWeight.w700, fontSize: 13)),
+            style: TextStyle(
+                color: context.wasl.textFaint,
+                fontWeight: FontWeight.w700,
+                fontSize: 13)),
       );
 }
 

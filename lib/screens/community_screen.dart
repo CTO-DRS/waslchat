@@ -115,7 +115,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(shortTime(r['last_at'] as String?),
-                            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                            style: TextStyle(color: context.wasl.textFaint, fontSize: 12)),
                         const SizedBox(height: 4),
                         UnreadBadge(unread),
                       ],

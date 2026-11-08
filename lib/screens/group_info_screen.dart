@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../config.dart';
 import '../services/e2e_service.dart';
@@ -32,6 +34,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _screenshotBlock = false;
+
+  // رابط الدعوة (المرحلة 1) — للمالك والمشرفين فقط
+  String? _inviteCode;
+  bool _inviteLoading = false;
+  bool _showQr = false;
 
   bool get _isAdmin => _myRole == 'owner' || _myRole == 'admin';
 
@@ -79,6 +86,151 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (mounted) setState(() => _loading = false);
       _snack('تعذّر تحميل معلومات المجموعة');
     }
+    // رابط الدعوة يُحمّل منفصلاً — تعطّله لا يفسد بقية الشاشة
+    unawaited(_loadInvite());
+  }
+
+  /// يجلب الرمز النشط إن كنت مالكاً أو مشرفاً
+  Future<void> _loadInvite() async {
+    if (!_isAdmin) return;
+    if (mounted) setState(() => _inviteLoading = true);
+    try {
+      final r = await supabase
+          .rpc('group_get_invite', params: {'p_conv': widget.conversationId});
+      if (mounted) {
+        setState(() {
+          _inviteCode = r as String?;
+          _inviteLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _inviteLoading = false);
+    }
+  }
+
+  Future<void> _createInvite() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final r = await supabase.rpc('group_create_invite',
+          params: {'p_conv': widget.conversationId});
+      if (mounted) {
+        setState(() {
+          _inviteCode = r as String?;
+          _showQr = false;
+        });
+        _snack('تم إنشاء رابط الدعوة — انسخه أو اعرض رمز QR');
+      }
+    } catch (_) {
+      _snack('تعذّر إنشاء رابط الدعوة');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _revokeInvite() async {
+    final ok = await _confirm(
+        'إبطال رابط الدعوة؟',
+        'لن يستطيع أي شخص الانضمام بالرابط القديم، ويمكنك إنشاء رابط جديد في أي وقت.',
+        'إبطال');
+    if (!ok || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await supabase.rpc('group_revoke_invite',
+          params: {'p_conv': widget.conversationId});
+      if (mounted) {
+        setState(() {
+          _inviteCode = null;
+          _showQr = false;
+        });
+      }
+    } catch (_) {
+      _snack('تعذّر إبطال الرابط');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// نسخ نص جاهز للمشاركة: الرمز + الرابط العميق
+  void _copyInvite() {
+    final code = _inviteCode;
+    if (code == null) return;
+    Clipboard.setData(ClipboardData(
+        text: 'انضم إلى مجموعة «$_title» على وصل شات\n'
+            'app.waslchat://join/$code\n'
+            'أو أدخل الرمز في التطبيق: $code'));
+    _snack('نُسخ رابط الدعوة — شاركه مع من تثق بهم');
+  }
+
+  /// قسم رابط الدعوة: إنشاء ونسخ وQR وإبطال (المالك والمشرفون)
+  Widget _inviteSection() {
+    final code = _inviteCode;
+    return Column(children: [
+      ListTile(
+        leading: CircleAvatar(
+          backgroundColor: context.wasl.violetSoft,
+          child: const Icon(Icons.link_rounded, color: WaslColors.violet),
+        ),
+        title: const Text('رابط الدعوة'),
+        subtitle: Text(_inviteLoading
+            ? '…'
+            : code == null
+                ? 'أنشئ رابطاً وشاركه لينضم الأشخاص بلا بحث'
+                : 'الرمز: $code'),
+        trailing: _inviteLoading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : code == null
+                ? TextButton(
+                    onPressed: _busy ? null : _createInvite,
+                    child: const Text('إنشاء'))
+                : Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(
+                      tooltip: _showQr ? 'إخفاء رمز QR' : 'عرض رمز QR',
+                      icon: Icon(_showQr
+                          ? Icons.qr_code_2_rounded
+                          : Icons.qr_code_rounded),
+                      onPressed: () => setState(() => _showQr = !_showQr),
+                    ),
+                    IconButton(
+                      tooltip: 'نسخ الرابط',
+                      icon: const Icon(Icons.copy_rounded),
+                      onPressed: _copyInvite,
+                    ),
+                    IconButton(
+                      tooltip: 'إبطال الرابط',
+                      icon: Icon(Icons.link_off_rounded,
+                          color: context.wasl.danger),
+                      onPressed: _busy ? null : _revokeInvite,
+                    ),
+                  ]),
+      ),
+      if (code != null && _showQr)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: Column(children: [
+            // خلفية بيضاء إلزامية لقراءة QR في الوضعين
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: QrImageView(
+                  data: 'app.waslchat://join/$code',
+                  size: 190,
+                  backgroundColor: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            Text('امسح الرمز بكاميرا الجوال لفتح وصل شات والانضمام',
+                textAlign: TextAlign.center,
+                style:
+                    TextStyle(fontSize: 12, color: context.wasl.textFaint)),
+          ]),
+        ),
+    ]);
   }
 
   String _nameOf(Map<String, dynamic> m) {
@@ -205,7 +357,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final picked = await showModalBottomSheet<List<String>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (_) => _AddMembersSheet(exclude: existing),
@@ -231,9 +383,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (_myRole == 'owner' && role == 'admin')
         const PopupMenuItem(value: 'demote', child: Text('إلغاء الإشراف')),
       if (canRemove)
-        const PopupMenuItem(
+        PopupMenuItem(
             value: 'remove',
-            child: Text('إزالة من المجموعة', style: TextStyle(color: Colors.redAccent))),
+            child: Text('إزالة من المجموعة',
+                style: TextStyle(color: context.wasl.danger))),
     ];
     if (items.isEmpty) return null;
     return PopupMenuButton<String>(
@@ -290,7 +443,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ]),
                   Text('${_members.length} أعضاء',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white60)),
+                      style: TextStyle(color: context.wasl.textFaint)),
                   const SizedBox(height: 12),
                   ListTile(
                     leading: const Icon(Icons.lock_outline, color: WaslColors.teal),
@@ -317,10 +470,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       title: const Text('إضافة أعضاء'),
                       onTap: _busy ? null : _addMembers,
                     ),
+                  if (_isAdmin) _inviteSection(),
                   for (final m in _members)
                     ListTile(
                       leading: CircleAvatar(
-                        backgroundColor: WaslColors.darkSurface,
+                        backgroundColor: context.wasl.surface,
                         child: Text(_nameOf(m).isNotEmpty ? _nameOf(m).characters.first : '?'),
                       ),
                       title: Text(m['user_id'] == _me ? '${_nameOf(m)} (أنت)' : _nameOf(m)),
@@ -332,9 +486,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     ),
                   const Divider(),
                   ListTile(
-                    leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                    title: const Text('مغادرة المجموعة',
-                        style: TextStyle(color: Colors.redAccent)),
+                    leading: Icon(Icons.logout_rounded, color: context.wasl.danger),
+                    title: Text('مغادرة المجموعة',
+                        style: TextStyle(color: context.wasl.danger)),
                     onTap: _busy ? null : _leave,
                   ),
                 ],

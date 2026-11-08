@@ -133,7 +133,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(shortTime(c['last_at'] as String?),
-                              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                              style: TextStyle(color: context.wasl.textFaint, fontSize: 12)),
                           const SizedBox(height: 4),
                           UnreadBadge(unread),
                         ],
@@ -143,10 +143,10 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                           ? null
                           : () => showModalBottomSheet(
                                 context: context,
-                                backgroundColor: WaslColors.darkSurface,
+                                backgroundColor: context.wasl.surface,
                                 builder: (ctx) => SafeArea(
                                   child: ListTile(
-                                    leading: const Icon(Icons.logout, color: Colors.redAccent),
+                                    leading: Icon(Icons.logout, color: ctx.wasl.danger),
                                     title: const Text('إلغاء المتابعة'),
                                     onTap: () {
                                       Navigator.pop(ctx);
@@ -170,11 +170,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                     ),
                   ),
                   if (_discover.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
+                    Padding(
+                      padding: const EdgeInsets.all(24),
                       child: Center(
                           child: Text('لا توجد قنوات جديدة. أنشئ قناتك بزر +',
-                              style: TextStyle(color: Colors.white60))),
+                              style: TextStyle(color: context.wasl.textFaint))),
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _icon(),

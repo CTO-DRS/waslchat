@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../theme.dart';
+
 /// تُحمّل بايتات الوسيط (بعد فك التشفير إن كان مشفّراً)
 typedef MediaLoader = Future<Uint8List?> Function();
 
@@ -39,11 +41,12 @@ class _ImageBubbleState extends State<ImageBubble> {
             height: 120,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: context.wasl.glass,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Text('🔒 تعذّر فك تشفير الصورة',
-                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            child: Text('🔒 تعذّر فك تشفير الصورة',
+                style: TextStyle(
+                    color: context.wasl.textSecondary, fontSize: 13)),
           );
         }
         return GestureDetector(
@@ -145,7 +148,7 @@ class _VoiceBubbleState extends State<VoiceBubble> {
             IconButton(
               onPressed: _toggle,
               icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white, size: 30),
+                  color: context.wasl.textPrimary, size: 30),
             ),
             SizedBox(
               width: 140,
@@ -167,13 +170,14 @@ class _VoiceBubbleState extends State<VoiceBubble> {
                         child: LinearProgressIndicator(
                           value: value,
                           minHeight: 4,
-                          backgroundColor: Colors.white24,
-                          color: Colors.white,
+                          backgroundColor: context.wasl.border,
+                          color: context.wasl.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(_fmt(playing ? pos : total),
-                          style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                          style: TextStyle(
+                              color: context.wasl.textSecondary, fontSize: 11)),
                     ],
                   );
                 },
