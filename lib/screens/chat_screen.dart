@@ -388,7 +388,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final created = DateTime.parse(m['created_at'] as String);
     final read = _othersReadUpTo != null && !created.isAfter(_othersReadUpTo!);
     return Icon(read ? Icons.done_all_rounded : Icons.done_rounded,
-        size: 15, color: read ? const Color(0xFF7DF9FF) : Colors.white70);
+        size: 15,
+        color: read
+            ? context.wasl.readReceipt
+            : context.wasl.onBubbleMine.withValues(alpha: 0.65));
   }
 
   @override
@@ -492,8 +495,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: QrImageView(data: number, size: 120),
               ),
               const SizedBox(height: 8),
-              const Text('أو قارن الـQR الظاهر عند الطرفين بصرياً',
-                  style: TextStyle(fontSize: 12, color: Colors.white60)),
+              Text('أو قارن الـQR الظاهر عند الطرفين بصرياً',
+                  style:
+                      TextStyle(fontSize: 12, color: context.wasl.textFaint)),
             ],
           ]),
         ),
@@ -748,7 +752,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _showAttachSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -756,8 +760,8 @@ class _ChatScreenState extends State<ChatScreen> {
           // وضع «عرض مرة واحدة» (المرحلة 2): الوسيطة التالية صور/فيديو تُعرض مرة واحدة
           StatefulBuilder(
             builder: (ctx, setSheet) => SwitchListTile(
-              secondary: const Icon(Icons.visibility_off_outlined,
-                  color: Colors.redAccent),
+              secondary: Icon(Icons.visibility_off_outlined,
+                  color: context.wasl.danger),
               title: const Text('عرض مرة واحدة'),
               subtitle: const Text(
                   'الصورة أو الفيديو التالي لا تُفتح إلا مرة، ثم يُحذف ملفها من الخادم'),
@@ -792,7 +796,8 @@ class _ChatScreenState extends State<ChatScreen> {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.insert_drive_file_outlined, color: Colors.amber),
+            leading: Icon(Icons.insert_drive_file_outlined,
+                color: context.wasl.warning),
             title: const Text('ملف'),
             subtitle: const Text('PDF، مستندات، وغيرها حتى 24 ميغابايت'),
             onTap: () {
@@ -897,18 +902,35 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Widget _body(Map<String, dynamic> m) {
+  /// لون النص الأساسي داخل الفقاعة: رسائلي أبيض دائماً (onBubbleMine)،
+  /// ورسائل الطرف الآخر تتبع اللوحة
+  Color _bubbleText(bool mine) =>
+      mine ? context.wasl.onBubbleMine : context.wasl.textPrimary;
+
+  /// النص الباهت داخل فقاعتي: أبيض بشفافية، وللطرف الآخر حسب اللوحة
+  Color _bubbleFaint(bool mine) => mine
+      ? context.wasl.onBubbleMine.withValues(alpha: 0.65)
+      : context.wasl.textFaint;
+
+  Color _bubbleSecondary(bool mine) => mine
+      ? context.wasl.onBubbleMine.withValues(alpha: 0.65)
+      : context.wasl.textSecondary;
+
+  Widget _body(Map<String, dynamic> m, {required bool mine}) {
     if (m['deleted_at'] != null) {
-      return const Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.block, size: 16, color: Colors.white60),
-        SizedBox(width: 6),
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.block, size: 16, color: _bubbleFaint(mine)),
+        const SizedBox(width: 6),
         Text('حُذفت هذه الرسالة',
-            style: TextStyle(color: Colors.white60, fontStyle: FontStyle.italic)),
+            style: TextStyle(
+                color: _bubbleFaint(mine), fontStyle: FontStyle.italic)),
       ]);
     }
     switch (m['type'] as String? ?? 'text') {
       case 'image':
-        if (m['view_once'] == true) return _viewOnceBubble(m, isVideo: false);
+        if (m['view_once'] == true) {
+          return _viewOnceBubble(m, isVideo: false, mine: mine);
+        }
         return ImageBubble(loader: () => _mediaBytes(m['media_url'] as String));
       case 'voice':
         return VoiceBubble(
@@ -918,7 +940,7 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'file':
         final isVideo = m['type'] == 'video';
         if (isVideo && m['view_once'] == true) {
-          return _viewOnceBubble(m, isVideo: true);
+          return _viewOnceBubble(m, isVideo: true, mine: mine);
         }
         final meta = _metaOf(m);
         final name = (meta?['name'] as String?) ?? (isVideo ? 'فيديو' : 'ملف');
@@ -928,25 +950,28 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.18),
+              color: context.wasl.glass,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(isVideo ? Icons.play_circle_fill : Icons.insert_drive_file_rounded,
-                  size: 36, color: Colors.white),
+                  size: 36, color: _bubbleText(mine)),
               const SizedBox(width: 10),
               Flexible(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      style: TextStyle(
+                          color: _bubbleText(mine),
+                          fontWeight: FontWeight.w600)),
                   Text(
                       [
                         isVideo ? 'فيديو' : 'ملف',
                         _sizeLabel((meta?['size'] as num?)?.toInt()),
                       ].where((e) => e.isNotEmpty).join(' · '),
-                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      style:
+                          TextStyle(color: _bubbleSecondary(mine), fontSize: 12)),
                 ]),
               ),
             ]),
@@ -955,7 +980,7 @@ class _ChatScreenState extends State<ChatScreen> {
       default:
         final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
         return Text(text,
-            style: const TextStyle(color: Colors.white, fontSize: 16));
+            style: TextStyle(color: _bubbleText(mine), fontSize: 16));
     }
   }
 
@@ -964,20 +989,22 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _onceViewed(Map<String, dynamic> m) =>
       m['media_url'] == null || _onceOpened.contains(m['id'] as String);
 
-  Widget _viewOnceBubble(Map<String, dynamic> m, {required bool isVideo}) {
+  Widget _viewOnceBubble(Map<String, dynamic> m,
+      {required bool isVideo, required bool mine}) {
     if (_onceViewed(m)) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.18),
+          color: context.wasl.glass,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(isVideo ? Icons.videocam_off_outlined : Icons.photo_outlined,
-              size: 22, color: Colors.white54),
+              size: 22, color: _bubbleFaint(mine)),
           const SizedBox(width: 8),
-          const Text('عرض مرة واحدة · تم العرض',
-              style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
+          Text('عرض مرة واحدة · تم العرض',
+              style: TextStyle(
+                  color: _bubbleFaint(mine), fontStyle: FontStyle.italic)),
         ]),
       );
     }
@@ -987,7 +1014,7 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.18),
+          color: context.wasl.glass,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -996,22 +1023,22 @@ class _ChatScreenState extends State<ChatScreen> {
             height: 34,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.redAccent, width: 2),
+              border: Border.all(color: context.wasl.danger, width: 2),
             ),
             alignment: Alignment.center,
             child: Text('1',
-                style: const TextStyle(
-                    color: Colors.redAccent,
+                style: TextStyle(
+                    color: context.wasl.danger,
                     fontWeight: FontWeight.w800,
                     fontSize: 16)),
           ),
           const SizedBox(width: 10),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(isVideo ? 'فيديو · عرض مرة واحدة' : 'صورة · عرض مرة واحدة',
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
-            const Text('اضغط للعرض — تُفتح مرة واحدة فقط',
-                style: TextStyle(color: Colors.white54, fontSize: 12)),
+                style: TextStyle(
+                    color: _bubbleText(mine), fontWeight: FontWeight.w600)),
+            Text('اضغط للعرض — تُفتح مرة واحدة فقط',
+                style: TextStyle(color: _bubbleFaint(mine), fontSize: 12)),
           ]),
         ]),
       ),
@@ -1052,7 +1079,7 @@ class _ChatScreenState extends State<ChatScreen> {
       } else {
         await showDialog<void>(
           context: context,
-          barrierColor: Colors.black,
+          barrierColor: context.wasl.barrier,
           builder: (c) => GestureDetector(
             onTap: () => Navigator.pop(c),
             child: Container(
@@ -1128,7 +1155,7 @@ class _ChatScreenState extends State<ChatScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1234,7 +1261,8 @@ class _ChatScreenState extends State<ChatScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
           FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              style: FilledButton.styleFrom(
+                  backgroundColor: context.wasl.danger),
               onPressed: () => Navigator.pop(c, true),
               child: const Text('حذف')),
         ],
@@ -1264,7 +1292,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final target = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1344,7 +1372,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final myReaction = _reactions[m['id']]?[_me];
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.wasl.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1365,7 +1393,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: myReaction == e ? WaslColors.glass : null,
+                        color: myReaction == e ? context.wasl.glass : null,
                       ),
                       child: Text(e, style: const TextStyle(fontSize: 26)),
                     ),
@@ -1399,7 +1427,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ListTile(
               leading: Icon(
                   _stars.contains(m['id']) ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: Colors.amber),
+                  color: context.wasl.warning),
               title: Text(_stars.contains(m['id']) ? 'إزالة النجمة' : 'تمييز بنجمة'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1435,8 +1463,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           if (mine)
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title: const Text('حذف للجميع', style: TextStyle(color: Colors.redAccent)),
+              leading: Icon(Icons.delete_outline, color: context.wasl.danger),
+              title: Text('حذف للجميع',
+                  style: TextStyle(color: context.wasl.danger)),
               onTap: () {
                 Navigator.pop(ctx);
                 _delete(m);
@@ -1444,9 +1473,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           if (!mine)
             ListTile(
-              leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-              title: const Text('إبلاغ عن الرسالة',
-                  style: TextStyle(color: Colors.orangeAccent)),
+              leading: Icon(Icons.flag_outlined, color: context.wasl.warning),
+              title: Text('إبلاغ عن الرسالة',
+                  style: TextStyle(color: context.wasl.warning)),
               onTap: () {
                 Navigator.pop(ctx);
                 _report(m);
@@ -1502,7 +1531,7 @@ class _ChatScreenState extends State<ChatScreen> {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
+        color: context.wasl.glass,
         borderRadius: BorderRadius.circular(12),
         border: const BorderDirectional(start: BorderSide(color: WaslColors.teal, width: 3)),
       ),
@@ -1514,7 +1543,7 @@ class _ChatScreenState extends State<ChatScreen> {
         Text(r == null ? 'رسالة غير متاحة' : _previewOf(r),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            style: TextStyle(color: _bubbleSecondary(mine), fontSize: 13)),
       ]),
     );
   }
@@ -1537,9 +1566,11 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: mineEmoji == e.key ? WaslColors.teal.withValues(alpha: 0.35) : WaslColors.darkSurface,
+                color: mineEmoji == e.key
+                    ? WaslColors.teal.withValues(alpha: 0.35)
+                    : context.wasl.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
+                border: Border.all(color: context.wasl.border),
               ),
               child: Text(e.value > 1 ? '${e.key} ${e.value}' : e.key,
                   style: const TextStyle(fontSize: 13)),
@@ -1558,7 +1589,7 @@ class _ChatScreenState extends State<ChatScreen> {
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
       decoration: BoxDecoration(
-        color: WaslColors.glass,
+        color: context.wasl.glass,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(children: [
@@ -1572,7 +1603,8 @@ class _ChatScreenState extends State<ChatScreen> {
             Text(_previewOf(m),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                style:
+                    TextStyle(color: context.wasl.textSecondary, fontSize: 13)),
           ]),
         ),
         IconButton(
@@ -1651,7 +1683,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 Text(_statusLine()!,
                     style: TextStyle(
                         fontSize: 12,
-                        color: _typing.isNotEmpty ? WaslColors.teal : Colors.white60)),
+                        color: _typing.isNotEmpty
+                            ? WaslColors.teal
+                            : context.wasl.textFaint)),
             ]),
           ),
          ]),
@@ -1674,7 +1708,7 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: _showSafetyNumber,
               icon: Icon(Icons.verified_user_outlined,
                   color: E2eService.peerKeyChanged(widget.otherId!)
-                      ? Colors.amber
+                      ? context.wasl.warning
                       : WaslColors.teal),
             ),
           IconButton(
@@ -1705,7 +1739,7 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           if (_disappear != null || _starredOnly)
             Material(
-              color: WaslColors.glass,
+              color: context.wasl.glass,
               child: InkWell(
                 onTap: _starredOnly
                     ? () => setState(() => _starredOnly = false)
@@ -1714,7 +1748,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Row(children: [
                     Icon(_starredOnly ? Icons.star_rounded : Icons.timer_outlined,
-                        size: 18, color: _starredOnly ? Colors.amber : WaslColors.violet),
+                        size: 18,
+                        color: _starredOnly
+                            ? context.wasl.warning
+                            : WaslColors.violet),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1729,14 +1766,15 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           if (_showSafety && E2eService.peerKeyChanged(widget.otherId!))
             Material(
-              color: const Color(0x33FFC107),
+              color: context.wasl.warningSoft,
               child: InkWell(
                 onTap: _showSafetyNumber,
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(children: [
-                    Icon(Icons.warning_amber_rounded, color: Colors.amber),
-                    SizedBox(width: 10),
+                    Icon(Icons.warning_amber_rounded,
+                        color: context.wasl.warning),
+                    const SizedBox(width: 10),
                     Expanded(
                         child: Text(
                             'تغيّر رمز الأمان لهذا الشخص (ربما غيّر جواله). اضغط للتحقق.')),
@@ -1763,9 +1801,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     : all;
                 if (_starredOnly && base.isEmpty) {
                   _scheduleDecrypt(all);
-                  return const Center(
+                  return Center(
                       child: Text('لا رسائل مميزة بنجمة هنا',
-                          style: TextStyle(color: Colors.white60)));
+                          style: TextStyle(color: context.wasl.textFaint)));
                 }
                 final msgs = q.isEmpty
                     ? base
@@ -1777,8 +1815,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       }).toList();
                 if (q.isNotEmpty && msgs.isEmpty) {
                   _scheduleDecrypt(all);
-                  return const Center(
-                      child: Text('لا نتائج', style: TextStyle(color: Colors.white60)));
+                  return Center(
+                      child: Text('لا نتائج',
+                          style: TextStyle(color: context.wasl.textFaint)));
                 }
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
                 _scheduleDecrypt(all);
@@ -1805,7 +1844,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             maxWidth: MediaQuery.of(context).size.width * 0.75),
                         decoration: BoxDecoration(
                           gradient: mine ? WaslColors.gradient : null,
-                          color: mine ? null : WaslColors.darkSurface,
+                          color: mine ? null : context.wasl.bubbleOther,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Column(
@@ -1823,25 +1862,29 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             if (replyId != null && m['deleted_at'] == null)
                               _quote(replyId, mine),
-                            _body(m),
+                            _body(m, mine: mine),
                             if (chips != null) chips,
                             const SizedBox(height: 2),
                             Row(mainAxisSize: MainAxisSize.min, children: [
                               if (_stars.contains(m['id'])) ...[
-                                const Icon(Icons.star_rounded, size: 13, color: Colors.amber),
+                                Icon(Icons.star_rounded,
+                                    size: 13, color: context.wasl.warning),
                                 const SizedBox(width: 3),
                               ],
                               if (m['expires_at'] != null) ...[
-                                const Icon(Icons.timer_outlined, size: 12, color: Colors.white60),
+                                Icon(Icons.timer_outlined,
+                                    size: 12, color: _bubbleFaint(mine)),
                                 const SizedBox(width: 3),
                               ],
                               if (m['edited_at'] != null && m['deleted_at'] == null) ...[
-                                const Text('معدّلة',
-                                    style: TextStyle(color: Colors.white60, fontSize: 11)),
+                                Text('معدّلة',
+                                    style: TextStyle(
+                                        color: _bubbleFaint(mine), fontSize: 11)),
                                 const SizedBox(width: 4),
                               ],
                               Text(_time(m['created_at'] as String),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                                  style: TextStyle(
+                                      color: _bubbleSecondary(mine), fontSize: 11)),
                               if (mine) ...[const SizedBox(width: 4), _ticks(m)],
                             ]),
                           ],
@@ -1864,11 +1907,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 margin: const EdgeInsets.fromLTRB(12, 6, 12, 12),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: WaslColors.glass,
+                  color: context.wasl.glass,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Text('النشر هنا للمشرفين فقط',
-                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+                child: Text('النشر هنا للمشرفين فقط',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.wasl.textFaint)),
               ),
             )
           else
@@ -1888,15 +1932,17 @@ class _ChatScreenState extends State<ChatScreen> {
                           height: 48,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: WaslColors.glass,
+                            color: context.wasl.glass,
                             borderRadius: BorderRadius.circular(18),
                           ),
                           child: Row(children: [
-                            const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 14),
+                            Icon(Icons.fiber_manual_record,
+                                color: context.wasl.danger, size: 14),
                             const SizedBox(width: 8),
                             Text('جارٍ التسجيل ${_recLabel()}'),
                             const Spacer(),
-                            const Text('اترك للإرسال', style: TextStyle(color: Colors.white54)),
+                            Text('اترك للإرسال',
+                                style: TextStyle(color: context.wasl.textFaint)),
                           ]),
                         )
                       : TextField(
@@ -1929,7 +1975,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: _recording ? null : WaslColors.gradient,
-                            color: _recording ? Colors.redAccent : null,
+                            color: _recording ? context.wasl.danger : null,
                           ),
                           child: const Icon(Icons.mic_rounded, color: Colors.white),
                         ),

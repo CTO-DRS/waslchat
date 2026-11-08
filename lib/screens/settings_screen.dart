@@ -26,13 +26,15 @@ class SettingsScreen extends StatelessWidget {
         children: [
           const _ProfileCard(),
           const SizedBox(height: 16),
+          const _AppearanceCard(),
+          const SizedBox(height: 16),
           const ListTile(
             leading: Icon(Icons.lock_outline, color: WaslColors.teal),
             title: Text('الرسائل محمية'),
             subtitle: Text('صلاحيات وصول على مستوى الصفوف (RLS)'),
           ),
           ListTile(
-            leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
+            leading: Icon(Icons.star_outline_rounded, color: context.wasl.warning),
             title: const Text('الرسائل المميزة بنجمة'),
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
@@ -60,7 +62,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => openChangePassword(context),
           ),
           ListTile(
-            leading: const Icon(Icons.logout, color: Colors.redAccent),
+            leading: Icon(Icons.logout, color: context.wasl.danger),
             title: const Text('تسجيل الخروج'),
             onTap: () async {
               // بلا نسخة احتياطية سيضيع المفتاح عند الخروج: ننبّه أولاً
@@ -98,10 +100,70 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
           Center(
               child: Text('وصل شات · الإصدار ${AppConfig.versionName}',
-                  style: const TextStyle(color: Colors.white38))),
+                  style: TextStyle(color: context.wasl.textFaint))),
         ],
       ),
     );
+  }
+}
+
+/// بطاقة المظهر (بند المرحلة 1: الوضع الفاتح وحجم الخط)
+class _AppearanceCard extends StatelessWidget {
+  const _AppearanceCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ListTile(
+        leading: Icon(Icons.palette_outlined, color: context.wasl.accent),
+        title: const Text('المظهر',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        subtitle: const Text('الوضع وحجم الخط — محفوظ على جهازك'),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: ValueListenableBuilder<ThemeMode>(
+          valueListenable: ThemeService.mode,
+          builder: (context, mode, _) => SegmentedButton<ThemeMode>(
+            segments: const [
+              ButtonSegment(
+                  value: ThemeMode.light,
+                  label: Text('فاتح'),
+                  icon: Icon(Icons.light_mode_outlined, size: 18)),
+              ButtonSegment(
+                  value: ThemeMode.dark,
+                  label: Text('داكن'),
+                  icon: Icon(Icons.dark_mode_outlined, size: 18)),
+              ButtonSegment(
+                  value: ThemeMode.system,
+                  label: Text('النظام'),
+                  icon: Icon(Icons.settings_suggest_outlined, size: 18)),
+            ],
+            selected: {mode},
+            onSelectionChanged: (s) => ThemeService.setMode(s.first),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: ValueListenableBuilder<double>(
+          valueListenable: ThemeService.fontScale,
+          builder: (context, scale, _) => Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: ThemeService.fontLevels.entries
+                .map((e) => ChoiceChip(
+                      label: Text(e.key,
+                          style: TextStyle(fontSize: 13 * e.value)),
+                      selected: scale == e.value,
+                      onSelected: (_) => ThemeService.setFontScale(e.value),
+                    ))
+                .toList(),
+          ),
+        ),
+      ),
+    ]);
   }
 }
 
@@ -142,7 +204,7 @@ class _AppLockCardState extends State<AppLockCard> {
                   child: const Text('إلغاء')),
               FilledButton(
                   style: FilledButton.styleFrom(
-                      backgroundColor: Colors.redAccent),
+                      backgroundColor: context.wasl.danger),
                   onPressed: () => Navigator.pop(c, true),
                   child: const Text('أوقف القفل')),
             ],
@@ -276,7 +338,7 @@ class _ProfileCardState extends State<_ProfileCard> {
     final name = (_p?['display_name'] ?? _p?['username'] ?? 'مستخدم') as String;
     final bio = _p?['bio'] as String?;
     return Material(
-      color: WaslColors.glass,
+      color: context.wasl.glass,
       borderRadius: BorderRadius.circular(22),
       child: InkWell(
         borderRadius: BorderRadius.circular(22),
@@ -299,10 +361,10 @@ class _ProfileCardState extends State<_ProfileCard> {
                         : (supabase.auth.currentUser?.email ?? ''),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white60)),
+                    style: TextStyle(color: context.wasl.textFaint)),
               ]),
             ),
-            const Icon(Icons.edit_outlined, color: Colors.white54),
+            Icon(Icons.edit_outlined, color: context.wasl.textFaint),
           ]),
         ),
       ),

@@ -21,7 +21,7 @@ String disappearLabel(int? s) {
 Future<int?> pickDisappearing(BuildContext context, String convId, int? current) async {
   final picked = await showModalBottomSheet<int>(
     context: context,
-    backgroundColor: WaslColors.darkSurface,
+    backgroundColor: context.wasl.surface,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (ctx) => SafeArea(
@@ -129,7 +129,7 @@ class _ContactScreenState extends State<ContactScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
           FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              style: FilledButton.styleFrom(backgroundColor: c.wasl.danger),
               onPressed: () => Navigator.pop(c, true),
               child: const Text('حظر')),
         ],
@@ -261,13 +261,13 @@ class _ContactScreenState extends State<ContactScreen> {
           if (_p != null)
             Center(
                 child: Text('@${_p!['username']}',
-                    style: const TextStyle(color: Colors.white60))),
+                    style: TextStyle(color: context.wasl.textFaint))),
           if (bio != null && bio.isNotEmpty) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                  color: WaslColors.glass, borderRadius: BorderRadius.circular(18)),
+                  color: context.wasl.glass, borderRadius: BorderRadius.circular(18)),
               child: Text(bio),
             ),
           ],
@@ -298,7 +298,7 @@ class _ContactScreenState extends State<ContactScreen> {
           ),
           if (widget.onShowStarred != null)
             ListTile(
-              leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
+              leading: Icon(Icons.star_outline_rounded, color: context.wasl.warning),
               title: const Text('الرسائل المميزة بنجمة'),
               onTap: () {
                 Navigator.pop(context);
@@ -314,18 +314,18 @@ class _ContactScreenState extends State<ContactScreen> {
           const Divider(height: 32),
           ListTile(
             leading: Icon(_blockedByMe ? Icons.lock_open_rounded : Icons.block_rounded,
-                color: _blockedByMe ? WaslColors.teal : Colors.redAccent),
+                color: _blockedByMe ? WaslColors.teal : context.wasl.danger),
             title: Text(_blockedByMe ? 'إلغاء الحظر' : 'حظر المستخدم',
-                style: TextStyle(color: _blockedByMe ? null : Colors.redAccent)),
+                style: TextStyle(color: _blockedByMe ? null : context.wasl.danger)),
             subtitle: _blockedByMe
                 ? const Text('يمكنه مراسلتك في المحادثة الفردية من جديد')
                 : const Text('يمنعه من مراسلتك هنا ومن ظهورك له في البحث'),
             onTap: _toggleBlock,
           ),
           ListTile(
-            leading: const Icon(Icons.flag_outlined, color: Colors.orangeAccent),
-            title: const Text('إبلاغ عن المستخدم',
-                style: TextStyle(color: Colors.orangeAccent)),
+            leading: Icon(Icons.flag_outlined, color: context.wasl.warning),
+            title: Text('إبلاغ عن المستخدم',
+                style: TextStyle(color: context.wasl.warning)),
             subtitle: const Text('يُراجع البلاغ يدوياً من فريق التطبيق'),
             onTap: _reportUser,
           ),

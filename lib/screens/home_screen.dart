@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/deep_link_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
@@ -10,6 +11,7 @@ import 'channels_screen.dart';
 import 'chats_screen.dart';
 import 'communities_screen.dart';
 import 'e2e_key_screen.dart';
+import 'join_invite_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -27,14 +29,26 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
-    // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
+    // رابط دعوة فُتح به التطبيق (app.waslchat://join/CODE) — بند المرحلة 1
+    DeepLinkService.pendingCode.addListener(_consumeInvite);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      // أولاً: استهلاك رمز الدعوة إن وُجد (قبل أي نوافذ أخرى ليظل ظاهراً)
+      _consumeInvite();
       await checkE2eKeys(context);
       // شاشة «تحديث متوفر» تقرأ آخر إصدار من الخادم (جدول app_releases)
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) await _checkUpdate();
     });
+  }
+
+  /// يفتح شاشة الانضمام مرة واحدة لكل رمز وصل عبر الرابط العميق
+  void _consumeInvite() {
+    final code = DeepLinkService.pendingCode.value;
+    if (code == null || !mounted) return;
+    DeepLinkService.pendingCode.value = null;
+    Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => JoinInviteScreen(initialCode: code)));
   }
 
   /// يعرض تنبيهاً إن وُجد إصدار أحدث من إصدار هذا الجهاز
@@ -60,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(notes, style: const TextStyle(height: 1.5)),
               ],
               const SizedBox(height: 12),
-              const Text('حمّله من هنا:', style: TextStyle(color: Colors.white60)),
+              Text('حمّله من هنا:', style: TextStyle(color: c.wasl.textFaint)),
               SelectableText((r['url'] as String?) ?? '',
                   style: const TextStyle(color: WaslColors.teal, fontSize: 13)),
             ],
@@ -76,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    DeepLinkService.pendingCode.removeListener(_consumeInvite);
     PresenceService.stop();
     super.dispose();
   }
@@ -102,14 +117,14 @@ class _HomeScreenState extends State<HomeScreen> {
               filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
               child: Container(
                 decoration: BoxDecoration(
-                  color: WaslColors.glass,
+                  color: context.wasl.glass,
                   borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: const Color(0x22FFFFFF)),
+                  border: Border.all(color: context.wasl.glassStrong),
                 ),
                 child: NavigationBar(
                   height: 68,
                   backgroundColor: Colors.transparent,
-                  indicatorColor: const Color(0x556366F1),
+                  indicatorColor: context.wasl.bubbleMine,
                   selectedIndex: _index,
                   onDestinationSelected: (i) => setState(() => _index = i),
                   destinations: const [
@@ -160,7 +175,8 @@ class _ComingSoon extends StatelessWidget {
           children: [
             Icon(icon, size: 64, color: WaslColors.teal),
             const SizedBox(height: 12),
-            const Text('قريباً في المرحلة القادمة', style: TextStyle(color: Colors.white60)),
+            Text('قريباً في المرحلة القادمة',
+                style: TextStyle(color: context.wasl.textFaint)),
           ],
         ),
       ),
