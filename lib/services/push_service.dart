@@ -16,6 +16,9 @@ class PushService {
   static bool _listening = false;
   static bool _tapsWired = false;
 
+  /// هل نجحت تهيئة Firebase؟ يُستخدم لتشغيل تقارير الأعطال (Crashlytics) بأمان
+  static bool get firebaseReady => _ready;
+
   static Future<void> init() async {
     if (kIsWeb) return;
     try {

@@ -97,3 +97,27 @@
 
 عند اكتمال القائمة: أضف النتائج في HANDOVER §8.1 أو أخبر المطوّر بتفاصيل أي فشل.
 بعد نجاح الاختبارات: يمكن تحديث نص شاشة الإعدادات ليقول «الرسائل مشفرة بين الطرفين» في المحادثات الخاصة.
+
+## 6) تفعيل النسخة الاحتياطية الليلية لقاعدة البيانات (إعداد مالك — مرة واحدة)
+
+الكود جاهز: `.github/workflows/backup-db.yml` يعمل يومياً 00:15 بتوقيت الرياض، يفريغ القاعدة بـ`pg_dump`، يفحص سلامة الأرشيف، يشفره GPG (AES-256)، ثم يدفعه إلى مستودع خاص + يحفظه كـArtifact لمدة 7 أيام، مع الاحتفاظ بآخر 30 نسخة في المستودع. **قبل أول تشغيل أنجز هذه الخطوات:**
+
+1. أنشئ مستودعاً **خاصاً** جديداً باسم `wasl-chat-backups` (فارغاً) من https://github.com/new — لا تضف README.
+2. أنشئ رمزاً من https://github.com/settings/personal-access-tokens/new:
+   - Repository access: **Only select repositories** → `CTO-DRS/wasl-chat-backups` فقط.
+   - Permissions: **Contents → Read and write** (لا شيء آخر).
+   - Expiration: 90 يوماً (أنشئ جديداً عند انتهائه — الوظيفة ستفشل برسالة واضحة).
+3. أضف الأسرار الثلاثة في https://github.com/CTO-DRS/wasl-chat/settings/secrets/actions:
+   - `SUPABASE_DB_URL`: Supabase → Project Settings → Database → Connection string → URI، واختر **Session pooler** (منفذ 5432)، واستبدل `[YOUR-PASSWORD]` بكلمة مرور قاعدة البيانات، والصق الرابط كاملاً.
+   - `BACKUP_REPO_TOKEN`: الرمز من الخطوة 2.
+   - `BACKUP_PASSPHRASE`: كلمة سر عشوائية طويلة (أنشئها بمدير كلمات المرور). **⚠️ احفظها في خزنة Hark فوراً — بلاها لا يمكن فك تشفير أي نسخة احتياطية على الإطلاق، ولا يوجد طريق استرداد.**
+4. اختبر يدوياً: تبويب **Actions** → Nightly DB backup → **Run workflow** → شغّل وانتظر الأخضر، وافحص مستودع `wasl-chat-backups` — يجب أن يظهر ملف `daily/wasl-db-YYYY-MM-DD-*.dump.gpg`.
+5. الاستعادة عند الكارثة (على جهاز يحتوي PostgreSQL):
+   ```bash
+   gpg --decrypt wasl-db-2026-11-08-2115.dump.gpg > restored.dump   # سيطلب BACKUP_PASSPHRASE
+   pg_restore --dbname "$NEW_DB_URL" --no-owner --no-privileges restored.dump
+   ```
+6. ملاحظات:
+   - الوظيفة مراقبة ذاتياً: نقص أي سر أو فشل التفريغ يجعل الوظيفة **حمراء** وتصلك إشعارات GitHub — لا تتجاهلها.
+   - النسخ المشفّرة آمنة حتى لو تسربت؛ السر الحقيقي هو `BACKUP_PASSPHRASE` لا تُكتب في أي ملف.
+   - كلمة مرور قاعدة البيانات تُدار من Supabase (Project Settings → Database) — إن غيّرتها حدّث `SUPABASE_DB_URL`.

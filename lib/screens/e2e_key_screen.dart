@@ -20,6 +20,7 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
   final _p2 = TextEditingController();
   bool _busy = false;
   bool _hide = true;
+  bool _ack = false;
   String? _error;
 
   @override
@@ -55,6 +56,10 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
       final err = _validateNew();
       if (err != null) {
         setState(() => _error = err);
+        return;
+      }
+      if (!_ack) {
+        setState(() => _error = 'يجب التأكيد أولاً أنك حفظت كلمة السر في مكان آمن');
         return;
       }
     }
@@ -132,13 +137,54 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
               decoration: const InputDecoration(labelText: 'تأكيد كلمة السر'),
             ),
           ],
+          if (newPass) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 22),
+                    SizedBox(width: 8),
+                    Text('لا تُسترجع هذه الكلمة أبداً',
+                        style: TextStyle(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15)),
+                  ]),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'وصل شات لا يعرف كلمة السر ولا يستطيع إرسالها لك أو إعادة تعيينها. إن نسيتها فلن تقرأ رسائلك المشفّرة على جوال جديد أو بعد إعادة تثبيت التطبيق، بلا استثناء. اكتبها الآن على ورقة واحفظها في مكان آمن، أو في مدير كلمات مرور.',
+                    style: TextStyle(fontSize: 14, height: 1.7),
+                  ),
+                  CheckboxListTile(
+                    value: _ack,
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() => _ack = v ?? false),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    activeColor: WaslColors.teal,
+                    title: const Text('أفهم ذلك — حفظت الكلمة في مكان آمن',
+                        style: TextStyle(fontSize: 14)),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: const TextStyle(color: Colors.redAccent)),
           ],
           const SizedBox(height: 24),
           FilledButton(
-            onPressed: _busy ? null : _submit,
+            onPressed: (_busy || (newPass && !_ack)) ? null : _submit,
             child: _busy
                 ? const SizedBox(
                     height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
@@ -153,6 +199,7 @@ class _E2eKeyScreenState extends State<E2eKeyScreen> {
                         _mode = _Mode.reset;
                         _error = null;
                         _p1.clear();
+                        _ack = false;
                       }),
               child: const Text('نسيت كلمة السر؟ إنشاء مفتاح جديد'),
             ),
