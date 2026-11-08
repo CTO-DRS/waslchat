@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/app_lock_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
+import 'app_lock_screen.dart';
 import 'e2e_key_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
@@ -51,6 +53,7 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => checkE2eKeys(context, fromSettings: true),
           ),
+          const AppLockCard(),
           ListTile(
             leading: const Icon(Icons.password, color: WaslColors.teal),
             title: const Text('تغيير كلمة المرور'),
@@ -99,6 +102,142 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// بطاقة قفل التطبيق (بند المرحلة 2: قفل بالبصمة أو الرمز)
+class AppLockCard extends StatefulWidget {
+  const AppLockCard({super.key});
+
+  @override
+  State<AppLockCard> createState() => _AppLockCardState();
+}
+
+class _AppLockCardState extends State<AppLockCard> {
+  bool _biometricAvailable = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppLockService.biometricAvailable().then((v) {
+      if (mounted) setState(() => _biometricAvailable = v);
+    });
+  }
+
+  Future<void> _toggle(bool want) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      if (!want) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('إيقاف قفل التطبيق؟'),
+            content: const Text(
+                'سيتمكن من يفتح جوالك من قراءة رسائلك مباشرة بدون رمز أو بصمة.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: const Text('إلغاء')),
+              FilledButton(
+                  style: FilledButton.styleFrom(
+                      backgroundColor: Colors.redAccent),
+                  onPressed: () => Navigator.pop(c, true),
+                  child: const Text('أوقف القفل')),
+            ],
+          ),
+        );
+        if (ok == true) await AppLockService.disable();
+      } else {
+        // 1) رمز PIN إلزامي (طريق احتياطي دائماً حتى لا يُقفل المستخدم خارجاً)
+        final pin = await showPinSetupDialog(context);
+        if (pin == null) return;
+        await AppLockService.enable(pin);
+        // 2) بصمة اختيارية إن كان الجهاز يدعمها
+        if (_biometricAvailable && mounted) {
+          final wantBio = await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('الفتح بالبصمة؟'),
+              content: const Text(
+                  'يمكنك فتح القفل بالبصمة أو رمز الجهاز بدل كتابة الرمز في كل مرة. يمكنك تغيير ذلك لاحقاً من هنا.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(c, false),
+                    child: const Text('لا، الرمز فقط')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(c, true),
+                    child: const Text('نعم، فعّلها')),
+              ],
+            ),
+          );
+          if (wantBio == true) {
+            final ok = await AppLockService.verifyBiometric();
+            await AppLockService.setBiometric(ok);
+          }
+        }
+      }
+      if (mounted) setState(() {});
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _toggleBiometric(bool want) async {
+    if (want) {
+      final ok = await AppLockService.verifyBiometric();
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('تعذّر التحقق من البصمة — لم تُفعّل')));
+        return;
+      }
+      await AppLockService.setBiometric(true);
+    } else {
+      await AppLockService.setBiometric(false);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _changePin() async {
+    final pin = await showPinSetupDialog(context);
+    if (pin == null) return;
+    await AppLockService.setPin(pin);
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('تم تغيير رمز القفل')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = AppLockService.enabled;
+    return Column(children: [
+      SwitchListTile(
+        secondary: const Icon(Icons.lock_clock_outlined, color: WaslColors.teal),
+        title: const Text('قفل التطبيق'),
+        subtitle: Text(on
+            ? 'يُقفل عند الخروج للخلفية أو فتح التطبيق'
+            : 'رمز أو بصمة قبل قراءة الرسائل عند العودة للتطبيق'),
+        value: on,
+        onChanged: _busy ? null : _toggle,
+      ),
+      if (on) ...[
+        if (_biometricAvailable)
+          SwitchListTile(
+            secondary: const Icon(Icons.fingerprint, color: WaslColors.indigo),
+            title: const Text('الفتح بالبصمة أو رمز الجهاز'),
+            subtitle: const Text('طريق مختصر فوق رمز الـPIN'),
+            value: AppLockService.useBiometric,
+            onChanged: _busy ? null : _toggleBiometric,
+          ),
+        ListTile(
+          leading: const Icon(Icons.password, color: WaslColors.violet),
+          title: const Text('تغيير رمز القفل'),
+          onTap: _busy ? null : _changePin,
+        ),
+      ],
+    ]);
   }
 }
 

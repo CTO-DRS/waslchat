@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -19,6 +20,7 @@ import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/media_service.dart';
 import '../services/presence_service.dart';
+import '../services/secure_flag_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
@@ -81,6 +83,14 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _searching = false;
   final _searchCtrl = TextEditingController();
   String get _query => _searchCtrl.text.trim().toLowerCase();
+
+  // منع لقطات الشاشة (المرحلة 2)
+  bool? _screenshotBlock;
+  bool _secureHeld = false;
+
+  // وسائط عرض مرة واحدة (المرحلة 2)
+  bool _attachViewOnce = false;
+  final Set<String> _onceOpened = {};
 
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
@@ -281,7 +291,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final conv = await supabase
           .from('conversations')
-          .select('disappear_seconds')
+          .select('disappear_seconds, screenshot_block')
           .eq('id', widget.conversationId)
           .maybeSingle();
       final stars = await supabase
@@ -300,10 +310,24 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(() {
         _disappear = conv?['disappear_seconds'] as int?;
+        _screenshotBlock = conv?['screenshot_block'] as bool? ?? false;
         _stars = {for (final r in stars) r['message_id'] as String};
         _otherAvatar = avatar;
       });
+      await _applySecureFlag();
     } catch (_) {}
+  }
+
+  /// تطبيق/رفع FLAG_SECURE بعدد مراجع (قد تتراكب محادثات محمية فوق بعضها)
+  Future<void> _applySecureFlag() async {
+    if (!mounted) return;
+    if (_screenshotBlock == true && !_secureHeld) {
+      _secureHeld = true;
+      await SecureFlag.acquire();
+    } else if (_screenshotBlock != true && _secureHeld) {
+      _secureHeld = false;
+      await SecureFlag.release();
+    }
   }
 
   Future<void> _toggleStar(Map<String, dynamic> m) async {
@@ -376,6 +400,11 @@ class _ChatScreenState extends State<ChatScreen> {
     PresenceService.online.removeListener(_onPresence);
     supabase.removeChannel(_room);
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+    // رفع منع لقطات الشاشة إن كانت مفعّلة من هذه المحادثة
+    if (_secureHeld) {
+      _secureHeld = false;
+      unawaited(SecureFlag.release());
+    }
     // إيقاف أي تسجيل جارٍ ثم تحرير الميكروفون
     unawaited(() async {
       try {
@@ -438,19 +467,36 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('رمز الأمان'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text(
-              'قارن هذا الرمز مع جوال الطرف الآخر وجهاً لوجه أو بمكالمة. إن تطابق فمحادثتكما مشفّرة ولا أحد في المنتصف.',
-              style: TextStyle(height: 1.6)),
-          const SizedBox(height: 16),
-          Directionality(
-            textDirection: TextDirection.ltr,
-            child: SelectableText(number ?? 'المفاتيح غير جاهزة بعد',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontFamily: 'monospace', fontSize: 18, letterSpacing: 1.5, height: 1.7)),
-          ),
-        ]),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text(
+                'قارن هذا الرمز مع جوال الطرف الآخر وجهاً لوجه أو بمكالمة. إن تطابق فمحادثتكما مشفّرة ولا أحد في المنتصف.',
+                style: TextStyle(height: 1.6)),
+            const SizedBox(height: 16),
+            Directionality(
+              textDirection: TextDirection.ltr,
+              child: SelectableText(number ?? 'المفاتيح غير جاهزة بعد',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontFamily: 'monospace', fontSize: 18, letterSpacing: 1.5, height: 1.7)),
+            ),
+            if (number != null) ...[
+              const SizedBox(height: 16),
+              // التحقق بمسح QR (المرحلة 2): كل طرف يعرض رمز نفسه، والآخر يقارن بصرياً
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: QrImageView(data: number, size: 120),
+              ),
+              const SizedBox(height: 8),
+              const Text('أو قارن الـQR الظاهر عند الطرفين بصرياً',
+                  style: TextStyle(fontSize: 12, color: Colors.white60)),
+            ],
+          ]),
+        ),
         actions: [
           if (number != null && E2eService.peerKeyChanged(other))
             TextButton(
@@ -548,6 +594,7 @@ class _ChatScreenState extends State<ChatScreen> {
     required String contentType,
     int? durationMs,
     Map<String, dynamic>? meta,
+    bool viewOnce = false,
   }) async {
     if (!mounted) return; // قد يغادر المستخدم الشاشة أثناء اختيار الملف
     setState(() => _uploading = true);
@@ -583,9 +630,16 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': content,
         'media_url': path,
         'duration_ms': durationMs,
+        if (viewOnce) 'view_once': true,
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
-      if (mounted) setState(() => _replyTo = null);
+      if (mounted) {
+        setState(() {
+          _replyTo = null;
+          // وضع «عرض مرة واحدة» استخدام واحد ثم يعود عادي
+          if (viewOnce) _attachViewOnce = false;
+        });
+      }
     } catch (e) {
       _snack(e.toString().contains('blocked')
           ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
@@ -607,6 +661,7 @@ class _ChatScreenState extends State<ChatScreen> {
       bytes: bytes,
       ext: ext,
       contentType: 'image/$ext',
+      viewOnce: _attachViewOnce,
     );
   }
 
@@ -629,10 +684,14 @@ class _ChatScreenState extends State<ChatScreen> {
       ext: ext,
       contentType: ext == 'mov' ? 'video/quicktime' : 'video/mp4',
       meta: {'name': x.name, 'size': size},
+      viewOnce: _attachViewOnce,
     );
   }
 
   Future<void> _pickFile() async {
+    if (_attachViewOnce) {
+      _snack('عرض مرة واحدة للصور والفيديو فقط');
+    }
     final r = await FilePicker.platform.pickFiles(withData: true);
     final f = r?.files.single;
     if (f == null) return;
@@ -694,6 +753,18 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
         child: Wrap(children: [
+          // وضع «عرض مرة واحدة» (المرحلة 2): الوسيطة التالية صور/فيديو تُعرض مرة واحدة
+          StatefulBuilder(
+            builder: (ctx, setSheet) => SwitchListTile(
+              secondary: const Icon(Icons.visibility_off_outlined,
+                  color: Colors.redAccent),
+              title: const Text('عرض مرة واحدة'),
+              subtitle: const Text(
+                  'الصورة أو الفيديو التالي لا تُفتح إلا مرة، ثم يُحذف ملفها من الخادم'),
+              value: _attachViewOnce,
+              onChanged: (v) => setSheet(() => setState(() => _attachViewOnce = v)),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
             title: const Text('صورة من المعرض'),
@@ -837,6 +908,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     switch (m['type'] as String? ?? 'text') {
       case 'image':
+        if (m['view_once'] == true) return _viewOnceBubble(m, isVideo: false);
         return ImageBubble(loader: () => _mediaBytes(m['media_url'] as String));
       case 'voice':
         return VoiceBubble(
@@ -845,6 +917,9 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'video':
       case 'file':
         final isVideo = m['type'] == 'video';
+        if (isVideo && m['view_once'] == true) {
+          return _viewOnceBubble(m, isVideo: true);
+        }
         final meta = _metaOf(m);
         final name = (meta?['name'] as String?) ?? (isVideo ? 'فيديو' : 'ملف');
         return InkWell(
@@ -881,6 +956,128 @@ class _ChatScreenState extends State<ChatScreen> {
         final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
         return Text(text,
             style: const TextStyle(color: Colors.white, fontSize: 16));
+    }
+  }
+
+  // ---------- وسائط عرض مرة واحدة (المرحلة 2) ----------
+
+  bool _onceViewed(Map<String, dynamic> m) =>
+      m['media_url'] == null || _onceOpened.contains(m['id'] as String);
+
+  Widget _viewOnceBubble(Map<String, dynamic> m, {required bool isVideo}) {
+    if (_onceViewed(m)) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(isVideo ? Icons.videocam_off_outlined : Icons.photo_outlined,
+              size: 22, color: Colors.white54),
+          const SizedBox(width: 8),
+          const Text('عرض مرة واحدة · تم العرض',
+              style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
+        ]),
+      );
+    }
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => _openViewOnce(m, isVideo: isVideo),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.redAccent, width: 2),
+            ),
+            alignment: Alignment.center,
+            child: Text('1',
+                style: const TextStyle(
+                    color: Colors.redAccent,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16)),
+          ),
+          const SizedBox(width: 10),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(isVideo ? 'فيديو · عرض مرة واحدة' : 'صورة · عرض مرة واحدة',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w600)),
+            const Text('اضغط للعرض — تُفتح مرة واحدة فقط',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  /// فتح وسيط عرض مرة واحدة: صورة بملء الشاشة أو فيديو بالعارض،
+  /// وبعد الإغلاق يُستهلك من الخادم (يسجّل viewed_at وينقل الملف إلى سلة الحذف)
+  Future<void> _openViewOnce(Map<String, dynamic> m,
+      {required bool isVideo}) async {
+    final url = m['media_url'] as String?;
+    if (url == null || _onceOpened.contains(m['id'] as String)) return;
+    if (kIsWeb) {
+      _snack('عرض مرة واحدة متاح على تطبيق الجوال');
+      return;
+    }
+    setState(() => _uploading = true);
+    try {
+      final bytes = await _mediaBytes(url);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الملف');
+        return;
+      }
+      if (!mounted) return;
+      if (isVideo) {
+        final dir = Directory('${(await getTemporaryDirectory()).path}/wasl_once');
+        await dir.create(recursive: true);
+        final file =
+            File('${dir.path}/${DateTime.now().millisecondsSinceEpoch}.mp4');
+        await file.writeAsBytes(bytes, flush: true);
+        _openedFiles.add(file);
+        if (!mounted) return;
+        await Navigator.push(context,
+            MaterialPageRoute(builder: (_) => VideoScreen(file: file)));
+        // حذف فوري من القرص بعد إغلاق العارض
+        _openedFiles.remove(file);
+        _deleteQuietly(file.path);
+      } else {
+        await showDialog<void>(
+          context: context,
+          barrierColor: Colors.black,
+          builder: (c) => GestureDetector(
+            onTap: () => Navigator.pop(c),
+            child: Container(
+              color: Colors.black,
+              alignment: Alignment.center,
+              child: InteractiveViewer(
+                maxScale: 5,
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        );
+      }
+      // المرسِل لا يستهلك رسالته (الخادم يتجاهله) — والمتلقي يستهلكها الآن
+      try {
+        await supabase.rpc('open_view_once', params: {'p_msg': m['id']});
+      } catch (_) {}
+      if (m['sender_id'] != _me && mounted) {
+        // حماية فورية من إعادة الفتح قبل وصول تحديث البث
+        setState(() => _onceOpened.add(m['id'] as String));
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الملف');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
     }
   }
 

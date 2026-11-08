@@ -7,6 +7,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'screens/app_lock_screen.dart';
+import 'services/app_lock_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
@@ -23,10 +25,12 @@ void main() {
     );
     // يهيّئ Firebase إن أمكن — تقارير الأعطال تعتمد على نجاحه وتتخطى الصمت
     await PushService.init();
+    // إعدادات قفل التطبيق (يبدأ مقفولاً إن كان مفعّلاً)
+    await AppLockService.load();
     _installCrashReporting();
     final uid = supabase.auth.currentUser?.id;
     if (uid != null) _setCrashUser(uid);
-    runApp(const WaslApp());
+    runApp(const LockGate(child: WaslApp()));
   }, (error, stack) {
     _reportCrash(error, stack, fatal: true);
   });
@@ -73,6 +77,50 @@ void _setCrashUser(String uid) {
 }
 
 final navigatorKey = GlobalKey<NavigatorState>();
+
+/// بوابة قفل التطبيق: تُغلف التطبيق كله وتعرض شاشة القفل فوقه عند القفل
+/// (الخروج للخلفية يقفل فوراً — بند المرحلة 2 من خارطة الطريق)
+class LockGate extends StatefulWidget {
+  const LockGate({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<LockGate> createState() => _LockGateState();
+}
+
+class _LockGateState extends State<LockGate> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) AppLockService.onBackgrounded();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppLockService.lockState,
+      builder: (context, locked, child) => Stack(
+        fit: StackFit.expand,
+        children: [
+          child!,
+          if (locked) const Positioned.fill(child: AppLockScreen()),
+        ],
+      ),
+      child: widget.child,
+    );
+  }
+}
 
 class WaslApp extends StatelessWidget {
   const WaslApp({super.key});
