@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,14 +13,63 @@ import 'screens/home_screen.dart';
 import 'screens/security_screens.dart';
 import 'services/push_service.dart';
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: AppConfig.supabaseUrl,
-    publishableKey: AppConfig.supabaseAnonKey,
-  );
-  await PushService.init();
-  runApp(const WaslApp());
+void main() {
+  // runZonedGuarded: يلتقط الأخطاء غير المتزامنة خارج إطار Flutter (Dart الخام)
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Supabase.initialize(
+      url: AppConfig.supabaseUrl,
+      publishableKey: AppConfig.supabaseAnonKey,
+    );
+    // يهيّئ Firebase إن أمكن — تقارير الأعطال تعتمد على نجاحه وتتخطى الصمت
+    await PushService.init();
+    _installCrashReporting();
+    final uid = supabase.auth.currentUser?.id;
+    if (uid != null) _setCrashUser(uid);
+    runApp(const WaslApp());
+  }, (error, stack) {
+    _reportCrash(error, stack, fatal: true);
+  });
+}
+
+/// تقارير الأعطال عبر Firebase Crashlytics (مجاني، بند المرحلة 0 من خارطة الطريق).
+/// آمنة تماماً: تُفعَّل على أندرويد/iOS فقط وبعد نجاح تهيئة Firebase، وأي فشل فيها صامت.
+void _installCrashReporting() {
+  try {
+    if (kIsWeb || !PushService.firebaseReady) return;
+    if (!(defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS)) {
+      return;
+    }
+    // أخطاء إطار Flutter (بناء الواجهات، setState...)
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      _reportCrash(details.exception, details.stack ?? StackTrace.empty,
+          fatal: details.library == null || details.library!.isEmpty);
+    };
+    // أخطاء غير المتزامنة داخل المنطقة (runZonedGuarded يمسكها)
+    PlatformDispatcher.instance.onError = (error, stack) {
+      _reportCrash(error, stack, fatal: true);
+      return true;
+    };
+  } catch (_) {}
+}
+
+void _reportCrash(Object error, StackTrace stack, {required bool fatal}) {
+  try {
+    if (kIsWeb || !PushService.firebaseReady) return;
+    unawaited(FirebaseCrashlytics.instance
+        .recordError(error, stack, fatal: fatal)
+        .catchError((_) {}));
+  } catch (_) {}
+}
+
+/// ربط معرّف المستخدم بالأعطال لتمييز الأعطال التي تصيب مجموعة مستخدمين
+void _setCrashUser(String uid) {
+  try {
+    if (kIsWeb || !PushService.firebaseReady) return;
+    FirebaseCrashlytics.instance.setUserIdentifier(uid);
+  } catch (_) {}
 }
 
 final navigatorKey = GlobalKey<NavigatorState>();

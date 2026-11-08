@@ -1,0 +1,111 @@
+# نسخة احتياطية ليلية لقاعدة البيانات (بند المرحلة 0 من خارطة الطريق)
+#
+# يعمل يومياً 00:15 بتوقيت الرياض (21:15 UTC) ويدوياً من تبويب Actions.
+# التدفق: pg_dump بصيغة مخصّصة مضغوطة ← فحص سلامة الأرشيف ← تشفير GPG متماثل AES-256
+#         ← دفع النسخة المشفّرة إلى مستودع خاص للنسخ الاحتياطية + حفظها كـ Artifact 7 أيام.
+#
+# الأسرار المطلوبة من المالك (راجع docs/RUNBOOK_URGENT.md §6):
+#   SUPABASE_DB_URL    — رابط قاعدة البيانات كاملاً (Supabase → Settings → Database → Connection string → URI، عبر Session pooler منفذ 5432)
+#   BACKUP_REPO_TOKEN  — رمز GitHub (fine-grained) بصلاحية Contents: Read and write على مستودع النسخ الاحتياطي الخاص فقط
+#   BACKUP_PASSPHRASE  — كلمة سر التشفير؛ احفظها في خزنة Hark: بلاها لا يمكن فك تشفير أي نسخة
+name: Nightly DB backup
+
+on:
+  schedule:
+    # 21:15 UTC = 00:15 بتوقيت الرياض
+    - cron: '15 21 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+# أسباب فشل الوظيفة تصل المالك عبر إشعارات GitHub الافتراضية
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: تحقق من وجود الأسرار المطلوبة
+        run: |
+          missing=0
+          for s in SUPABASE_DB_URL BACKUP_REPO_TOKEN BACKUP_PASSPHRASE; do
+            if [ -z "${!s}" ]; then echo "❌ السر $s غير مضبوط في Settings → Secrets → Actions"; missing=1; fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo "أكمل الإعداد وفق docs/RUNBOOK_URGENT.md §6 ثم أعد تشغيل الوظيفة."
+            exit 1
+          fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+
+      - name: تثبيت أدوات PostgreSQL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client gnupg >/dev/null
+          pg_dump --version
+
+      - name: تفريغ قاعدة البيانات (pg_dump)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          STAMP=$(date -u +%Y-%m-%d-%H%M)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          # --no-owner --no-privileges: الاستعادة تتم بأدوار المستهدف لا أدوار المصدر
+          pg_dump "$SUPABASE_DB_URL" \
+            --format=custom \
+            --no-owner --no-privileges \
+            --file="wasl-db-$STAMP.dump"
+          ls -lh "wasl-db-$STAMP.dump"
+
+      - name: فحص سلامة الأرشيف قبل التشفير
+        run: pg_restore --list "wasl-db-$STAMP.dump" > /dev/null && echo "✅ أرشيف سليم"
+
+      - name: تشفير النسخة (GPG متماثل AES-256)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          gpg --batch --yes --symmetric \
+            --cipher-algo AES256 \
+            --passphrase "$BACKUP_PASSPHRASE" \
+            --output "wasl-db-$STAMP.dump.gpg" \
+            "wasl-db-$STAMP.dump"
+          shred -u "wasl-db-$STAMP.dump"   # حذف النسخة الخام من قرص العدّاء
+          ls -lh "wasl-db-$STAMP.dump.gpg"
+
+      - name: حفظ Artifact مشفّر لمدة 7 أيام (نسخة ثانية)
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ env.STAMP }}
+          path: wasl-db-*.dump.gpg
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: دفع النسخة المشفّرة إلى مستودع النسخ الاحتياطي الخاص
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+          BACKUP_REPO: CTO-DRS/wasl-chat-backups
+        run: |
+          git config --global user.name  "wasl-backup-bot"
+          git config --global user.email "backup@waslchat.app"
+          git clone --depth=1 "https://x-access-token:${BACKUP_REPO_TOKEN}@github.com/${BACKUP_REPO}.git" backup-repo
+          cd backup-repo
+          mkdir -p daily
+          cp "../wasl-db-$STAMP.dump.gpg" daily/
+          # الاحتفاظ بآخر 30 يوماً فقط: حذف الأقدم ثم التثبيت
+          find daily -name 'wasl-db-*.dump.gpg' -mtime +30 -print -delete
+          git add daily
+          if git diff --cached --quiet; then
+            echo "لا جديد للدفع (قد تكون النسخة اليومية مطابقة؟) — غير متوقع، نفحص:"
+            ls -l daily | tail -5
+            exit 1
+          fi
+          git commit -m "backup $STAMP"
+          git push origin HEAD
+
+      - name: ملخص
+        run: |
+          echo "✅ النسخة الاحتياطية $STAMP أُرشفت في مستودع النسخ الاحتياطي (daily/) وحُفظت كـ Artifact لمدة 7 أيام."
+          echo "الاستعادة عند الكارثة: gpg --decrypt ثم pg_restore — التفاصيل في RUNBOOK §6."
