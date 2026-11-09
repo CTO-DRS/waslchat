@@ -779,6 +779,15 @@ class E2eService {
   static void initGroupKey(String conversationId) {
     unawaited(groupKey(conversationId));
   }
+
+  // ---------- وصول لخدمات أعلى تبني على نفس الهوية ----------
+
+  /// زوج هوية هذا الجهاز — لخدمات تُغلِّف مفاتيحها بهويته (الحالات 0.4.1).
+  /// الخاص لا يخرج من هنا؛ المتصل يستخدمه محلياً فقط.
+  static Future<SimpleKeyPair> identityPair() => _loadMyPair();
+
+  /// المفتاح العام المنشور لمستخدم آخر (مع فحص التغيّر وتنبيهه) — null إن لم يُنشر بعد
+  static Future<SimplePublicKey?> publicKeyOf(String userId) => _publicKeyOf(userId);
 }
 
 /// حالة مفاتيح التشفير على هذا الجهاز
