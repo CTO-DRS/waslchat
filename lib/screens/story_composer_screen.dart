@@ -108,7 +108,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
     if (kind == 'video') {
       try {
         // المعاينة تحتاج ملفاً على القرص — نكتبه في المجلد المؤقت (غير مشفر، محلي فقط)
-        final dir = await getTempDir();
+        final dir = await getTemporaryDirectory();
         final f = File('${dir.path}/story_preview_${DateTime.now().millisecondsSinceEpoch}.mp4');
         await f.writeAsBytes(bytes);
         final c = VideoPlayerController.file(f);

@@ -122,11 +122,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     _video = null;
   }
 
-  Future<bool> _setupVideo(Uint8ListHolder bytes, int pageIndex) async {
+  Future<bool> _setupVideo(Uint8List bytes, int pageIndex) async {
     try {
       final dir = await getTemporaryDirectory();
       final f = File('${dir.path}/story_${_current.id}.mp4');
-      await f.writeAsBytes(bytes.data);
+      await f.writeAsBytes(bytes);
       final c = VideoPlayerController.file(f);
       await c.initialize();
       await c.play();

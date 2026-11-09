@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/story_service.dart';
 import '../theme.dart';
 import 'common.dart';
-import 'story_composer_screen.dart';
-import 'story_viewer_screen.dart';
+import '../screens/story_composer_screen.dart';
+import '../screens/story_viewer_screen.dart';
 
 /// شريط الحالات أعلى قائمة المحادثات: «حالتي» + حلقات جهات الاتصال النشطة.
 /// الحلقة المتدرجة = لم تُشاهد بعد، والرمادية = تمت المشاهدة.
@@ -77,50 +77,6 @@ class StoriesStripState extends State<StoriesStrip> {
         MaterialPageRoute(
             builder: (_) => StoryViewerScreen(stories: g.stories)));
     if (mounted) refresh();
-  }
-
-  Future<void> _addSheet() async {
-    final pick = await showModalBottomSheet<StoryPick>(
-      context: context,
-      backgroundColor: context.wasl.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => SafeArea(
-        child: Wrap(children: [
-          ListTile(
-            leading:
-                const Icon(Icons.photo_outlined, color: WaslColors.indigo),
-            title: const Text('صورة من المعرض'),
-            onTap: () => Navigator.pop(ctx, StoryPick.gallery),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_camera_outlined,
-                color: WaslColors.teal),
-            title: const Text('صورة بالكاميرا'),
-            onTap: () => Navigator.pop(ctx, StoryPick.camera),
-          ),
-          ListTile(
-            leading:
-                const Icon(Icons.edit_note_outlined, color: WaslColors.violet),
-            title: const Text('حالة نصية'),
-            onTap: () => Navigator.pop(ctx, StoryPick.text),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
-            child: Text(
-              'تظهر حالتك 24 ساعة لجهات اتصالك فقط (من لديك محادثة معه)، ومحتواها مشفر بين الطرفين.',
-              style: TextStyle(fontSize: 12),
-            ),
-          ),
-        ]),
-      ),
-    );
-    if (pick is! StoryPick || !mounted) return;
-    final posted = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(
-            builder: (_) => StoryComposerScreen(initialPick: pick)));
-    if (posted == true && mounted) refresh();
   }
 
   @override

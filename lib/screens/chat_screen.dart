@@ -20,6 +20,7 @@ import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/media_service.dart';
 import '../services/presence_service.dart';
+import '../services/privacy_service.dart';
 import '../services/secure_flag_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -232,16 +233,17 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_typing.length != before && mounted) setState(() {});
     });
 
-    // متى قرأ الآخرون؟ (لعلامة ✓✓)
+    // متى قرأ الآخرون؟ (لعلامة ✓✓) — جدول read_receipts (020):
+    // صفوف من أخفى علاماته لا تصل أصلاً بفضل RLS، والإخفاء لدىّ يمنع العرض
     _partsSub = supabase
-        .from('conversation_participants')
+        .from('read_receipts')
         .stream(primaryKey: ['conversation_id', 'user_id'])
         .eq('conversation_id', widget.conversationId)
         .listen((rows) {
       DateTime? minRead;
       for (final r in rows) {
-        if (r['user_id'] == _me || r['last_read_at'] == null) continue;
-        final t = DateTime.parse(r['last_read_at'] as String);
+        if (r['user_id'] == _me || r['seen_at'] == null) continue;
+        final t = DateTime.parse(r['seen_at'] as String);
         if (minRead == null || t.isBefore(minRead)) minRead = t;
       }
       if (mounted) setState(() => _othersReadUpTo = minRead);
@@ -260,6 +262,9 @@ class _ChatScreenState extends State<ChatScreen> {
     }, onError: (_) {});
 
     PresenceService.online.addListener(_onPresence);
+    // إعادة بناء الشاشة عند تغيير إعدادات الخصوصية (قاعدة المبادلة)
+    PrivacyService.hidePresence.addListener(_onPresence);
+    PrivacyService.hideReceipts.addListener(_onPresence);
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
   }
 
@@ -381,12 +386,17 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_names.isEmpty) return null;
       return widget.isChannel ? '${_names.length} متابع' : '${_names.length} أعضاء';
     }
-    return PresenceService.isOnline(widget.otherId) ? 'متصل الآن' : null;
+    return PresenceService.canShowPresence && PresenceService.isOnline(widget.otherId)
+        ? 'متصل الآن'
+        : null;
   }
 
   Widget _ticks(Map<String, dynamic> m) {
     final created = DateTime.parse(m['created_at'] as String);
-    final read = _othersReadUpTo != null && !created.isAfter(_othersReadUpTo!);
+    // قاعدة المبادلة: إن أخفيتُ علامات القراءة فلا أرى ✓✓ لغيري
+    final read = !PrivacyService.hideReceipts.value &&
+        _othersReadUpTo != null &&
+        !created.isAfter(_othersReadUpTo!);
     return Icon(read ? Icons.done_all_rounded : Icons.done_rounded,
         size: 15,
         color: read
@@ -401,6 +411,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _partsSub?.cancel();
     _reactSub?.cancel();
     PresenceService.online.removeListener(_onPresence);
+    PrivacyService.hidePresence.removeListener(_onPresence);
+    PrivacyService.hideReceipts.removeListener(_onPresence);
     supabase.removeChannel(_room);
     supabase.rpc('mark_read', params: {'conv': widget.conversationId});
     // رفع منع لقطات الشاشة إن كانت مفعّلة من هذه المحادثة

@@ -127,7 +127,8 @@ class StoryService {
         if (captionEnc != null) 'caption': captionEnc,
       });
       try {
-        final enc = await E2eService.encryptBytes(key, storyId, bytes);
+        // bytes! آمن هنا: الحارس أعلاه رفض (type != text && bytes == null)
+        final enc = await E2eService.encryptBytes(key, storyId, bytes!);
         await supabase.storage.from(bucket).uploadBinary(
               mediaPath,
               enc,
