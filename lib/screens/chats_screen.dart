@@ -6,6 +6,7 @@ import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/stories_strip.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
@@ -26,6 +27,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
   final Map<String, String> _previews = {};
   bool _showArchived = false;
+  final GlobalKey<StoriesStripState> _stripKey = GlobalKey();
 
   @override
   void initState() {
@@ -59,6 +61,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _loading = false;
       });
       _decryptPreviews(chats);
+      // شريط الحالات يُحدّث معها (حالاتي وحالات جهات الاتصال)
+      _stripKey.currentState?.refresh();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -274,7 +278,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
               onRefresh: _load,
               child: visible.isEmpty && archivedCount == 0
                   ? ListView(children: [
-                      const SizedBox(height: 160),
+                      if (!_showArchived) StoriesStrip(key: _stripKey),
+                      const SizedBox(height: 130),
                       Center(
                           child: Text('لا توجد محادثات بعد.\nاضغط ✏️ لبدء محادثة جديدة',
                               textAlign: TextAlign.center,
@@ -282,8 +287,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),
-                      itemCount: visible.length + (!_showArchived && archivedCount > 0 ? 1 : 0),
+                      itemCount:
+                          visible.length +
+                              (!_showArchived ? 1 : 0) +
+                              (!_showArchived && archivedCount > 0 ? 1 : 0),
                       itemBuilder: (context, i) {
+                        if (!_showArchived) {
+                          if (i == 0) return StoriesStrip(key: _stripKey);
+                          i -= 1;
+                        }
                         if (!_showArchived && archivedCount > 0) {
                           if (i == 0) {
                             return ListTile(
