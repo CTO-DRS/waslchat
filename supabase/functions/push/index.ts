@@ -97,6 +97,10 @@ Deno.serve(async (req) => {
   const encrypted = typeof m.content === "string" && m.content.startsWith("v1.");
   const body = m.type === "poll"
     ? "📊 استطلاع رأي"
+    : m.type === "location"
+    ? "📍 موقع"
+    : m.type === "contact"
+    ? "👤 جهة اتصال"
     : m.type === "image"
     ? "📷 صورة"
     : m.type === "voice"

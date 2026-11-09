@@ -45,6 +45,20 @@ class ForwardService {
         });
         return true;
       }
+      // رسائل المحتوى-فقط (0.4.6): الاستطلاعات والموقع وبطاقات جهات
+      // الاتصال — نصّها المفكوك يُشفَّر بمفتاح الهدف بلا أي وسائط
+      // (يصلح توجيه الاستطلاعات الذي كان يفشل صامتاً)
+      if (type == 'poll' || type == 'location' || type == 'contact') {
+        if (text == null || !E2eService.withinPlainLimit(text)) return false;
+        final payload = await E2eService.encryptText(key, conv, text);
+        await supabase.from('messages').insert({
+          'conversation_id': conv,
+          'sender_id': me,
+          'type': type,
+          'content': payload,
+        });
+        return true;
+      }
       if (bytes == null) return false;
       final enc = await E2eService.encryptBytes(key, conv, bytes);
       final meta = (text != null && text.isNotEmpty)

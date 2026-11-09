@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- قفل التطبيق بالبصمة (local_auth) -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- الموقع المشفّر (0.4.6): قراءة الموقع الحالي عند طلب المستخدم فقط -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <!-- بطاقات جهات الاتصال (0.4.6): قراءة الدفتر محلياً فقط — بلا مزامنة ولا كتابة -->
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
     <application
         android:label="وصل شات"
         android:name="${applicationName}"
