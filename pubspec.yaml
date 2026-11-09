@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.4.8+27
+version: 0.4.9+28
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -36,6 +36,9 @@ dependencies:
   # ضغط الفيديو بمُرمّزات المنصة والمصغّرة والتنزيل التلقائي (0.4.8 — المرحلة 1)
   video_compressor_plus: ^4.1.0
   connectivity_plus: ^6.1.0
+  # الملصقات والصور المتحركة (0.4.9 — المرحلة 1):
+  # image مكتبة pure-Dart لفك/ترميز الصور الكبيرة على الجهاز — بلا كود C أصلي
+  image: ^4.5.4
 
 dev_dependencies:
   flutter_test:
@@ -44,6 +47,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # حزمة الملصقات المدمجة (0.4.9) — رسومات أصلية داخل التطبيق
+  assets:
+    - assets/stickers/basics/
 
 # نسخ بدون كود C أصلي (jni) لتسهيل البناء
 dependency_overrides:

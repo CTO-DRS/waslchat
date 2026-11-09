@@ -20,11 +20,13 @@ import '../services/ai_service.dart';
 import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
+import '../services/image_service.dart';
 import '../services/media_cache.dart';
 import '../services/media_prefs.dart';
 import '../services/media_service.dart';
 import '../services/mention_service.dart';
 import '../services/poll_service.dart';
+import '../services/sticker_service.dart';
 import '../services/video_service.dart';
 import '../services/location_service.dart';
 import '../services/contact_card_service.dart';
@@ -40,6 +42,7 @@ import '../widgets/location_bubble.dart';
 import '../widgets/location_picker_sheet.dart';
 import '../widgets/contact_bubble.dart';
 import '../widgets/contact_picker_sheet.dart';
+import '../widgets/sticker_panel.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
@@ -121,6 +124,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _recording = false;
   bool _uploading = false;
   bool _compressing = false; // ضغط الفيديو على الجهاز قبل الرفع (0.4.8)
+  bool _stickerPanel = false; // لوحة الملصقات (0.4.9)
   // التنزيل التلقائي حسب الشبكة (0.4.8) — قرارات محلية بحتة:
   final Set<String> _cachedMedia = {}; // مسارات التخزين الموجودة في الكاش المحلي
   final Set<String> _autoDownloading = {}; // رسائل تُنزّل الآن
@@ -1153,20 +1157,80 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ---------- الصور ----------
+  // ---------- الصور والملصقات (0.4.9) ----------
+  // الكاميرا: JPEG دائماً — ضغط المنتقي آمن. المعرض: بلا ضغط من
+  // المنتقي إطلاقاً (كود أندرويد لا يتجاوز GIF فتتسطح المتحركة) —
+  // الأصل يُرسل كما هو والتصغير الساكن للكبير على الجهاز في ImageService.
   Future<void> _pickImage(ImageSource source) async {
-    final x = await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+    final compressed = source == ImageSource.camera;
+    final x = compressed
+        ? await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 80)
+        : await _picker.pickImage(source: source);
     if (x == null) return;
-    final bytes = await x.readAsBytes();
-    var ext = x.name.contains('.') ? x.name.split('.').last.toLowerCase() : 'jpg';
+    var bytes = await x.readAsBytes();
+    final kind = ImageService.detectKind(bytes);
+    final (reject, downscale) = ImageService.decide(kind, bytes.lengthInBytes);
+    if (reject != null) {
+      _snack(reject);
+      return;
+    }
+    if (downscale) {
+      setState(() => _compressing = true);
+      try {
+        final small = await ImageService.downscaleAsync(bytes,
+            keepPng: kind == ImageKind.png);
+        if (small != null) bytes = small; // فشل التصغير يُرسل الأصل كما هو
+      } catch (_) {
+        // فكّ غير ناجح: الأصل يُرسل كما هو — صادق
+      } finally {
+        if (mounted) setState(() => _compressing = false);
+      }
+    }
+    if (bytes.lengthInBytes > _maxBytes) {
+      _snack('الصورة أكبر من 24 ميغابايت');
+      return;
+    }
+    final animated = ImageService.isAnimated(kind, bytes);
+    var ext = switch (kind) {
+      ImageKind.jpeg => 'jpeg',
+      ImageKind.png => 'png',
+      ImageKind.gif => 'gif',
+      ImageKind.webp => 'webp',
+      _ => (x.name.contains('.') ? x.name.split('.').last.toLowerCase() : 'jpg'),
+    };
     if (ext == 'jpg') ext = 'jpeg';
     await _sendMedia(
       type: 'image',
       bytes: bytes,
       ext: ext,
       contentType: 'image/$ext',
+      // علم الحركة داخل meta المشفّرة — المستقبل يعرضها متحركة أصلاً
+      meta: animated ? const {'animated': true} : null,
       viewOnce: _attachViewOnce,
     );
+  }
+
+  // ---------- الملصقات (0.4.9) ----------
+  Future<void> _sendSticker(String pack, String id) async {
+    try {
+      final path = StickerService.assetPath(pack, id);
+      final data = await rootBundle.load(path);
+      final bytes = data.buffer
+          .asUint8List(data.offsetInBytes, data.lengthInBytes);
+      await _sendMedia(
+        type: 'sticker',
+        bytes: bytes,
+        ext: StickerService.extOf(id),
+        contentType:
+            StickerService.extOf(id) == 'gif' ? 'image/gif' : 'image/webp',
+        rawContent: StickerService.metaJson(pack, id),
+      );
+      await StickerService.remember(pack, id);
+    } on ArgumentError {
+      _snack('ملصق غير معروف');
+    } catch (_) {
+      _snack('تعذّر تحميل الملصق');
+    }
   }
 
   static const _maxBytes = 24 * 1024 * 1024;
@@ -1574,6 +1638,14 @@ class _ChatScreenState extends State<ChatScreen> {
           return _viewOnceBubble(m, isVideo: false, mine: mine);
         }
         return ImageBubble(loader: () => _mediaBytes(m['media_url'] as String));
+      case 'sticker':
+        final meta = _metaOf(m);
+        final ref = StickerService.decodeMeta(meta);
+        if (ref == null) {
+          return Text('🩹 ملصق',
+              style: TextStyle(color: _bubbleText(mine), fontSize: 15));
+        }
+        return StickerBubble(loader: () => _mediaBytes(m['media_url'] as String));
       case 'voice':
         return VoiceBubble(
             loader: () => _mediaBytes(m['media_url'] as String),
@@ -1963,6 +2035,8 @@ class _ChatScreenState extends State<ChatScreen> {
         return '🎬 فيديو';
       case 'file':
         return '📎 ${(_metaOf(m)?['name'] as String?) ?? 'ملف'}';
+      case 'sticker':
+        return '🩹 ملصق';
       case 'poll':
         final raw = _textOf(m);
         final poll = raw == null ? null : PollService.decodePoll(raw);
@@ -2100,7 +2174,10 @@ class _ChatScreenState extends State<ChatScreen> {
               target: target,
               type: type,
               bytes: bytes,
-              text: (type == 'file' || type == 'video') ? _textOf(m) : null,
+              // ملف/فيديو/ملصق: meta المفكوكة تُشفر بمفتاح الهدف
+              text: (type == 'file' || type == 'video' || type == 'sticker')
+                  ? _textOf(m)
+                  : null,
               durationMs: m['duration_ms'] as int?);
     }
     if (mounted) setState(() => _uploading = false);
@@ -2631,6 +2708,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     final sender = _names[m['sender_id']];
                     final replyId = m['reply_to'] as String?;
                     final chips = _reactionChips(m);
+                    // الملصق السليم بلا فقاعة: الشفاف نفسه بلا خلفية (0.4.9)
+                    final stickerish =
+                        m['type'] == 'sticker' && m['deleted_at'] == null;
                     return Align(
                       alignment: mine
                           ? AlignmentDirectional.centerEnd
@@ -2639,10 +2719,14 @@ class _ChatScreenState extends State<ChatScreen> {
                        onLongPress: () => _messageActions(m),
                        child: Container(
                         margin: const EdgeInsets.symmetric(vertical: 3),
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                        padding: stickerish
+                            ? const EdgeInsets.symmetric(horizontal: 6)
+                            : const EdgeInsets.fromLTRB(12, 8, 12, 6),
                         constraints: BoxConstraints(
                             maxWidth: MediaQuery.of(context).size.width * 0.75),
-                        decoration: BoxDecoration(
+                        decoration: stickerish
+                            ? null
+                            : BoxDecoration(
                           gradient: mine ? WaslColors.gradient : null,
                           color: mine ? null : context.wasl.bubbleOther,
                           borderRadius: BorderRadius.circular(20),
@@ -2707,6 +2791,15 @@ class _ChatScreenState extends State<ChatScreen> {
           // منتقي الإشارة @ (0.4.5) — شريط أعضاء فوق حقل الكتابة
           if (widget.canPost && !_recording && _mentionQuery != null)
             _mentionPicker(),
+          // لوحة الملصقات (0.4.9) — فوق حقل الكتابة، تبقى مفتوحة للإرسال المتتابع
+          if (widget.canPost && !_recording && _stickerPanel)
+            SafeArea(
+              top: false,
+              child: StickerPanel(
+                onPick: _sendSticker,
+                onClose: () => setState(() => _stickerPanel = false),
+              ),
+            ),
           if (widget.canPost && _composeBanner() != null) _composeBanner()!,
           if (!widget.canPost)
             SafeArea(
@@ -2730,11 +2823,23 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
               child: Row(children: [
-                if (!_recording)
+                if (!_recording) ...[
+                  IconButton(
+                    onPressed: _uploading
+                        ? null
+                        : () => setState(() => _stickerPanel = !_stickerPanel),
+                    // المبتسم يفتح لوحة الملصقات (0.4.9) — وأيقونة لوحة
+                    // المفاتيح تعيده للحقل
+                    icon: Icon(_stickerPanel
+                        ? Icons.keyboard_alt_outlined
+                        : Icons.face_outlined),
+                    tooltip: 'ملصقات',
+                  ),
                   IconButton(
                     onPressed: _uploading ? null : _showAttachSheet,
                     icon: const Icon(Icons.attach_file_rounded),
                   ),
+                ],
                 Expanded(
                   child: _recording
                       ? Container(

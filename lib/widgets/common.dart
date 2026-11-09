@@ -12,6 +12,8 @@ String previewText(Map<String, dynamic> row, {String empty = 'لا توجد رس
       return '🎬 فيديو';
     case 'file':
       return '📎 ملف';
+    case 'sticker':
+      return '🩹 ملصق';
     default:
       return (row['last_message'] as String?) ?? empty;
   }

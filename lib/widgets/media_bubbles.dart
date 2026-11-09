@@ -79,6 +79,54 @@ class _FullImage extends StatelessWidget {
   }
 }
 
+/// فقاعة ملصق (0.4.9): بلا خلفية فقاعة — الصورة الشفافة نفسها.
+/// GIF/webp المتحركة تعمل تلقائياً عبر Image.memory. تعذّر فك meta
+/// أو التحميل = نص بديل صادق.
+class StickerBubble extends StatefulWidget {
+  const StickerBubble({super.key, required this.loader});
+  final MediaLoader loader;
+
+  @override
+  State<StickerBubble> createState() => _StickerBubbleState();
+}
+
+class _StickerBubbleState extends State<StickerBubble> {
+  late final Future<Uint8List?> _future = widget.loader();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const SizedBox(
+            width: 140,
+            height: 140,
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        final bytes = snap.data;
+        if (bytes == null) {
+          return Text('🩹 ملصق',
+              style: TextStyle(
+                  color: context.wasl.textSecondary, fontSize: 15));
+        }
+        return Image.memory(
+          bytes,
+          width: 140,
+          height: 140,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, __, ___) => Text('🩹 ملصق',
+              style: TextStyle(
+                  color: context.wasl.textSecondary, fontSize: 15)),
+        );
+      },
+    );
+  }
+}
+
 /// فقاعة رسالة صوتية: تشغيل/إيقاف وشريط تقدم ومدة
 /// (يُفكّ تشفير الملف ويُكتب مؤقتاً ثم يُشغّل محلياً)
 class VoiceBubble extends StatefulWidget {
