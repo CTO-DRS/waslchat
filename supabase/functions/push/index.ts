@@ -77,6 +77,10 @@ Deno.serve(async (req) => {
       .eq("conversation_id", m.conversation_id).neq("user_id", m.sender_id),
   ]);
 
+  // أصوات الاستطلاعات صامتة: لا إشعار لها إطلاقاً (المشغّل في ترحيل 022
+  // يستثنيها أصلاً — هذا حاجز ثانٍ إن تغيّر المشغّل يوماً)
+  if (m.type === "poll_vote") return new Response("ignored");
+
   // المكتومون لا يصلهم إشعار (muted_until في المستقبل، أو "infinity" = دائماً)
   const now = Date.now();
   const isMuted = (u: string | null) =>
@@ -91,7 +95,9 @@ Deno.serve(async (req) => {
   const title = conv?.is_group ? `${name} · ${conv.title ?? "مجموعة"}` : name;
   // الرسائل المشفرة بين الطرفين (بادئة v1.) لا يفكها السيرفر أبداً: نص إشعار عام
   const encrypted = typeof m.content === "string" && m.content.startsWith("v1.");
-  const body = m.type === "image"
+  const body = m.type === "poll"
+    ? "📊 استطلاع رأي"
+    : m.type === "image"
     ? "📷 صورة"
     : m.type === "voice"
     ? "🎤 رسالة صوتية"

@@ -115,6 +115,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
         return '🎬 فيديو';
       case 'file':
         return '📎 ملف';
+      case 'poll':
+        return '📊 استطلاع';
+      case 'poll_vote':
+        // نظرياً لا يصل: my_chats يتخطى الأصوات (ترحيل 022) — حماية إضافية
+        return '📊 استطلاع';
       default:
         final raw = (c['last_message'] as String?) ?? 'ابدأ المحادثة';
         if (E2eService.isEncrypted(raw)) {
