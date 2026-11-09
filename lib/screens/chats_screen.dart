@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
@@ -33,6 +34,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   void initState() {
     super.initState();
+    // المسودات المحفوظة محلياً (تظهر «مسودة: …» في المعاينة)
+    DraftService.load();
     _load();
     // تحديث القائمة فور وصول أي رسالة جديدة
     _channel = supabase
@@ -98,6 +101,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   String _preview(Map<String, dynamic> c) {
+    // المسودة المحلية تتقدم على معاينة الخادم (نفس سلوك واتساب)
+    final draft = DraftService.get(c['conversation_id'] as String?);
+    if (draft != null) return 'مسودة: $draft';
+    // رسالتي المجدولة (آخر رسالة) تظهر بعلامة الجدولة
+    if (c['last_scheduled'] == true) return '⏰ رسالة مجدولة';
     switch (c['last_type']) {
       case 'image':
         return '📷 صورة';
