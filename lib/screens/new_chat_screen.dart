@@ -6,6 +6,7 @@ import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
+import 'discover_screen.dart';
 
 class NewChatScreen extends StatefulWidget {
   const NewChatScreen({super.key});
@@ -107,6 +108,19 @@ class _NewChatScreenState extends State<NewChatScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('محادثة جديدة')),
       body: Column(children: [
+        ListTile(
+          leading: CircleAvatar(
+              radius: 22,
+              backgroundColor: WaslColors.teal.withValues(alpha: 0.15),
+              child: Icon(Icons.person_search, color: WaslColors.teal, size: 22)),
+          title: const Text('اكتشاف من جهات الاتصال'),
+          subtitle: const Text('بأرقام مُجزّأة على جهازك — لا يُرفع رقم خام',
+              style: TextStyle(fontSize: 12)),
+          trailing: const Icon(Icons.chevron_left, size: 20),
+          onTap: () => Navigator.push(
+              context, MaterialPageRoute(builder: (_) => const DiscoverScreen())),
+        ),
+        const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.all(12),
           child: TextField(
