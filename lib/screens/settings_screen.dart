@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../config.dart';
 import '../services/app_lock_service.dart';
 import '../services/presence_service.dart';
+import '../services/privacy_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
@@ -27,6 +28,8 @@ class SettingsScreen extends StatelessWidget {
           const _ProfileCard(),
           const SizedBox(height: 16),
           const _AppearanceCard(),
+          const SizedBox(height: 16),
+          const _PrivacyCard(),
           const SizedBox(height: 16),
           const ListTile(
             leading: Icon(Icons.lock_outline, color: WaslColors.teal),
@@ -94,6 +97,7 @@ class SettingsScreen extends StatelessWidget {
               await E2eService.wipeLocal();
               await PushService.unregister();
               await PresenceService.stop();
+              PrivacyService.reset();
               await supabase.auth.signOut();
             },
           ),
@@ -162,6 +166,64 @@ class _AppearanceCard extends StatelessWidget {
                 .toList(),
           ),
         ),
+      ),
+    ]);
+  }
+}
+
+/// بطاقة الخصوصية (بند المرحلة 1: إخفاء «متصل الآن» وعلامات القراءة اختيارياً)
+class _PrivacyCard extends StatefulWidget {
+  const _PrivacyCard();
+
+  @override
+  State<_PrivacyCard> createState() => _PrivacyCardState();
+}
+
+class _PrivacyCardState extends State<_PrivacyCard> {
+  bool _busy = false;
+
+  Future<void> _set({bool? presence, bool? receipts}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await PrivacyService.save(
+        hidePresenceValue:
+            presence ?? PrivacyService.hidePresence.value,
+        hideReceiptsValue:
+            receipts ?? PrivacyService.hideReceipts.value,
+      );
+      // إعادة تشكيل قناة الحضور فوراً حسب الإعداد الجديد
+      if (presence != null) await PresenceService.apply();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ListTile(
+        leading: Icon(Icons.visibility_off_outlined, color: context.wasl.accent),
+        title: const Text('الخصوصية',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        subtitle: const Text('ما تخفيه لا يراه الآخرون — وبالمقابل لن ترى مثله'),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.circle, color: WaslColors.teal, size: 22),
+        title: const Text('إخفاء حالة الاتصال'),
+        subtitle: const Text(
+            'لن يراك أحد «متصل الآن» — ولن ترى حالة الآخرين (قاعدة المبادلة)'),
+        value: PrivacyService.hidePresence.value,
+        onChanged: _busy ? null : (v) => _set(presence: v),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.done_all_rounded,
+            color: WaslColors.indigo, size: 22),
+        title: const Text('إخفاء علامات القراءة ✓✓'),
+        subtitle: const Text(
+            'لن يعرف أحد متى قرأت رسائله — ولن تعرف أنت متى قرأ (قاعدة المبادلة)'),
+        value: PrivacyService.hideReceipts.value,
+        onChanged: _busy ? null : (v) => _set(receipts: v),
       ),
     ]);
   }

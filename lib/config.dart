@@ -10,8 +10,8 @@ class AppConfig {
 
   /// إصدار هذا البناء — حدّثه مع كل إصدار (يجب أن يطابق pubspec.yaml)
   /// يُقارن بجدول app_releases لإظهار شاشة «تحديث متوفر»
-  static const int versionCode = 20;
-  static const String versionName = '0.4.1';
+  static const int versionCode = 21;
+  static const String versionName = '0.4.2';
 }
 
 SupabaseClient get supabase => Supabase.instance.client;

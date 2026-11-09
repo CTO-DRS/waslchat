@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
+import '../services/privacy_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/stories_strip.dart';
@@ -329,10 +330,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               icon: isGroup ? Icons.groups_2 : null,
                             ),
                             if (!isGroup)
-                              ValueListenableBuilder<Set<String>>(
-                                valueListenable: PresenceService.online,
-                                builder: (context, online, _) => online.contains(otherId)
-                                    ? PositionedDirectional(
+                              ListenableBuilder(
+                                listenable: Listenable.merge([
+                                  PresenceService.online,
+                                  PrivacyService.hidePresence,
+                                ]),
+                                builder: (context, _) =>
+                                    // قاعدة المبادلة: من يخفي حالته لا يرى حالة الآخرين
+                                    (!PresenceService.canShowPresence ||
+                                            PresenceService.isOnline(otherId))
+                                        ? PositionedDirectional(
                                         bottom: 0,
                                         end: 0,
                                         child: Container(
