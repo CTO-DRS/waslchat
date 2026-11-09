@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config.dart';
 import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
+import '../services/mention_service.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
 import '../theme.dart';
@@ -89,7 +90,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
               content: lm,
             );
       job.then((plain) {
-        if (mounted) setState(() => _previews[lm] = plain);
+        if (mounted) {
+          // رسالة عليها إشارات @: المعاينة تعرض نصّها لا بنيتها
+          setState(() => _previews[lm] = MentionCodec.displayText(plain));
+        }
       });
     }
   }

@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
   const ids = (members ?? []).filter((r) => !isMuted(r.muted_until)).map((r) => r.user_id);
   if (!ids.length) return new Response("no recipients");
 
-  const { data: tokens } = await db.from("device_tokens").select("token").in("user_id", ids);
+  const { data: tokens } = await db.from("device_tokens").select("token, user_id").in("user_id", ids);
   if (!tokens?.length) return new Response("no devices");
 
   const name = sender?.display_name ?? sender?.username ?? "وصل شات";
@@ -109,8 +109,25 @@ Deno.serve(async (req) => {
     ? "🔒 رسالة مشفرة"
     : String(m.content ?? "").slice(0, 140);
 
+  // جسم مخصّص لكل مستقبل — بيانات وصفية فقط، بلا قراءة أي محتوى:
+  // mentions (ترحيل 023): الخادم يعرف من أُشير إليه دون نص الإشارة
+  // reply_to: موجود أصلاً — الخادم يعرف من ردّ على من
+  const mentions: string[] = Array.isArray(m.mentions) ? m.mentions : [];
+  let replySender: string | null = null;
+  if (m.reply_to) {
+    const { data } = await db.from("messages").select("sender_id")
+      .eq("id", m.reply_to).maybeSingle();
+    replySender = data?.sender_id ?? null;
+  }
+  const bodyFor = (uid: string) =>
+    mentions.includes(uid)
+      ? `🔔 أشار إليك ${name}`
+      : replySender === uid
+      ? "↩️ ردّ على رسالتك"
+      : body;
+
   const access = await googleAccessToken();
-  await Promise.all(tokens.map(async ({ token }) => {
+  await Promise.all(tokens.map(async ({ token, user_id }) => {
     let r: Response;
     try {
       r = await fetch(
@@ -121,7 +138,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             message: {
               token,
-              notification: { title, body },
+              notification: { title, body: bodyFor(user_id) },
               data: { conversation_id: m.conversation_id },
               android: { priority: "high" },
               apns: { payload: { aps: { sound: "default" } } },
