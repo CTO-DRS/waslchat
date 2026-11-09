@@ -20,12 +20,15 @@ import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/media_service.dart';
+import '../services/poll_service.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
 import '../services/secure_flag_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
+import '../widgets/poll_bubble.dart';
+import '../widgets/poll_composer_sheet.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
@@ -73,6 +76,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Map<String, dynamic>? _replyTo;
   Map<String, dynamic>? _editing;
   Map<String, Map<String, dynamic>> _byId = {};
+  // أصوات الاستطلاعات: poll_id -> صفوف poll_vote (تُبنى في كل build)
+  Map<String, List<Map<String, dynamic>>> _votesByPoll = {};
   StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
   Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
   // الرسائل المختفية والنجوم وصورة الطرف الآخر
@@ -168,7 +173,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!_e2e) return;
     for (final m in msgs) {
       final t = m['type'] ?? 'text';
-      if (t != 'text' && t != 'file' && t != 'video') continue;
+      // الاستطلاعات: السؤال والخيارات والأصوات كلها مشفّرة وتُفكّ هنا
+      if (t != 'text' && t != 'file' && t != 'video' && t != 'poll' && t != 'poll_vote') {
+        continue;
+      }
       if (m['deleted_at'] != null) continue;
       final content = m['content'] as String? ?? '';
       if (!E2eService.isEncrypted(content) || _plain.containsKey(content)) continue;
@@ -629,6 +637,81 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ---------- استطلاعات الرأي (0.4.4 — بند المرحلة 1) ----------
+
+  /// إنشاء استطلاع: السؤال والخيارات تُشفَّر قبل الرفع
+  Future<void> _newPoll() async {
+    final draft = await PollComposerSheet.show(context);
+    if (draft == null || !mounted) return;
+    var payload = PollService.encodePoll(draft.question, draft.options);
+    if (_e2e) {
+      final key = await _convKey(fresh: true);
+      if (key == null) {
+        _snack(_keyMissingMsg());
+        return;
+      }
+      try {
+        payload = await E2eService.encryptText(key, widget.conversationId, payload);
+      } catch (_) {
+        _snack('تعذّر تشفير الاستطلاع');
+        return;
+      }
+    }
+    try {
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'poll',
+        'content': payload,
+      });
+    } catch (e) {
+      _snack(e.toString().contains('blocked')
+          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
+          : 'تعذّر إرسال الاستطلاع');
+    }
+  }
+
+  /// تصويت (أو تغيير الصوت): اختيار جديد يلغي السابق («الأحدث يفوز»).
+  /// صامت عمداً: بلا إشعار ولا عدّاد غير مقروء (ترحيل 022 يستثنيه).
+  Future<void> _sendVote(String pollId, int choice) async {
+    var payload = PollService.encodeVote(choice);
+    if (_e2e) {
+      final key = await _convKey(fresh: true);
+      if (key == null) {
+        _snack(_keyMissingMsg());
+        return;
+      }
+      try {
+        payload = await E2eService.encryptText(key, widget.conversationId, payload);
+      } catch (_) {
+        _snack('تعذّر تسجيل الصوت');
+        return;
+      }
+    }
+    try {
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'poll_vote',
+        'poll_id': pollId,
+        'content': payload,
+      });
+    } catch (_) {
+      _snack('تعذّر تسجيل الصوت');
+    }
+  }
+
+  /// جلب أوليّ موجّه لأصوات استطلاع (يغطي أصواتاً خارج نافذة الرسائل المحمّلة)
+  Future<List<Map<String, dynamic>>> _loadPollVotes(String pollId) =>
+      supabase
+          .from('messages')
+          .select('id, sender_id, content, created_at, deleted_at')
+          .eq('poll_id', pollId)
+          .order('created_at');
+
+  List<Map<String, dynamic>> _votesFor(String pollId) =>
+      _votesByPoll[pollId] ?? const [];
+
   /// جدولة الرسالة النصية المكتوبة حالياً (بند المرحلة 1: الرسائل المجدولة)
   Future<void> _scheduleText() async {
     if (_text.text.trim().isEmpty) {
@@ -859,6 +942,17 @@ class _ChatScreenState extends State<ChatScreen> {
               _scheduleText();
             },
           ),
+          // استطلاع رأي (المرحلة 1 — 0.4.4): مشفّر بالكامل والفرز حيّ
+          ListTile(
+            leading: const Icon(Icons.poll_rounded, color: WaslColors.indigo),
+            title: const Text('استطلاع رأي'),
+            subtitle: const Text(
+                'سؤال وخيارات مشفّرة — الأصوات حيّة ويمكن تغييرها، ولا تُرسل إشعاراً'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _newPoll();
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
             title: const Text('صورة من المعرض'),
@@ -1017,6 +1111,24 @@ class _ChatScreenState extends State<ChatScreen> {
       ]);
     }
     switch (m['type'] as String? ?? 'text') {
+      case 'poll':
+        final raw = _textOf(m);
+        final poll = raw == null ? null : PollService.decodePoll(raw);
+        if (poll == null) {
+          return Text(raw == null ? '📊 جارٍ فك التشفير…' : '📊 استطلاع',
+              style: TextStyle(color: _bubbleText(mine), fontSize: 16));
+        }
+        return PollBubble(
+          content: poll,
+          mine: mine,
+          myId: _me,
+          votes: _votesFor(m['id'] as String),
+          loadVotes: () => _loadPollVotes(m['id'] as String),
+          onVote: (i) => _sendVote(m['id'] as String, i),
+        );
+      case 'poll_vote':
+        // الصوت يُعرض داخل فقاعة الاستطلاع نفسها — لا فقاعة مستقلة
+        return const SizedBox.shrink();
       case 'image':
         if (m['view_once'] == true) {
           return _viewOnceBubble(m, isVideo: false, mine: mine);
@@ -1314,6 +1426,12 @@ class _ChatScreenState extends State<ChatScreen> {
         return '🎬 فيديو';
       case 'file':
         return '📎 ${(_metaOf(m)?['name'] as String?) ?? 'ملف'}';
+      case 'poll':
+        final raw = _textOf(m);
+        final poll = raw == null ? null : PollService.decodePoll(raw);
+        return poll == null ? '📊 استطلاع' : '📊 ${poll.question}';
+      case 'poll_vote':
+        return '📊 صوت في استطلاع';
       default:
         final t = _textOf(m) ?? '🔒 رسالة مشفرة';
         return t.length > 120 ? '${t.substring(0, 120)}…' : t;
@@ -1885,6 +2003,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   return e == null || DateTime.parse(e).isAfter(now);
                 }).toList();
                 _byId = {for (final m in all) m['id'] as String: m};
+                // أصوات الاستطلاعات تُجمع من البث الحي ثم تُحجب عن قائمة الرسائل
+                _votesByPoll = {};
+                for (final m in all) {
+                  if ((m['type'] ?? '') == 'poll_vote') {
+                    final pid = m['poll_id'] as String?;
+                    if (pid != null) (_votesByPoll[pid] ??= []).add(m);
+                  }
+                }
                 final q = _query;
                 final base = _starredOnly
                     ? all.where((m) => _stars.contains(m['id'])).toList()
@@ -1896,7 +2022,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: TextStyle(color: context.wasl.textFaint)));
                 }
                 final msgs = q.isEmpty
-                    ? base
+                    ? base.where((m) => (m['type'] ?? '') != 'poll_vote').toList()
                     : base.where((m) {
                         if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') {
                           return false;
