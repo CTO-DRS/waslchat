@@ -20,6 +20,7 @@ import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/media_service.dart';
+import '../services/mention_service.dart';
 import '../services/poll_service.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
@@ -78,6 +79,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Map<String, Map<String, dynamic>> _byId = {};
   // أصوات الاستطلاعات: poll_id -> صفوف poll_vote (تُبنى في كل build)
   Map<String, List<Map<String, dynamic>>> _votesByPoll = {};
+  // الإشارة @ في المجموعات (0.4.5): توكنات حيّة + منتقي أعضاء
+  final List<MentionToken> _mentionTokens = [];
+  String? _mentionQuery; // استعلام المنتقي الحالي (بعد @)
+  int? _mentionStart; // موضع '@' عند آخر تحديث
+  bool _mentionInserting = false; // كتم ضبط المدى أثناء الإدراج البرمجي
+  String _mentionPrevText = '';
+  final FocusNode _inputFocus = FocusNode();
   StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
   Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
   // الرسائل المختفية والنجوم وصورة الطرف الآخر
@@ -162,10 +170,13 @@ class _ChatScreenState extends State<ChatScreen> {
     _decrypting.remove(content);
   }
 
-  /// النص المعروض لرسالة نصية (null إن كانت ما زالت قيد فك التشفير)
+  /// النص المعروض لرسالة نصية (null إن كانت ما زالت قيد فك التشفير).
+  /// يفك أيضاً بنية الإشارات @ — الباقي يُعاد كما هو.
   String? _textOf(Map<String, dynamic> m) {
     final raw = m['content'] as String? ?? '';
-    return E2eService.isEncrypted(raw) ? _plain[raw] : raw;
+    final t = E2eService.isEncrypted(raw) ? _plain[raw] : raw;
+    if (t == null || t.isEmpty) return t;
+    return MentionCodec.displayText(t);
   }
 
   /// يفك تشفير الرسائل النصية المشفّرة الجديدة في الخلفية
@@ -220,6 +231,7 @@ class _ChatScreenState extends State<ChatScreen> {
         .eq('conversation_id', widget.conversationId)
         .order('created_at', ascending: true);
     _text.addListener(_onTextChanged);
+    _mentionPrevText = _text.text;
     // استرجاع المسودة المحفوظة محلياً لهذه المحادثة (بند المرحلة 1)
     DraftService.load().then((_) {
       if (!mounted) return;
@@ -289,6 +301,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onTextChanged() {
+    // ضبط مدى إشارات @ مع أي تغيير (الإدراج البرمجي مكتوم)
+    if (!_mentionInserting) {
+      MentionTracker.adjust(_mentionTokens, _mentionPrevText, _text.text);
+    }
+    _mentionPrevText = _text.text;
+    _updateMentionQuery();
     setState(() {});
     // حفظ المسودة محلياً بتأجيل بسيط — لا تُرفع للخادم إطلاقاً
     _draftTimer?.cancel();
@@ -434,6 +452,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingSweep?.cancel();
     _partsSub?.cancel();
     _reactSub?.cancel();
+    _inputFocus.dispose();
     PresenceService.online.removeListener(_onPresence);
     PrivacyService.hidePresence.removeListener(_onPresence);
     PrivacyService.hideReceipts.removeListener(_onPresence);
@@ -574,13 +593,160 @@ class _ChatScreenState extends State<ChatScreen> {
     _showAiResult('ملخص المحادثة', _summarize());
   }
 
+  // ---------- الإشارة @ في المجموعات (0.4.5 — بند المرحلة 1) ----------
+
+  void _updateMentionQuery() {
+    if (!widget.isGroup || _editing != null || !widget.canPost) {
+      _mentionQuery = null;
+      return;
+    }
+    final cursor = _text.selection.baseOffset;
+    final q =
+        cursor > 0 ? MentionTracker.queryAt(_text.text, cursor) : null;
+    _mentionQuery = q;
+    _mentionStart = q == null ? null : cursor - 1 - q.length;
+  }
+
+  /// اختيار عضو من المنتقي: يستبدل «@استعلام» بـ«@اسم » ويسجّل مداه
+  void _pickMention(String id, String name) {
+    final q = _mentionQuery;
+    final start = _mentionStart;
+    final base = _text.text;
+    if (q == null || start == null || start >= base.length) return;
+    final end = start + 1 + q.length;
+    if (end > base.length || base.substring(start, end) != '@$q') return;
+    final insert = '@$name ';
+    final next = base.replaceRange(start, end, insert);
+    _mentionInserting = true;
+    _text.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: start + insert.length));
+    _mentionInserting = false;
+    _mentionPrevText = next;
+    _mentionTokens.add(MentionToken(id, name, start, start + insert.length));
+    _mentionQuery = null;
+    _mentionStart = null;
+    setState(() {});
+    FocusScope.of(context).requestFocus(_inputFocus);
+  }
+
+  /// شريط أعضاء فوق حقل الكتابة عند كتابة @
+  Widget _mentionPicker() {
+    final q = _mentionQuery;
+    final ql = q?.toLowerCase() ?? '';
+    final matches = _names.entries
+        .where((e) => e.value.trim().isNotEmpty)
+        .where((e) => ql.isEmpty || e.value.toLowerCase().contains(ql))
+        .take(6)
+        .toList();
+    if (q == null || matches.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+      decoration: BoxDecoration(
+        color: context.wasl.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: context.wasl.border),
+      ),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsetsDirectional.only(start: 8, bottom: 4),
+              child: Text('أشر إلى عضو — يصله تنبيه في الإشعار',
+                  style:
+                      TextStyle(color: context.wasl.textFaint, fontSize: 11)),
+            ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final e in matches)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 6),
+                    child: ActionChip(
+                      avatar: CircleAvatar(
+                        radius: 10,
+                        backgroundColor: WaslColors.indigo,
+                        child: Text(
+                            e.value.isEmpty
+                                ? '?'
+                                : e.value.substring(0, 1),
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.white)),
+                      ),
+                      label: Text('@${e.value}',
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: context.wasl.textPrimary)),
+                      onPressed: () => _pickMention(e.key, e.value),
+                    ),
+                  ),
+              ]),
+            ),
+          ]),
+    );
+  }
+
+  /// نصّ بإشارات ملوّنة — تمييز أقوى إن كنت أنا المُشار إليه
+  Widget _mentionText(StructuredText st, bool mine) {
+    final spans = <TextSpan>[];
+    var cursor = 0;
+    final sorted = st.mentions.toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+    for (final m in sorted) {
+      if (m.start < cursor || m.end > st.text.length) continue;
+      if (m.start > cursor) {
+        spans.add(TextSpan(text: st.text.substring(cursor, m.start)));
+      }
+      final isMe = m.userId == _me;
+      spans.add(TextSpan(
+        text: st.text.substring(m.start, m.end),
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: mine ? context.wasl.onBubbleMine : context.wasl.accent,
+          backgroundColor: mine
+              ? context.wasl.onBubbleMine.withValues(alpha: isMe ? 0.35 : 0.18)
+              : context.wasl.accent.withValues(alpha: isMe ? 0.28 : 0.12),
+        ),
+      ));
+      cursor = m.end;
+    }
+    if (cursor < st.text.length) {
+      spans.add(TextSpan(text: st.text.substring(cursor)));
+    }
+    return Text.rich(
+        TextSpan(
+            style: TextStyle(
+                color: _bubbleText(mine), fontSize: 16),
+            children: spans),
+        textAlign: TextAlign.start);
+  }
+
   // ---------- إرسال ----------
   Future<void> _sendText({DateTime? scheduledAt}) async {
-    final content = _text.text.trim();
+    final raw = _text.text;
+    final content = raw.trim();
     if (content.isEmpty) return;
     final editing = _editing;
     final replyTo = _replyTo;
+    // الإشارات @ (0.4.5): مدى التوكنات مُنزاح بحذف الفراغات الطرفية قبل الترميز
+    final lead = raw.indexOf(content);
+    final tokens = [
+      for (final t in _mentionTokens)
+        if (t.start - lead >= 0 && t.end - lead <= content.length)
+          MentionToken(t.userId, t.name, t.start - lead, t.end - lead)
+    ];
     var payload = content;
+    final mentionIds =
+        tokens.isEmpty ? null : tokens.map((t) => t.userId).toSet().toList();
+    if (tokens.isNotEmpty) {
+      payload = MentionCodec.encode(content, [
+        for (final t in tokens) MentionSpan(t.userId, t.start, t.end)
+      ]);
+    }
     if (_e2e) {
       if (!E2eService.withinPlainLimit(content)) {
         _snack('الرسالة طويلة جداً');
@@ -602,6 +768,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _editing = null;
       _replyTo = null;
+      _mentionTokens.clear();
     });
     if (editing != null) {
       try {
@@ -618,6 +785,8 @@ class _ChatScreenState extends State<ChatScreen> {
         'sender_id': _me,
         'type': 'text',
         'content': payload,
+        // قائمة المُشار إليهم (بيانات وصفية للتنبيه — ترحيل 023)
+        if (mentionIds != null) 'mentions': mentionIds,
         if (replyTo != null) 'reply_to': replyTo['id'],
         // رسالة مجدولة (ترحيل 021): تُشفَّر الآن ويطلقها الخادم في موعدها
         // (تسليم خلال دقيقة من الموعد) — الإلغاء بالحذف قبل الموعد
@@ -1181,6 +1350,8 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       default:
         final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
+        final st = MentionCodec.decode(text);
+        if (st != null) return _mentionText(st, mine);
         return Text(text,
             style: TextStyle(color: _bubbleText(mine), fontSize: 16));
     }
@@ -1562,6 +1733,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _editing = m;
       _replyTo = null;
+      _mentionTokens.clear();
       _text.text = t;
       _text.selection = TextSelection.collapsed(offset: t.length);
     });
@@ -2119,6 +2291,9 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
+          // منتقي الإشارة @ (0.4.5) — شريط أعضاء فوق حقل الكتابة
+          if (widget.canPost && !_recording && _mentionQuery != null)
+            _mentionPicker(),
           if (widget.canPost && _composeBanner() != null) _composeBanner()!,
           if (!widget.canPost)
             SafeArea(
@@ -2168,6 +2343,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         )
                       : TextField(
                           controller: _text,
+                          focusNode: _inputFocus,
                           minLines: 1,
                           maxLines: 5,
                           textInputAction: TextInputAction.send,
