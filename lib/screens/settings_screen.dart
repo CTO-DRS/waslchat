@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../services/app_lock_service.dart';
+import '../services/media_cache.dart';
+import '../services/media_prefs.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
 import '../services/push_service.dart';
@@ -28,6 +30,8 @@ class SettingsScreen extends StatelessWidget {
           const _ProfileCard(),
           const SizedBox(height: 16),
           const _AppearanceCard(),
+          const SizedBox(height: 16),
+          _MediaCard(),
           const SizedBox(height: 16),
           const _PrivacyCard(),
           const SizedBox(height: 16),
@@ -166,6 +170,93 @@ class _AppearanceCard extends StatelessWidget {
                 .toList(),
           ),
         ),
+      ),
+    ]);
+  }
+}
+
+/// بطاقة الوسائط (بند المرحلة 1: ضغط الفيديو والتنزيل التلقائي 0.4.8)
+/// كل شيء محلي على الجهاز — لا يُرفع أي إعداد للخادم
+class _MediaCard extends StatefulWidget {
+  const _MediaCard();
+
+  @override
+  State<_MediaCard> createState() => _MediaCardState();
+}
+
+class _MediaCardState extends State<_MediaCard> {
+  bool _clearing = false;
+
+  Future<void> _pickRule() async {
+    final current = MediaPrefs.autoDownload.value;
+    final picked = await showDialog<AutoDownloadRule>(
+      context: context,
+      builder: (ctx) => RadioGroup<AutoDownloadRule>(
+        groupValue: current,
+        onChanged: (v) {
+          if (v != null) Navigator.pop(ctx, v);
+        },
+        child: SimpleDialog(
+          title: const Text('التنزيل التلقائي للفيديو'),
+          children: [
+            for (final r in AutoDownloadRule.values)
+              RadioListTile<AutoDownloadRule>(
+                value: r,
+                title: Text(MediaPrefs.label(r)),
+                subtitle: Text(MediaPrefs.description(r),
+                    style: const TextStyle(fontSize: 12)),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) await MediaPrefs.setRule(picked);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _clearCache() async {
+    setState(() => _clearing = true);
+    final n = await MediaCache.clear();
+    if (!mounted) return;
+    setState(() => _clearing = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(n > 0
+            ? 'مُسحت $n من الوسائط المؤقتة المفكوكة'
+            : 'لا وسائط مؤقتة الآن')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ListTile(
+        leading: Icon(Icons.video_library_outlined, color: context.wasl.accent),
+        title: const Text('الوسائط',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        subtitle: const Text(
+            'الفيديو يُضغط على جهازك قبل الإرسال (بمُرمّزات المنصة)، ومصغّره تصل مشفّرة'),
+      ),
+      ListTile(
+        leading: const Icon(Icons.wifi_rounded, color: WaslColors.teal, size: 22),
+        title: const Text('التنزيل التلقائي للفيديو'),
+        subtitle: Text(MediaPrefs.description(MediaPrefs.autoDownload.value),
+            style: const TextStyle(fontSize: 12)),
+        trailing: Text(MediaPrefs.label(MediaPrefs.autoDownload.value),
+            style: TextStyle(color: context.wasl.accent, fontSize: 13)),
+        onTap: _pickRule,
+      ),
+      ListTile(
+        leading: const Icon(Icons.cleaning_services_outlined,
+            color: WaslColors.violet, size: 22),
+        title: const Text('مسح الوسائط المؤقتة'),
+        subtitle: const Text('تحذف النسخ المفكوكة على جهازك من الكاش',
+            style: TextStyle(fontSize: 12)),
+        trailing: _clearing
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.chevron_left),
+        onTap: _clearing ? null : _clearCache,
       ),
     ]);
   }

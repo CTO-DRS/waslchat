@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:cryptography/cryptography.dart' show SecretKey;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -19,9 +20,12 @@ import '../services/ai_service.dart';
 import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
+import '../services/media_cache.dart';
+import '../services/media_prefs.dart';
 import '../services/media_service.dart';
 import '../services/mention_service.dart';
 import '../services/poll_service.dart';
+import '../services/video_service.dart';
 import '../services/location_service.dart';
 import '../services/contact_card_service.dart';
 import '../services/presence_service.dart';
@@ -116,6 +120,14 @@ class _ChatScreenState extends State<ChatScreen> {
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
   bool _uploading = false;
+  bool _compressing = false; // ضغط الفيديو على الجهاز قبل الرفع (0.4.8)
+  // التنزيل التلقائي حسب الشبكة (0.4.8) — قرارات محلية بحتة:
+  final Set<String> _cachedMedia = {}; // مسارات التخزين الموجودة في الكاش المحلي
+  final Set<String> _autoDownloading = {}; // رسائل تُنزّل الآن
+  final Set<String> _autoTried = {}; // مَن حاولنا تنزيله (تفادي التكرار عند إعادة البناء)
+  int _autoBudget = 6; // سقف تنزيلات تلقائية لكل فتح شاشة (حِرص على البيانات)
+  bool _onWifi = true; // حالة الشبكة الحالية (واي-فاي/إيثرنت)
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   DateTime? _recStart;
   Timer? _ticker;
 
@@ -187,6 +199,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// يفك تشفير الرسائل النصية المشفّرة الجديدة في الخلفية
   void _scheduleDecrypt(List<Map<String, dynamic>> msgs) {
+    _maybeAutoDownload(msgs); // التنزيل التلقائي للفيديو (0.4.8)
     if (!_e2e) return;
     for (final m in msgs) {
       final t = m['type'] ?? 'text';
@@ -215,6 +228,55 @@ class _ChatScreenState extends State<ChatScreen> {
       return Map<String, dynamic>.from(jsonDecode(t) as Map);
     } catch (_) {
       return null;
+    }
+  }
+
+  // ---------- التنزيل التلقائي للفيديو حسب الشبكة (0.4.8) ----------
+
+  Future<void> _initConnectivity() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      if (!mounted) return;
+      final r = results.isEmpty ? ConnectivityResult.none : results.first;
+      setState(() => _onWifi =
+          r == ConnectivityResult.wifi || r == ConnectivityResult.ethernet);
+    } catch (_) {}
+  }
+
+  /// يُستدعى من بث الرسائل: ينزّل فيديو الآخرين تلقائياً وفق الإعداد
+  /// وقاعدة الشبكة. بلا تعليم عند الرفض — تغيّر الشبكة لاحقاً يعيد
+  /// المحاولة. «عرض مرة واحدة» ورسالتي لا تدخلان التلقائي أبداً.
+  void _maybeAutoDownload(List<Map<String, dynamic>> msgs) {
+    final rule = MediaPrefs.autoDownload.value;
+    if (rule == AutoDownloadRule.never) return;
+    if (!MediaPrefs.allows(rule, onWifi: _onWifi)) return;
+    if (_autoBudget <= 0) return; // سقف لكل فتح شاشة — البقية يدوي
+    for (final m in msgs) {
+      if (m['type'] != 'video') continue;
+      if (m['view_once'] == true) continue;
+      if ((m['sender_id'] ?? '') == _me) continue;
+      final id = m['id'] as String;
+      final path = m['media_url'] as String?;
+      if (path == null) continue;
+      if (_cachedMedia.contains(path)) continue;
+      if (_autoTried.contains(id) || _autoDownloading.contains(id)) continue;
+      _autoTried.add(id);
+      _autoBudget--;
+      unawaited(_cacheVideo(path, id));
+    }
+  }
+
+  /// تنزيل وفك وتخزين نسخة الفيديو محلياً للفتح الفوري
+  Future<void> _cacheVideo(String path, String msgId) async {
+    setState(() => _autoDownloading.add(msgId));
+    try {
+      final bytes = await _mediaBytes(path);
+      if (bytes != null) {
+        final f = await MediaCache.put(path, bytes);
+        if (f != null && mounted) setState(() => _cachedMedia.add(path));
+      }
+    } finally {
+      if (mounted) setState(() => _autoDownloading.remove(msgId));
     }
   }
 
@@ -252,6 +314,16 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     if (widget.isGroup) _loadMembers();
     _loadMeta();
+
+    // تفضيلات الوسائط وحالة الشبكة (0.4.8 — التنزيل التلقائي للفيديو)
+    unawaited(MediaPrefs.load());
+    unawaited(_initConnectivity());
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      if (!mounted) return;
+      final r = results.isEmpty ? ConnectivityResult.none : results.first;
+      setState(() =>
+          _onWifi = r == ConnectivityResult.wifi || r == ConnectivityResult.ethernet);
+    });
 
     // بث «يكتب الآن» بين أعضاء المحادثة
     _room = supabase.channel('room:${widget.conversationId}');
@@ -463,6 +535,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _ticker?.cancel();
     _typingSweep?.cancel();
     _partsSub?.cancel();
+    _connectivitySub?.cancel();
     _reactSub?.cancel();
     _inputFocus.dispose();
     PresenceService.online.removeListener(_onPresence);
@@ -1024,12 +1097,13 @@ class _ChatScreenState extends State<ChatScreen> {
     required String contentType,
     int? durationMs,
     Map<String, dynamic>? meta,
+    String? rawContent, // محتوى جاهز مسبقاً (meta الفيديو المُجزّأة بالضغط والمصغّرة — 0.4.8)
     bool viewOnce = false,
   }) async {
     if (!mounted) return; // قد يغادر المستخدم الشاشة أثناء اختيار الملف
     setState(() => _uploading = true);
     try {
-      var content = meta == null ? '' : jsonEncode(meta);
+      var content = rawContent ?? (meta == null ? '' : jsonEncode(meta));
       var payload = bytes;
       var upExt = ext;
       var upType = contentType;
@@ -1101,19 +1175,61 @@ class _ChatScreenState extends State<ChatScreen> {
     final x = await _picker.pickVideo(
         source: ImageSource.gallery, maxDuration: const Duration(minutes: 5));
     if (x == null) return;
-    final size = await x.length();
+    File src = File(x.path);
+    var size = await src.length();
+    final origSize = size;
+    // الضغط على الجهاز بمُرمّزات المنصة (0.4.8): أفضل جهد — فشله يُرسل
+    // الأصل كما هو، والأصل لا يُحذف أبداً
+    if (VideoService.shouldCompress(size)) {
+      setState(() => _compressing = true);
+      try {
+        final out =
+            await VideoService.compress(src.path, sizeBytes: size);
+        if (out != null) {
+          src = out;
+          size = await out.length();
+        }
+      } finally {
+        if (mounted) setState(() => _compressing = false);
+      }
+    }
     if (size > _maxBytes) {
-      _snack('الفيديو أكبر من 24 ميغابايت');
+      _snack('الفيديو أكبر من 24 ميغابايت حتى بعد الضغط');
       return;
     }
-    final bytes = await x.readAsBytes();
-    final ext = x.name.contains('.') ? x.name.split('.').last.toLowerCase() : 'mp4';
+    // المصغّرة داخل التشفير (0.4.8): إطار JPEG صغير في meta المشفّرة —
+    // فشلها يرسل بلا مصغّرة، وتجاوز السقف يعيد المحاولة بلا مصغّرة
+    String? thumbB64;
+    String meta;
+    try {
+      final tb = await VideoService.thumbnail(src.path);
+      if (tb != null) thumbB64 = base64Encode(tb);
+    } catch (_) {}
+    final name = x.name.isNotEmpty ? x.name : 'video.mp4';
+    final wasCompressed = size != origSize;
+    try {
+      meta = VideoService.metaJson(
+          name: name,
+          size: size,
+          originalSize: wasCompressed ? origSize : null,
+          thumbBase64: thumbB64);
+    } on StateError {
+      try {
+        meta = VideoService.metaJsonWithoutThumb(
+            name: name, size: size, originalSize: wasCompressed ? origSize : null);
+      } on StateError {
+        _snack('تعذّر تجهيز الفيديو');
+        return;
+      }
+    }
+    final bytes = await src.readAsBytes();
+    final ext = src.path.toLowerCase().endsWith('.mov') ? 'mov' : 'mp4';
     await _sendMedia(
       type: 'video',
       bytes: bytes,
       ext: ext,
       contentType: ext == 'mov' ? 'video/quicktime' : 'video/mp4',
-      meta: {'name': x.name, 'size': size},
+      rawContent: meta,
       viewOnce: _attachViewOnce,
     );
   }
@@ -1139,31 +1255,52 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// يفك الملف إلى مجلد مؤقت ثم يفتحه (الفيديو داخل التطبيق، وغيره بتطبيق مناسب)
+  /// يفك الملف ثم يفتحه (الفيديو داخل التطبيق، وغيره بتطبيق مناسب).
+  /// الفيديو يمرّ بكاش محلي (0.4.8): تنزيل واحد ثم فتح فوري لاحقاً.
   Future<void> _openMedia(Map<String, dynamic> m) async {
     if (kIsWeb) return;
+    final mediaPath = m['media_url'] as String?;
+    if (mediaPath == null) return;
     setState(() => _uploading = true);
     try {
-      final bytes = await _mediaBytes(m['media_url'] as String);
-      if (bytes == null) {
-        _snack('تعذّر تنزيل الملف');
-        return;
+      File? file;
+      if (m['type'] == 'video' && _cachedMedia.contains(mediaPath)) {
+        file = await MediaCache.get(mediaPath);
       }
-      final meta = _metaOf(m);
-      var name = (meta?['name'] as String?) ?? (m['type'] == 'video' ? 'video.mp4' : 'file');
-      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final dir = Directory('${(await getTemporaryDirectory()).path}/wasl_open');
-      await dir.create(recursive: true);
-      final file = File('${dir.path}/${DateTime.now().millisecondsSinceEpoch}_$name');
-      await file.writeAsBytes(bytes, flush: true);
-      _openedFiles.add(file);
+      if (file == null) {
+        final bytes = await _mediaBytes(mediaPath);
+        if (bytes == null) {
+          _snack('تعذّر تنزيل الملف');
+          return;
+        }
+        if (m['type'] == 'video') {
+          // نسخة الفيديو تبقى في الكاش للفتح الفوري لاحقاً —
+          // التنظيف عبر «مسح الوسائط المؤقتة» في الإعدادات
+          file = await MediaCache.put(mediaPath, bytes);
+          if (file != null && mounted) {
+            setState(() => _cachedMedia.add(mediaPath));
+          }
+        }
+        if (file == null) {
+          final meta = _metaOf(m);
+          var name = (meta?['name'] as String?) ??
+              (m['type'] == 'video' ? 'video.mp4' : 'file');
+          name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+          final dir =
+              Directory('${(await getTemporaryDirectory()).path}/wasl_open');
+          await dir.create(recursive: true);
+          file = File(
+              '${dir.path}/${DateTime.now().millisecondsSinceEpoch}_$name');
+          await file.writeAsBytes(bytes, flush: true);
+          _openedFiles.add(file);
+        }
+      }
       if (!mounted) return;
       if (m['type'] == 'video') {
-        await Navigator.push(
-            context, MaterialPageRoute(builder: (_) => VideoScreen(file: file)));
-        // حذف فوري بعد إغلاق العارض (وdispose يحذفه أيضاً لو أُغلقت الشاشة فجأة)
+        await Navigator.push(context,
+            MaterialPageRoute(builder: (_) => VideoScreen(file: file!)));
         _openedFiles.remove(file);
-        _deleteQuietly(file.path);
+        if (file.path.contains('wasl_open')) _deleteQuietly(file.path);
       } else {
         final res = await OpenFilex.open(file.path);
         if (res.type != ResultType.done) _snack('لا يوجد تطبيق يفتح هذا الملف');
@@ -1447,8 +1584,9 @@ class _ChatScreenState extends State<ChatScreen> {
         if (isVideo && m['view_once'] == true) {
           return _viewOnceBubble(m, isVideo: true, mine: mine);
         }
+        if (isVideo) return _videoBubble(m, mine);
         final meta = _metaOf(m);
-        final name = (meta?['name'] as String?) ?? (isVideo ? 'فيديو' : 'ملف');
+        final name = (meta?['name'] as String?) ?? 'ملف';
         return InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () => _openMedia(m),
@@ -1489,6 +1627,100 @@ class _ChatScreenState extends State<ChatScreen> {
         return Text(text,
             style: TextStyle(color: _bubbleText(mine), fontSize: 16));
     }
+  }
+
+  // ---------- فقاعة الفيديو بالمصغّرة المشفّرة (0.4.8) ----------
+
+  /// فقاعة فيديو: المصغّرة (إطار JPEG) تخرج من meta المشفّرة فلا يرى
+  /// الخادم بيكسلاتها، وشارة صادقة للحالة: ✓ جاهز / جارٍ التنزيل /
+  /// اضغط للتنزيل. بلا مصغّرة تظهر فقاعة أيقونية كما قبل 0.4.8.
+  Widget _videoBubble(Map<String, dynamic> m, bool mine) {
+    final meta = _metaOf(m);
+    final b64 = meta?['thumb'] as String?;
+    Uint8List? thumb;
+    if (b64 != null && b64.length <= 40000) {
+      try {
+        thumb = base64Decode(b64);
+      } catch (_) {}
+    }
+    final path = m['media_url'] as String?;
+    final cached = path != null && _cachedMedia.contains(path);
+    final downloading = _autoDownloading.contains(m['id'] as String);
+    final sizeText = _sizeLabel((meta?['size'] as num?)?.toInt());
+    final orig = (meta?['orig'] as num?)?.toInt();
+    final subtitle = [
+      if (sizeText.isNotEmpty) sizeText,
+      if (orig != null) 'مضغوط من ${_sizeLabel(orig)}',
+    ].join(' · ');
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: () => _openMedia(m),
+        child: Container(
+          width: 236,
+          color: context.wasl.glass,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(children: [
+                if (thumb != null)
+                  Image.memory(thumb,
+                      width: 236,
+                      height: 148,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true)
+                else
+                  Container(
+                    height: 104,
+                    width: 236,
+                    color: context.wasl.glassStrong,
+                    alignment: Alignment.center,
+                    child: Icon(Icons.videocam_outlined,
+                        size: 40, color: _bubbleText(mine)),
+                  ),
+                const Positioned.fill(
+                  child: Center(
+                    child: Icon(Icons.play_circle_fill,
+                        size: 46, color: Colors.white70),
+                  ),
+                ),
+              ]),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(
+                      subtitle.isEmpty ? 'فيديو' : subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: _bubbleSecondary(mine), fontSize: 12),
+                    ),
+                  ),
+                  if (downloading)
+                    SizedBox(
+                      width: 13,
+                      height: 13,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: _bubbleText(mine)),
+                    )
+                  else
+                    Icon(
+                      cached
+                          ? Icons.check_circle_outline
+                          : Icons.download_rounded,
+                      size: 16,
+                      color: _bubbleSecondary(mine),
+                    ),
+                ]),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ---------- وسائط عرض مرة واحدة (المرحلة 2) ----------
@@ -2470,7 +2702,8 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-          if (_uploading) const LinearProgressIndicator(minHeight: 2),
+          if (_compressing || _uploading)
+            const LinearProgressIndicator(minHeight: 2),
           // منتقي الإشارة @ (0.4.5) — شريط أعضاء فوق حقل الكتابة
           if (widget.canPost && !_recording && _mentionQuery != null)
             _mentionPicker(),
