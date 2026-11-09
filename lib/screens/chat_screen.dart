@@ -16,6 +16,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/ai_service.dart';
+import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/media_service.dart';
@@ -200,6 +201,7 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime _lastTypingSent = DateTime(2000);
   DateTime? _othersReadUpTo;
   String? _lastMarkedId;
+  Timer? _draftTimer;
 
   @override
   void initState() {
@@ -210,6 +212,12 @@ class _ChatScreenState extends State<ChatScreen> {
         .eq('conversation_id', widget.conversationId)
         .order('created_at', ascending: true);
     _text.addListener(_onTextChanged);
+    // استرجاع المسودة المحفوظة محلياً لهذه المحادثة (بند المرحلة 1)
+    DraftService.load().then((_) {
+      if (!mounted) return;
+      final d = DraftService.get(widget.conversationId);
+      if (d != null && _text.text.isEmpty) _text.text = d;
+    });
     if (widget.isGroup) _loadMembers();
     _loadMeta();
 
@@ -274,6 +282,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _onTextChanged() {
     setState(() {});
+    // حفظ المسودة محلياً بتأجيل بسيط — لا تُرفع للخادم إطلاقاً
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 600), () {
+      unawaited(DraftService.save(widget.conversationId, _text.text));
+    });
     final now = DateTime.now();
     if (_text.text.trim().isNotEmpty &&
         now.difference(_lastTypingSent).inMilliseconds > 2000) {
@@ -406,6 +419,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _draftTimer?.cancel();
+    // حفظ المسودة الأخيرة قبل المغادرة
+    unawaited(DraftService.save(widget.conversationId, _text.text));
     _ticker?.cancel();
     _typingSweep?.cancel();
     _partsSub?.cancel();
@@ -551,7 +567,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ---------- إرسال ----------
-  Future<void> _sendText() async {
+  Future<void> _sendText({DateTime? scheduledAt}) async {
     final content = _text.text.trim();
     if (content.isEmpty) return;
     final editing = _editing;
@@ -595,12 +611,63 @@ class _ChatScreenState extends State<ChatScreen> {
         'type': 'text',
         'content': payload,
         if (replyTo != null) 'reply_to': replyTo['id'],
+        // رسالة مجدولة (ترحيل 021): تُشفَّر الآن ويطلقها الخادم في موعدها
+        // (تسليم خلال دقيقة من الموعد) — الإلغاء بالحذف قبل الموعد
+        if (scheduledAt != null) ...{
+          'created_at': scheduledAt.toUtc().toIso8601String(),
+          'scheduled': true,
+        },
       });
+      unawaited(DraftService.clear(widget.conversationId));
+      if (scheduledAt != null && mounted) {
+        _snack('⏰ ستُرسل الرسالة في ${_fmtWhen(scheduledAt)}');
+      }
     } catch (e) {
       _snack(e.toString().contains('blocked')
           ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
           : 'تعذّر إرسال الرسالة');
     }
+  }
+
+  /// جدولة الرسالة النصية المكتوبة حالياً (بند المرحلة 1: الرسائل المجدولة)
+  Future<void> _scheduleText() async {
+    if (_text.text.trim().isEmpty) {
+      _snack('اكتب الرسالة أولاً ثم اختر جدولة الإرسال');
+      return;
+    }
+    if (_editing != null) {
+      _snack('لا يمكن جدولة تعديل — أرسله أو ألغِ التعديل');
+      return;
+    }
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 180)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(minutes: 15))),
+    );
+    if (time == null || !mounted) return;
+    final at = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    if (at.difference(now) < const Duration(minutes: 5)) {
+      _snack('اختر وقتاً بعد 5 دقائق على الأقل من الآن');
+      return;
+    }
+    await _sendText(scheduledAt: at);
+  }
+
+  String _fmtWhen(DateTime at) {
+    final d = at.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final hm = '${two(d.hour)}:${two(d.minute)}';
+    final now = DateTime.now();
+    final today = d.year == now.year && d.month == now.month && d.day == now.day;
+    if (today) return 'اليوم $hm';
+    return '${d.year}/${two(d.month)}/${two(d.day)} · $hm';
   }
 
   Future<void> _sendMedia({
@@ -780,6 +847,17 @@ class _ChatScreenState extends State<ChatScreen> {
               value: _attachViewOnce,
               onChanged: (v) => setSheet(() => setState(() => _attachViewOnce = v)),
             ),
+          ),
+          // رسالة مجدولة (المرحلة 1): نص فقط في هذا الإصدار
+          ListTile(
+            leading: const Icon(Icons.schedule_send_outlined, color: WaslColors.violet),
+            title: const Text('رسالة مجدولة'),
+            subtitle: const Text(
+                'تُشفَّر الآن وتُسلَّم في الوقت الذي تحدده (خلال دقيقة منه)، والإلغاء بالحذف'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _scheduleText();
+            },
           ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
@@ -1888,6 +1966,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                     size: 12, color: _bubbleFaint(mine)),
                                 const SizedBox(width: 3),
                               ],
+                              if (m['scheduled'] == true) ...[
+                                Icon(Icons.schedule_rounded,
+                                    size: 12, color: _bubbleFaint(mine)),
+                                const SizedBox(width: 3),
+                              ],
                               if (m['edited_at'] != null && m['deleted_at'] == null) ...[
                                 Text('معدّلة',
                                     style: TextStyle(
@@ -1973,6 +2056,9 @@ class _ChatScreenState extends State<ChatScreen> {
                             shape: BoxShape.circle, gradient: WaslColors.gradient),
                         child: IconButton(
                           onPressed: _sendText,
+                          // ضغط مطول = جدولة الإرسال (بند المرحلة 1)
+                          onLongPress: _scheduleText,
+                          tooltip: 'إرسال · ضغط مطول للجدولة',
                           icon: const Icon(Icons.send_rounded, color: Colors.white),
                         ),
                       )
