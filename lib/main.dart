@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'screens/app_lock_screen.dart';
 import 'services/app_lock_service.dart';
+import 'services/media_prefs.dart';
 import 'services/deep_link_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
@@ -30,6 +31,8 @@ void main() {
     await AppLockService.load();
     // المظهر: الوضع (فاتح/داكن/النظام) وحجم الخط (المرحلة 1)
     await ThemeService.load();
+    // تفضيلات الوسائط: التنزيل التلقائي للفيديو (0.4.8 — المرحلة 1)
+    await MediaPrefs.load();
     // روابط دعوة المجموعات app.waslchat://join/CODE
     await DeepLinkService.init();
     _installCrashReporting();
