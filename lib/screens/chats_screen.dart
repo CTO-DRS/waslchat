@@ -121,6 +121,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
         return '📎 ملف';
       case 'poll':
         return '📊 استطلاع';
+      case 'location':
+        // الخادم يرسل معاينة عامة أصلاً (ترحيل 024) — هذه حماية إضافية
+        return '📍 موقع';
+      case 'contact':
+        return '👤 جهة اتصال';
       case 'poll_vote':
         // نظرياً لا يصل: my_chats يتخطى الأصوات (ترحيل 022) — حماية إضافية
         return '📊 استطلاع';

@@ -22,6 +22,8 @@ import '../services/forward_service.dart';
 import '../services/media_service.dart';
 import '../services/mention_service.dart';
 import '../services/poll_service.dart';
+import '../services/location_service.dart';
+import '../services/contact_card_service.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
 import '../services/secure_flag_service.dart';
@@ -30,6 +32,10 @@ import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/poll_bubble.dart';
 import '../widgets/poll_composer_sheet.dart';
+import '../widgets/location_bubble.dart';
+import '../widgets/location_picker_sheet.dart';
+import '../widgets/contact_bubble.dart';
+import '../widgets/contact_picker_sheet.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
@@ -185,7 +191,13 @@ class _ChatScreenState extends State<ChatScreen> {
     for (final m in msgs) {
       final t = m['type'] ?? 'text';
       // الاستطلاعات: السؤال والخيارات والأصوات كلها مشفّرة وتُفكّ هنا
-      if (t != 'text' && t != 'file' && t != 'video' && t != 'poll' && t != 'poll_vote') {
+      if (t != 'text' &&
+          t != 'file' &&
+          t != 'video' &&
+          t != 'poll' &&
+          t != 'poll_vote' &&
+          t != 'location' &&
+          t != 'contact') {
         continue;
       }
       if (m['deleted_at'] != null) continue;
@@ -840,6 +852,89 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// مشاركة الموقع الحالي (0.4.6 — بند المرحلة 1): الإحداثيات والدقة
+  /// تُقرأ على الجهاز ثم تُشفَّر قبل الرفع — الخادم يرى النوع فقط.
+  Future<void> _sendLocation() async {
+    final loc = await LocationPickerSheet.show(context, encrypted: _e2e);
+    if (loc == null || !mounted) return;
+    var payload = LocationService.encode(
+      lat: loc.lat,
+      lng: loc.lng,
+      accuracyM: loc.accuracyM,
+      label: loc.label,
+    );
+    if (!LocationService.withinLimit(payload)) {
+      _snack('تعذّر تجهيز الموقع');
+      return;
+    }
+    if (_e2e) {
+      final key = await _convKey(fresh: true);
+      if (key == null) {
+        _snack(_keyMissingMsg());
+        return;
+      }
+      try {
+        payload = await E2eService.encryptText(key, widget.conversationId, payload);
+      } catch (_) {
+        _snack('تعذّر تشفير الموقع');
+        return;
+      }
+    }
+    try {
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'location',
+        'content': payload,
+      });
+    } catch (e) {
+      _snack(e.toString().contains('blocked')
+          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
+          : 'تعذّر إرسال الموقع');
+    }
+  }
+
+  /// مشاركة بطاقة جهة اتصال (0.4.6 — بند المرحلة 1): الاسم والأرقام
+  /// والبريد تُقرأ من دفتر الجهاز وتُشفَّر قبل الرفع.
+  Future<void> _sendContact() async {
+    final card = await ContactPickerSheet.show(context, encrypted: _e2e);
+    if (card == null || !mounted) return;
+    var payload = ContactCardService.encode(
+      name: card.name,
+      phones: card.phones,
+      emails: card.emails,
+    );
+    if (!ContactCardService.withinLimit(payload)) {
+      _snack('البطاقة كبيرة — قلّل القيم المختارة');
+      return;
+    }
+    if (_e2e) {
+      final key = await _convKey(fresh: true);
+      if (key == null) {
+        _snack(_keyMissingMsg());
+        return;
+      }
+      try {
+        payload = await E2eService.encryptText(key, widget.conversationId, payload);
+      } catch (_) {
+        _snack('تعذّر تشفير البطاقة');
+        return;
+      }
+    }
+    try {
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'contact',
+        'content': payload,
+      });
+    } catch (e) {
+      _snack(e.toString().contains('blocked')
+          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
+          : 'تعذّر إرسال البطاقة');
+    }
+  }
+
   /// تصويت (أو تغيير الصوت): اختيار جديد يلغي السابق («الأحدث يفوز»).
   /// صامت عمداً: بلا إشعار ولا عدّاد غير مقروء (ترحيل 022 يستثنيه).
   Future<void> _sendVote(String pollId, int choice) async {
@@ -1122,6 +1217,29 @@ class _ChatScreenState extends State<ChatScreen> {
               _newPoll();
             },
           ),
+          // الموقع الحالي (المرحلة 1 — 0.4.6): الإحداثيات داخل التشفير
+          ListTile(
+            leading: const Icon(Icons.location_on_outlined, color: WaslColors.teal),
+            title: const Text('الموقع'),
+            subtitle: const Text(
+                'موقعك الحالي تُشفَّر إحداثياته — الخادم لا يعرف مكانك'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _sendLocation();
+            },
+          ),
+          // بطاقة جهة اتصال (المرحلة 1 — 0.4.6): الاسم والأرقام داخل التشفير
+          ListTile(
+            leading: const Icon(Icons.person_pin_circle_rounded,
+                color: WaslColors.violet),
+            title: const Text('جهة اتصال'),
+            subtitle: const Text(
+                'تُقرأ من دفتر جهازك وتُشفَّر داخل البطاقة — بلا مزامنة'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _sendContact();
+            },
+          ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
             title: const Text('صورة من المعرض'),
@@ -1298,6 +1416,22 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'poll_vote':
         // الصوت يُعرض داخل فقاعة الاستطلاع نفسها — لا فقاعة مستقلة
         return const SizedBox.shrink();
+      case 'location':
+        final raw = _textOf(m);
+        final loc = raw == null ? null : LocationService.decode(raw);
+        if (loc == null) {
+          return Text(raw == null ? '📍 جارٍ فك التشفير…' : '📍 موقع',
+              style: TextStyle(color: _bubbleText(mine), fontSize: 16));
+        }
+        return LocationBubble(content: loc, mine: mine);
+      case 'contact':
+        final raw = _textOf(m);
+        final card = raw == null ? null : ContactCardService.decode(raw);
+        if (card == null) {
+          return Text(raw == null ? '👤 جارٍ فك التشفير…' : '👤 جهة اتصال',
+              style: TextStyle(color: _bubbleText(mine), fontSize: 16));
+        }
+        return ContactBubble(content: card, mine: mine);
       case 'image':
         if (m['view_once'] == true) {
           return _viewOnceBubble(m, isVideo: false, mine: mine);
@@ -1603,6 +1737,16 @@ class _ChatScreenState extends State<ChatScreen> {
         return poll == null ? '📊 استطلاع' : '📊 ${poll.question}';
       case 'poll_vote':
         return '📊 صوت في استطلاع';
+      case 'location':
+        final raw = _textOf(m);
+        final loc = raw == null ? null : LocationService.decode(raw);
+        return loc == null
+            ? '📍 موقع'
+            : '📍 ${loc.label ?? '${loc.lat.toStringAsFixed(4)}, ${loc.lng.toStringAsFixed(4)}'}';
+      case 'contact':
+        final raw = _textOf(m);
+        final card = raw == null ? null : ContactCardService.decode(raw);
+        return card == null ? '👤 جهة اتصال' : '👤 ${card.name}';
       default:
         final t = _textOf(m) ?? '🔒 رسالة مشفرة';
         return t.length > 120 ? '${t.substring(0, 120)}…' : t;
@@ -1711,6 +1855,12 @@ class _ChatScreenState extends State<ChatScreen> {
     bool ok;
     if (type == 'text') {
       ok = await ForwardService.send(target: target, type: 'text', text: _textOf(m));
+    } else if (type == 'poll' ||
+        type == 'location' ||
+        type == 'contact') {
+      // رسائل المحتوى-فقط: تُفكّ ثم تُشفَّر بمفتاح الهدف — بلا وسائط
+      // (يصلح أيضاً توجيه الاستطلاعات الذي كان يفشل صامتاً)
+      ok = await ForwardService.send(target: target, type: type, text: _textOf(m));
     } else {
       final bytes = await _mediaBytes(m['media_url'] as String);
       ok = bytes != null &&
@@ -1741,11 +1891,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _messageActions(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) return;
-    final isText = (m['type'] ?? 'text') == 'text';
+    final type = m['type'] ?? 'text';
+    final isText = type == 'text';
     final text = isText ? _textOf(m) : null;
     if (isText && text == null) {
       _snack('جارٍ فك التشفير… حاول بعد لحظة');
       return;
+    }
+    // النسخ يمتد للموقع (رابط geo) والبطاقة (الاسم والأرقام) — 0.4.6
+    String? copyable = text;
+    if (type == 'location') {
+      final raw = _textOf(m);
+      final loc = raw == null ? null : LocationService.decode(raw);
+      copyable = loc?.geoUri;
+    } else if (type == 'contact') {
+      final raw = _textOf(m);
+      final card = raw == null ? null : ContactCardService.decode(raw);
+      copyable = card == null ? null : ContactCardService.copyText(card);
     }
     final arabic = text != null && RegExp(r'[\u0600-\u06FF]').hasMatch(text);
     final mine = m['sender_id'] == _me;
@@ -1793,12 +1955,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 });
               },
             ),
-          if (text != null)
+          if (copyable != null)
             ListTile(
               leading: const Icon(Icons.copy_rounded),
-              title: const Text('نسخ'),
+              title: Text(type == 'location' ? 'نسخ الإحداثيات' : type == 'contact' ? 'نسخ البطاقة' : 'نسخ'),
               onTap: () {
-                Clipboard.setData(ClipboardData(text: text));
+                Clipboard.setData(ClipboardData(text: copyable!));
                 Navigator.pop(ctx);
                 _snack('تم النسخ');
               },
@@ -2196,9 +2358,27 @@ class _ChatScreenState extends State<ChatScreen> {
                 final msgs = q.isEmpty
                     ? base.where((m) => (m['type'] ?? '') != 'poll_vote').toList()
                     : base.where((m) {
-                        if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') {
-                          return false;
+                        if (m['deleted_at'] != null) return false;
+                        final t = m['type'] ?? 'text';
+                        // البحث يشمل اسم ورقم بطاقة الاتصال ووصف الموقع — 0.4.6
+                        if (t == 'contact') {
+                          final raw = _textOf(m);
+                          final card =
+                              raw == null ? null : ContactCardService.decode(raw);
+                          if (card == null) return false;
+                          return (card.name + card.phones.join())
+                              .toLowerCase()
+                              .contains(q);
                         }
+                        if (t == 'location') {
+                          final raw = _textOf(m);
+                          final loc =
+                              raw == null ? null : LocationService.decode(raw);
+                          if (loc == null) return false;
+                          return (loc.label ?? '').toLowerCase().contains(q) ||
+                              loc.geoUri.contains(q);
+                        }
+                        if (t != 'text') return false;
                         return (_textOf(m) ?? '').toLowerCase().contains(q);
                       }).toList();
                 if (q.isNotEmpty && msgs.isEmpty) {
