@@ -26,6 +26,7 @@ import '../services/media_prefs.dart';
 import '../services/media_service.dart';
 import '../services/mention_service.dart';
 import '../services/poll_service.dart';
+import '../services/room_permissions_service.dart';
 import '../services/sticker_service.dart';
 import '../services/video_service.dart';
 import '../services/location_service.dart';
@@ -85,6 +86,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Map<String, String> _names = {};
   late String _title = widget.title;
+
+  // صلاحيات الغرفة (0.5.0 — المرحلة 3): تُجلب مرة عند الفتح،
+  // وتعطّل خيارات الواجهة — والفرض الحقيقي من الخادم على كل رسالة
+  RoomPerms? _perms;
+
+  bool get _canMedia => _perms?.canSendMedia ?? true;
+  bool get _canVoice => _perms?.canSendVoice ?? true;
+  bool get _canPolls => _perms?.canSendPolls ?? true;
 
   // الرد والتعديل والتفاعلات
   Map<String, dynamic>? _replyTo;
@@ -317,6 +326,12 @@ class _ChatScreenState extends State<ChatScreen> {
       if (d != null && _text.text.isEmpty) _text.text = d;
     });
     if (widget.isGroup) _loadMembers();
+    // صلاحيات الغرفة للمجموعات وغرف المجتمعات (القنوات قاعدة نشرها للمشرفين كما هي)
+    if (widget.isGroup && !widget.isChannel) {
+      RoomPermissionsService.fetch(widget.conversationId).then((p) {
+        if (mounted) setState(() => _perms = p);
+      });
+    }
     _loadMeta();
 
     // تفضيلات الوسائط وحالة الشبكة (0.4.8 — التنزيل التلقائي للفيديو)
@@ -575,6 +590,17 @@ class _ChatScreenState extends State<ChatScreen> {
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// رسالة فشل الإرسال: تحويل رفض الخادم لرسالة عربية واضحة،
+  /// ومنها رفض صلاحيات الغرفة (0.5.0 — RLS يرفض بصمت)
+  String _sendFail(Object e, String fallback) {
+    final s = e.toString();
+    if (s.contains('blocked')) return 'لا يمكن الإرسال: أحد الطرفين حظر الآخر';
+    if (s.contains('row-level') || s.contains('permission denied')) {
+      return 'مالك المجموعة قيّد هذا النوع من الرسائل في هذه الغرفة';
+    }
+    return fallback;
   }
 
   Future<void> _loadMembers() async {
@@ -889,9 +915,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _snack('⏰ ستُرسل الرسالة في ${_fmtWhen(scheduledAt)}');
       }
     } catch (e) {
-      _snack(e.toString().contains('blocked')
-          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
-          : 'تعذّر إرسال الرسالة');
+      _snack(_sendFail(e, 'تعذّر إرسال الرسالة'));
     }
   }
 
@@ -923,9 +947,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': payload,
       });
     } catch (e) {
-      _snack(e.toString().contains('blocked')
-          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
-          : 'تعذّر إرسال الاستطلاع');
+      _snack(_sendFail(e, 'تعذّر إرسال الاستطلاع'));
     }
   }
 
@@ -965,9 +987,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': payload,
       });
     } catch (e) {
-      _snack(e.toString().contains('blocked')
-          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
-          : 'تعذّر إرسال الموقع');
+      _snack(_sendFail(e, 'تعذّر إرسال الموقع'));
     }
   }
 
@@ -1006,9 +1026,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': payload,
       });
     } catch (e) {
-      _snack(e.toString().contains('blocked')
-          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
-          : 'تعذّر إرسال البطاقة');
+      _snack(_sendFail(e, 'تعذّر إرسال البطاقة'));
     }
   }
 
@@ -1037,8 +1055,8 @@ class _ChatScreenState extends State<ChatScreen> {
         'poll_id': pollId,
         'content': payload,
       });
-    } catch (_) {
-      _snack('تعذّر تسجيل الصوت');
+    } catch (e) {
+      _snack(_sendFail(e, 'تعذّر تسجيل الصوت'));
     }
   }
 
@@ -1149,9 +1167,7 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     } catch (e) {
-      _snack(e.toString().contains('blocked')
-          ? 'لا يمكن الإرسال: أحد الطرفين حظر الآخر'
-          : 'تعذّر رفع الملف');
+      _snack(_sendFail(e, 'تعذّر رفع الملف'));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -1413,10 +1429,13 @@ class _ChatScreenState extends State<ChatScreen> {
             title: const Text('استطلاع رأي'),
             subtitle: const Text(
                 'سؤال وخيارات مشفّرة — الأصوات حيّة ويمكن تغييرها، ولا تُرسل إشعاراً'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _newPoll();
-            },
+            enabled: _canPolls,
+            onTap: _canPolls
+                ? () {
+                    Navigator.pop(ctx);
+                    _newPoll();
+                  }
+                : null,
           ),
           // الموقع الحالي (المرحلة 1 — 0.4.6): الإحداثيات داخل التشفير
           ListTile(
@@ -1424,10 +1443,13 @@ class _ChatScreenState extends State<ChatScreen> {
             title: const Text('الموقع'),
             subtitle: const Text(
                 'موقعك الحالي تُشفَّر إحداثياته — الخادم لا يعرف مكانك'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _sendLocation();
-            },
+            enabled: _canMedia,
+            onTap: _canMedia
+                ? () {
+                    Navigator.pop(ctx);
+                    _sendLocation();
+                  }
+                : null,
           ),
           // بطاقة جهة اتصال (المرحلة 1 — 0.4.6): الاسم والأرقام داخل التشفير
           ListTile(
@@ -1436,46 +1458,61 @@ class _ChatScreenState extends State<ChatScreen> {
             title: const Text('جهة اتصال'),
             subtitle: const Text(
                 'تُقرأ من دفتر جهازك وتُشفَّر داخل البطاقة — بلا مزامنة'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _sendContact();
-            },
+            enabled: _canMedia,
+            onTap: _canMedia
+                ? () {
+                    Navigator.pop(ctx);
+                    _sendContact();
+                  }
+                : null,
           ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
             title: const Text('صورة من المعرض'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _pickImage(ImageSource.gallery);
-            },
+            enabled: _canMedia,
+            onTap: _canMedia
+                ? () {
+                    Navigator.pop(ctx);
+                    _pickImage(ImageSource.gallery);
+                  }
+                : null,
           ),
           if (!kIsWeb)
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined, color: WaslColors.indigo),
               title: const Text('الكاميرا'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickImage(ImageSource.camera);
-              },
+              enabled: _canMedia,
+              onTap: _canMedia
+                  ? () {
+                      Navigator.pop(ctx);
+                      _pickImage(ImageSource.camera);
+                    }
+                  : null,
             ),
           ListTile(
             leading: const Icon(Icons.movie_outlined, color: WaslColors.violet),
             title: const Text('فيديو'),
             subtitle: const Text('حتى 24 ميغابايت'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _pickVideo();
-            },
+            enabled: _canMedia,
+            onTap: _canMedia
+                ? () {
+                    Navigator.pop(ctx);
+                    _pickVideo();
+                  }
+                : null,
           ),
           ListTile(
             leading: Icon(Icons.insert_drive_file_outlined,
                 color: context.wasl.warning),
             title: const Text('ملف'),
             subtitle: const Text('PDF، مستندات، وغيرها حتى 24 ميغابايت'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _pickFile();
-            },
+            enabled: _canMedia,
+            onTap: _canMedia
+                ? () {
+                    Navigator.pop(ctx);
+                    _pickFile();
+                  }
+                : null,
           ),
         ]),
       ),
@@ -1484,6 +1521,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ---------- التسجيل الصوتي (اضغط مطولاً) ----------
   Future<void> _startRec() async {
+    if (!_canVoice) {
+      _snack('مالك المجموعة أوقف الرسائل الصوتية في هذه الغرفة');
+      return;
+    }
     if (kIsWeb) {
       _snack('التسجيل الصوتي متاح على تطبيق الجوال');
       return;

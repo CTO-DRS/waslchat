@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../config.dart';
 import '../services/e2e_service.dart';
+import '../services/room_permissions_service.dart';
 import '../theme.dart';
 
 /// نتيجة شاشة معلومات المجموعة للمحادثة
@@ -35,7 +36,12 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   bool _busy = false;
   bool _screenshotBlock = false;
 
-  // رابط الدعوة (المرحلة 1) — للمالك والمشرفين فقط
+  // صلاحيات الغرفة (0.5.0 — المرحلة 3): تُحمّل مع البقية،
+  // والمالك وحده يعدّلها (الخادم يفرض ذلك على كل حال)
+  RoomPerms? _perms;
+  bool _savingPerms = false;
+
+  // رابط الدعوة (المرحلة 1) — للمالك والمشرفين، وللأعضاء إن فتحها المالك (0.5.0)
   String? _inviteCode;
   bool _inviteLoading = false;
   bool _showQr = false;
@@ -86,13 +92,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       if (mounted) setState(() => _loading = false);
       _snack('تعذّر تحميل معلومات المجموعة');
     }
+    // صلاحيات الغرفة تُجلب بعد دوري — أقسام الدعوة تعتمد عليها
+    try {
+      final p = await RoomPermissionsService.fetch(widget.conversationId);
+      if (mounted) setState(() => _perms = p);
+    } catch (_) {}
     // رابط الدعوة يُحمّل منفصلاً — تعطّله لا يفسد بقية الشاشة
     unawaited(_loadInvite());
   }
 
-  /// يجلب الرمز النشط إن كنت مالكاً أو مشرفاً
+  /// يجلب الرمز النشط إن كنت مالكاً أو مشرفاً أو عضواً بصلاحية الدعوة
   Future<void> _loadInvite() async {
-    if (!_isAdmin) return;
+    if (!(_perms?.canInvite ?? _isAdmin)) return;
     if (mounted) setState(() => _inviteLoading = true);
     try {
       final r = await supabase
@@ -275,6 +286,93 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  /// تبديل صلاحية غرفة (المالك فقط — الخادم يفرض ذلك)
+  Future<void> _togglePerm(RoomPermKey k, bool v) async {
+    final current = _perms;
+    if (current == null || _savingPerms) return;
+    final updated =
+        RoomPerms(role: current.role, perms: {...current.perms, k.key: v});
+    setState(() {
+      _perms = updated;
+      _savingPerms = true;
+    });
+    try {
+      final saved = await RoomPermissionsService.save(
+          widget.conversationId, updated.perms);
+      if (mounted) {
+        setState(() =>
+            _perms = RoomPerms(role: current.role, perms: saved));
+      }
+      // قسم الدعوة يتغيّر فوراً مع member_invites
+      unawaited(_loadInvite());
+    } catch (e) {
+      if (mounted) setState(() => _perms = current);
+      _snack(RoomPermissionsService.rejectionMessage(e));
+    } finally {
+      if (mounted) setState(() => _savingPerms = false);
+    }
+  }
+
+  /// قسم صلاحيات الغرفة (0.5.0): للقراءة للجميع، والتعديل للمالك وحده.
+  /// القيم المعروضة هي القيم المخصّصة للغرفة (أو الافتراضي) وليست حالتي أنا
+  Widget _permissionsSection() {
+    final perms = _perms;
+    final isOwner = _myRole == 'owner';
+    final entries = <(RoomPermKey, IconData, String)>[
+      (
+        RoomPermKey.media,
+        Icons.collections_outlined,
+        'صور وفيديو وملفات وملصقات وموقع وبطاقات — للأعضاء'
+      ),
+      (
+        RoomPermKey.voice,
+        Icons.mic_none_outlined,
+        'التسجيل الصوتي المضغوط — للأعضاء'
+      ),
+      (
+        RoomPermKey.polls,
+        Icons.poll_outlined,
+        'إنشاء الاستطلاعات والتصويت فيها — للأعضاء'
+      ),
+      (
+        RoomPermKey.invites,
+        Icons.link_outlined,
+        'روابط الدعوة — كانت للمشرفين فقط سابقاً'
+      ),
+      (
+        RoomPermKey.manageMembers,
+        Icons.manage_accounts_outlined,
+        'إضافة وإزالة الأعضاء — ساري على المشرفين'
+      ),
+      (
+        RoomPermKey.editInfo,
+        Icons.edit_note_outlined,
+        'تغيير اسم المجموعة — ساري على المشرفين'
+      ),
+    ];
+    return Column(children: [
+      ListTile(
+        leading: const Icon(Icons.rule_outlined, color: WaslColors.indigo),
+        title: const Text('صلاحيات الغرفة'),
+        subtitle: Text(isOwner
+            ? 'اضبط ما يستطيع الأعضاء والمشرفون فعله — يسري فوراً ويُفرض من الخادم'
+            : 'يضبطها مالك المجموعة — عرض للقراءة'),
+      ),
+      for (final (k, icon, desc) in entries)
+        SwitchListTile(
+          secondary: Icon(icon, color: WaslColors.teal),
+          title: Text(k.label),
+          subtitle: Text(desc),
+          value: perms != null
+              ? (perms.perms[k.key] ?? kRoomPermDefaults[k.key] ?? false)
+              : (kRoomPermDefaults[k.key] ?? false),
+          onChanged: isOwner && !_savingPerms
+              ? (v) => _togglePerm(k, v)
+              : null,
+        ),
+    ]);
+  }
+
   Future<bool> _confirm(String title, String body, String ok) async {
     final r = await showDialog<bool>(
       context: context,
@@ -375,7 +473,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Widget? _memberMenu(Map<String, dynamic> m) {
     final uid = m['user_id'] as String;
     final role = m['role'] as String? ?? 'member';
-    if (uid == _me || role == 'owner' || !_isAdmin) return null;
+    final canManage = _myRole == 'owner' || (_perms?.canManageMembers ?? true);
+    if (uid == _me || role == 'owner' || !_isAdmin || !canManage) return null;
     final canRemove = _myRole == 'owner' || role == 'member';
     final items = <PopupMenuEntry<String>>[
       if (_myRole == 'owner' && role == 'member')
@@ -437,7 +536,10 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     if (_isAdmin)
                       IconButton(
                         tooltip: 'تغيير الاسم',
-                        onPressed: _busy ? null : _rename,
+                        onPressed:
+                            (_busy || !(_perms?.canEditInfo ?? true))
+                                ? null
+                                : _rename,
                         icon: const Icon(Icons.edit_outlined, size: 20),
                       ),
                   ]),
@@ -461,7 +563,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     onChanged: _isAdmin ? (_) => _toggleScreenshotBlock() : null,
                   ),
                   const Divider(),
-                  if (_isAdmin)
+                  _permissionsSection(),
+                  const Divider(),
+                  if (_isAdmin && (_perms?.canManageMembers ?? true))
                     ListTile(
                       leading: const CircleAvatar(
                         backgroundColor: WaslColors.indigo,
@@ -470,7 +574,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       title: const Text('إضافة أعضاء'),
                       onTap: _busy ? null : _addMembers,
                     ),
-                  if (_isAdmin) _inviteSection(),
+                  if (_isAdmin || (_perms?.canInvite ?? false)) _inviteSection(),
                   for (final m in _members)
                     ListTile(
                       leading: CircleAvatar(
