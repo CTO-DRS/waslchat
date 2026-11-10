@@ -128,6 +128,9 @@ Deno.serve(async (req) => {
       ? `🔔 أشار إليك ${name}`
       : replySender === uid
       ? "↩️ ردّ على رسالتك"
+      // رسائل السلاسل (0.5.1): الخادم يعرف ربط الرسالة بجذرها فقط — بادئة عامة
+      : m.thread_root_id
+      ? `🧵 ${body}`
       : body;
 
   const access = await googleAccessToken();
