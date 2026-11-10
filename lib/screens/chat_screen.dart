@@ -28,6 +28,7 @@ import '../services/mention_service.dart';
 import '../services/poll_service.dart';
 import '../services/room_permissions_service.dart';
 import '../services/sticker_service.dart';
+import '../services/thread_service.dart';
 import '../services/video_service.dart';
 import '../services/location_service.dart';
 import '../services/contact_card_service.dart';
@@ -46,6 +47,7 @@ import '../widgets/contact_picker_sheet.dart';
 import '../widgets/sticker_panel.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
+import 'thread_screen.dart';
 import 'video_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -98,6 +100,11 @@ class _ChatScreenState extends State<ChatScreen> {
   // الرد والتعديل والتفاعلات
   Map<String, dynamic>? _replyTo;
   Map<String, dynamic>? _editing;
+  // سلاسل الردود والمنشورات المثبّتة (0.5.1)
+  Map<String, dynamic>? _threadReplyTo; // وضع «ردّ في سلسلة» على رسالة الجذر
+  List<Map<String, dynamic>> _pins = []; // مثبتات الغرفة (الأحدث أولاً)
+  final Set<String> _pinIds = {}; // معرفات الرسائل المثبّتة (شارة + إخفاء الخيار)
+  String? _pinRole; // دوري في الغرفة — لإظهار/إخفاء التثبيت محلياً (الفروض خادمي)
   Map<String, Map<String, dynamic>> _byId = {};
   // أصوات الاستطلاعات: poll_id -> صفوف poll_vote (تُبنى في كل build)
   Map<String, List<Map<String, dynamic>>> _votesByPoll = {};
@@ -332,6 +339,11 @@ class _ChatScreenState extends State<ChatScreen> {
         if (mounted) setState(() => _perms = p);
       });
     }
+    // المثبتات ودوري فيها (0.5.1) — الفرض الخادمي في can_pin لا يعتمد على هذا
+    PinApi.myRole(widget.conversationId).then((r) {
+      if (mounted) setState(() => _pinRole = r);
+    });
+    unawaited(_loadPins());
     _loadMeta();
 
     // تفضيلات الوسائط وحالة الشبكة (0.4.8 — التنزيل التلقائي للفيديو)
@@ -847,6 +859,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (content.isEmpty) return;
     final editing = _editing;
     final replyTo = _replyTo;
+    final threadRoot = _threadReplyTo;
     // الإشارات @ (0.4.5): مدى التوكنات مُنزاح بحذف الفراغات الطرفية قبل الترميز
     final lead = raw.indexOf(content);
     final tokens = [
@@ -883,6 +896,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _editing = null;
       _replyTo = null;
+      _threadReplyTo = null;
       _mentionTokens.clear();
     });
     if (editing != null) {
@@ -903,6 +917,8 @@ class _ChatScreenState extends State<ChatScreen> {
         // قائمة المُشار إليهم (بيانات وصفية للتنبيه — ترحيل 023)
         if (mentionIds != null) 'mentions': mentionIds,
         if (replyTo != null) 'reply_to': replyTo['id'],
+        // ردّ داخل سلسلة (0.5.1): ربط برسالة الجذر — فرض الخادم في 029
+        if (threadRoot != null) 'thread_root_id': threadRoot['id'],
         // رسالة مجدولة (ترحيل 021): تُشفَّر الآن ويطلقها الخادم في موعدها
         // (تسليم خلال دقيقة من الموعد) — الإلغاء بالحذف قبل الموعد
         if (scheduledAt != null) ...{
@@ -1149,6 +1165,7 @@ class _ChatScreenState extends State<ChatScreen> {
         contentType: upType,
       );
       final replyTo = _replyTo;
+      final threadRoot = _threadReplyTo;
       await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
@@ -1158,10 +1175,13 @@ class _ChatScreenState extends State<ChatScreen> {
         'duration_ms': durationMs,
         if (viewOnce) 'view_once': true,
         if (replyTo != null) 'reply_to': replyTo['id'],
+        // وسائط داخل سلسلة (0.5.1) — يقبلها الخادم كأي إدراج
+        if (threadRoot != null) 'thread_root_id': threadRoot['id'],
       });
       if (mounted) {
         setState(() {
           _replyTo = null;
+          _threadReplyTo = null;
           // وضع «عرض مرة واحدة» استخدام واحد ثم يعود عادي
           if (viewOnce) _attachViewOnce = false;
         });
@@ -2143,6 +2163,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final media = await supabase.rpc('delete_message', params: {'p_id': m['id']});
       if (media is String && media.isNotEmpty) unawaited(MediaService.remove(media));
       if (_replyTo?['id'] == m['id']) setState(() => _replyTo = null);
+      if (_threadReplyTo?['id'] == m['id']) setState(() => _threadReplyTo = null);
+      // تثبيت الرسالة المحذوفة يزيله الخادم (cascade) — نحدّث الشريط محلياً
+      if (_pinIds.contains(m['id'])) unawaited(_loadPins());
     } catch (_) {
       _snack('تعذّر حذف الرسالة');
     }
@@ -2303,6 +2326,39 @@ class _ChatScreenState extends State<ChatScreen> {
                   _replyTo = m;
                   _editing = null;
                 });
+              },
+            ),
+          // «ردّ في سلسلة» (0.5.1): على رسائل التدفق فقط — الرسالة داخل
+          // سلسلة تُردّ ضمن سلسلتها من شاشتها
+          if (widget.canPost &&
+              m['deleted_at'] == null &&
+              (m['thread_root_id'] as String?) == null)
+            ListTile(
+              leading:
+                  const Icon(Icons.topic_rounded, color: WaslColors.violet),
+              title: const Text('ردّ في سلسلة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _threadReplyTo = m;
+                  _replyTo = null;
+                  _editing = null;
+                });
+              },
+            ),
+          // التثبيت (0.5.1): المشرفون في المجموعات والقنوات، الطرفان في الخاص
+          if (_canPin && m['deleted_at'] == null)
+            ListTile(
+              leading: Icon(Icons.push_pin_rounded,
+                  color: _pinIds.contains(m['id'])
+                      ? context.wasl.warning
+                      : null),
+              title: Text(_pinIds.contains(m['id'])
+                  ? 'إلغاء التثبيت'
+                  : 'تثبيت في المحادثة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _togglePin(m);
               },
             ),
           if (copyable != null)
@@ -2472,11 +2528,12 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// شريط الرد/التعديل فوق حقل الكتابة
+  /// شريط الرد/التعديل/الرد في سلسلة فوق حقل الكتابة
   Widget? _composeBanner() {
-    final m = _editing ?? _replyTo;
+    final m = _editing ?? _threadReplyTo ?? _replyTo;
     if (m == null) return null;
     final editing = _editing != null;
+    final threading = !editing && _threadReplyTo != null;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
@@ -2485,13 +2542,26 @@ class _ChatScreenState extends State<ChatScreen> {
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(children: [
-        Icon(editing ? Icons.edit_outlined : Icons.reply_rounded, color: WaslColors.teal),
+        Icon(
+            editing
+                ? Icons.edit_outlined
+                : threading
+                    ? Icons.topic_rounded
+                    : Icons.reply_rounded,
+            color: threading ? WaslColors.violet : WaslColors.teal),
         const SizedBox(width: 8),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(editing ? 'تعديل الرسالة' : 'رد على ${_senderName(m['sender_id'] as String?)}',
-                style: const TextStyle(
-                    color: WaslColors.teal, fontSize: 12, fontWeight: FontWeight.bold)),
+            Text(
+                editing
+                    ? 'تعديل الرسالة'
+                    : threading
+                        ? 'ردّ في سلسلة على ${_senderName(m['sender_id'] as String?)}'
+                        : 'رد على ${_senderName(m['sender_id'] as String?)}',
+                style: TextStyle(
+                    color: threading ? WaslColors.violet : WaslColors.teal,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold)),
             Text(_previewOf(m),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -2505,9 +2575,148 @@ class _ChatScreenState extends State<ChatScreen> {
             if (editing) _text.clear();
             _editing = null;
             _replyTo = null;
+            _threadReplyTo = null;
           }),
         ),
       ]),
+    );
+  }
+
+  // ---------- سلاسل الردود والمنشورات المثبّتة (0.5.1) ----------
+  /// التثبيت: المشرفون في المجموعات والقنوات، الطرفان في الخاص —
+  /// والقرار الحقيقي خادمي في can_pin (الواجهة تخفي فقط)
+  bool get _canPin =>
+      !widget.isGroup || _pinRole == 'owner' || _pinRole == 'admin';
+
+  Future<void> _loadPins() async {
+    try {
+      final rows = await PinApi.list(widget.conversationId);
+      if (!mounted) return;
+      setState(() {
+        _pins = rows;
+        _pinIds
+          ..clear()
+          ..addAll(rows.map((r) => r['message_id'] as String));
+      });
+      // نص المثبتات يُفكّ بنفس آلية الرسائل (كاش _plain)
+      for (final p in rows) {
+        final raw = p['content'] as String?;
+        if (raw != null) unawaited(_decryptInto(raw));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _togglePin(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    final pinned = _pinIds.contains(id);
+    try {
+      if (pinned) {
+        await PinApi.unpin(id);
+      } else {
+        await PinApi.pin(id);
+      }
+      await _loadPins();
+      _snack(pinned ? 'أُزيل التثبيت' : '📌 ثُبّتت الرسالة');
+    } catch (e) {
+      _snack(ThreadService.pinErrorText(e));
+    }
+  }
+
+  void _openThread(Map<String, dynamic> root) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ThreadScreen(
+          conversationId: widget.conversationId,
+          title: _title,
+          root: root,
+          myId: _me,
+          names: _names,
+          isGroup: widget.isGroup,
+          isChannel: widget.isChannel,
+          encrypted: widget.encrypted,
+          canPost: widget.canPost,
+          otherId: widget.otherId,
+        ),
+      ),
+    );
+  }
+
+  /// شريط المثبت الأحدث أعلى المحادثة — نقرة تفتح قائمة كل المثبتات
+  Widget _pinBar() {
+    final first = _pins.first;
+    return Material(
+      color: context.wasl.glass,
+      child: InkWell(
+        onTap: _showPinsSheet,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(children: [
+            Icon(Icons.push_pin_rounded,
+                size: 16, color: context.wasl.warning),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(_previewOf(first),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13)),
+            ),
+            if (_pins.length > 1)
+              Text(' (${_pins.length})',
+                  style: TextStyle(
+                      fontSize: 12, color: context.wasl.textFaint)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// قائمة كل مثبتات الغرفة (حتى 10): نقرة تعرض التفاصيل، وإزالة التثبيت للمصرّح
+  void _showPinsSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: context.wasl.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('الرسائل المثبّتة (${_pins.length}/10)',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _pins.length,
+              itemBuilder: (_, i) {
+                final p = _pins[i];
+                final pid = p['message_id'] as String;
+                return ListTile(
+                  leading: Icon(Icons.push_pin_rounded,
+                      color: context.wasl.warning),
+                  title: Text(_previewOf(p),
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                      '${_senderName(p['sender_id'] as String?)} · ${_time(p['created_at'] as String)}',
+                      style: TextStyle(
+                          fontSize: 11, color: context.wasl.textFaint)),
+                  trailing: _canPin
+                      ? IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _togglePin({'id': pid});
+                          },
+                        )
+                      : null,
+                );
+              },
+            ),
+          ),
+        ]),
+      ),
     );
   }
 
@@ -2656,6 +2865,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
+          if (_pins.isNotEmpty) _pinBar(),
           if (_showSafety && E2eService.peerKeyChanged(widget.otherId!))
             Material(
               color: context.wasl.warningSoft,
@@ -2699,6 +2909,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 final base = _starredOnly
                     ? all.where((m) => _stars.contains(m['id'])).toList()
                     : all;
+                // سلاسل الردود (0.5.1): عدّاد ردود كل جذر يُحسب محلياً من البثّ،
+                // ورسائل السلاسل تُستبعد من التدفق العادي (تعاد على الجذر كمصفوفة)،
+                // وبوضع البحث أو النجوم تُعرض كلها مع شارة.
+                final threadCounts = ThreadService.threadCounts(base);
                 if (_starredOnly && base.isEmpty) {
                   _scheduleDecrypt(all);
                   return Center(
@@ -2737,18 +2951,24 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Text('لا نتائج',
                           style: TextStyle(color: context.wasl.textFaint)));
                 }
+                final flow = (q.isEmpty && !_starredOnly)
+                    ? ThreadService.mainFlow(msgs)
+                    : msgs;
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
                 _scheduleDecrypt(all);
                 return ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),
-                  itemCount: msgs.length,
+                  itemCount: flow.length,
                   itemBuilder: (context, i) {
-                    final m = msgs[i];
+                    final m = flow[i];
                     final mine = m['sender_id'] == _me;
                     final sender = _names[m['sender_id']];
                     final replyId = m['reply_to'] as String?;
                     final chips = _reactionChips(m);
+                    final rootCount = threadCounts[m['id'] as String] ?? 0;
+                    final inThread = (m['thread_root_id'] as String?) != null;
+                    final pinned = _pinIds.contains(m['id']);
                     // الملصق السليم بلا فقاعة: الشفاف نفسه بلا خلفية (0.4.9)
                     final stickerish =
                         m['type'] == 'sticker' && m['deleted_at'] == null;
@@ -2758,7 +2978,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           : AlignmentDirectional.centerStart,
                       child: GestureDetector(
                        onLongPress: () => _messageActions(m),
-                       child: Container(
+                       child: Column(
+                        crossAxisAlignment: mine
+                            ? CrossAxisAlignment.end
+                            : CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                        Container(
                         margin: const EdgeInsets.symmetric(vertical: 3),
                         padding: stickerish
                             ? const EdgeInsets.symmetric(horizontal: 6)
@@ -2776,6 +3002,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (pinned || (inThread && q.isNotEmpty))
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: Text(pinned ? '📌 مثبّتة' : '🧵 ضمن سلسلة',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: _bubbleSecondary(mine))),
+                              ),
                             if (widget.isGroup && !mine && sender != null)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 3),
@@ -2819,7 +3053,37 @@ class _ChatScreenState extends State<ChatScreen> {
                             ]),
                           ],
                         ),
-                      ),
+                        ),
+                        // مصفوفة السلسلة تحت رسالة الجذر (0.5.1): فتح سلسلة ردوده
+                        if (rootCount > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () => _openThread(m),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: context.wasl.glass,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  const Text('🧵', style: TextStyle(fontSize: 12)),
+                                  const SizedBox(width: 4),
+                                  Text(ThreadService.threadLabel(rootCount),
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: WaslColors.teal,
+                                          fontWeight: FontWeight.w600)),
+                                  const Icon(Icons.chevron_right_rounded,
+                                      size: 14, color: WaslColors.teal),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        ],
+                       ),
                       ),
                     );
                   },
