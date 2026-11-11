@@ -48,3 +48,6 @@ app.*.map.json
 .widget_preview/
 /android/local.properties
 # *.jks (مرفوع عمداً في secrets/ بطلب المالك)
+
+# Flutter-generated (يُعاد توليده عند pub get/build)
+/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
