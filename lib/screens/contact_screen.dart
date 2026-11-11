@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/block_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/report_dialog.dart';
 
 String disappearLabel(int? s) {
   switch (s) {
@@ -83,12 +85,83 @@ class _ContactScreenState extends State<ContactScreen> {
   Map<String, dynamic>? _p;
   bool _muted = false;
   int? _disappear;
+  bool _blocked = false;
 
   @override
   void initState() {
     super.initState();
     _disappear = widget.disappearSeconds;
     _load();
+    _loadBlocked();
+  }
+
+  Future<void> _loadBlocked() async {
+    await BlockService.ensureLoaded();
+    if (mounted) {
+      setState(() => _blocked = BlockService.isBlocked(widget.otherId));
+    }
+  }
+
+  Future<void> _toggleBlock() async {
+    if (_blocked) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('إلغاء الحظر؟'),
+          content: const Text('سيستطيع إرسال الرسائل إليك مجدداً.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('إلغاء الحظر')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      try {
+        await BlockService.unblock(widget.otherId);
+        if (mounted) setState(() => _blocked = false);
+        if (mounted) Navigator.pop(context, true);
+      } catch (_) {
+        _snack('تعذّر إلغاء الحظر');
+      }
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('حظر المستخدم؟'),
+        content: const Text(
+            'لن يصلك منه رسائل جديدة، ولن يستطيع إرسال رسائل إليك. لن يُبلَّغ بالحظر.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('حظر')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await BlockService.block(widget.otherId);
+      if (mounted) setState(() => _blocked = true);
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      _snack('تعذّر الحظر');
+    }
+  }
+
+  Future<void> _report() async {
+    final name = (_p?['display_name'] ?? _p?['username'] ?? widget.title) as String?;
+    final blocked = await showReportDialog(context,
+        targetUser: widget.otherId, targetName: name);
+    if (blocked && mounted) {
+      setState(() => _blocked = true);
+      Navigator.pop(context, true);
+    }
+  }
+
+  void _snack(String m) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
   Future<void> _load() async {
@@ -184,6 +257,26 @@ class _ContactScreenState extends State<ContactScreen> {
             title: const Text('كتم الإشعارات'),
             value: _muted,
             onChanged: (_) => _toggleMute(),
+          ),
+          const Divider(height: 32),
+          ListTile(
+            leading: Icon(
+                _blocked ? Icons.block_rounded : Icons.block_outlined,
+                color: _blocked ? Colors.redAccent : Colors.white70),
+            title: Text(
+                _blocked ? 'إلغاء حظر هذا الاتصال' : 'حظر هذا الاتصال',
+                style: TextStyle(color: _blocked ? Colors.redAccent : null)),
+            subtitle: Text(_blocked
+                ? 'محدود الآن: لا رسائل جديدة بينكما من أي اتجاه'
+                : 'لن يصلك منه رسائل جديدة ولن يُبلَّغ بالحظر'),
+            onTap: _toggleBlock,
+          ),
+          ListTile(
+            leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+            title: const Text('الإبلاغ عن المستخدم',
+                style: TextStyle(color: Colors.redAccent)),
+            subtitle: const Text('تصل الشكوى إلى إدارة التطبيق فقط'),
+            onTap: _report,
           ),
         ],
       ),
