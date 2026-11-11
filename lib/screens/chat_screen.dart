@@ -15,6 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/ai_service.dart';
+import '../services/app_lock_service.dart';
 import '../services/block_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
@@ -58,7 +59,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with RouteAware {
   final _text = TextEditingController();
   final _recorder = AudioRecorder();
   final _picker = ImagePicker();
@@ -87,6 +88,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // الحظر: أنا حظرتُ الطرف الآخر في محادثة فردية؟
   bool _iBlockedPeer = false;
+
+  // منع لقطات الشاشة لهذه المحادثة (أندرويد: FLAG_SECURE)
+  bool _noScreenshots = false;
 
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
@@ -192,6 +196,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (widget.isGroup) _loadMembers();
     _loadMeta();
     _refreshBlockState();
+    ScreenshotService.flagOf(widget.conversationId).then((v) {
+      if (!mounted || !v) return;
+      setState(() => _noScreenshots = true);
+      ScreenshotService.setSecure(true);
+    });
 
     // بث «يكتب الآن» بين أعضاء المحادثة
     _room = supabase.channel('room:${widget.conversationId}');
@@ -415,7 +424,31 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    ScreenshotService.routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
+  void didPopNext() {
+    // عدنا من شاشة أعلى: أعد تطبيق منع اللقطات الخاص بهذه المحادثة
+    ScreenshotService.setSecure(_noScreenshots);
+  }
+
+  Future<void> _toggleNoScreenshots() async {
+    final v = !_noScreenshots;
+    await ScreenshotService.setSecure(v);
+    await ScreenshotService.setFlag(widget.conversationId, v);
+    if (mounted) {
+      setState(() => _noScreenshots = v);
+      _snack(v ? 'مُنع التقاط الشاشة في هذه المحادثة' : 'أُسمح بلقطات الشاشة مجدداً');
+    }
+  }
+
+  @override
   void dispose() {
+    ScreenshotService.routeObserver.unsubscribe(this);
+    ScreenshotService.setSecure(false);
     _ticker?.cancel();
     _typingSweep?.cancel();
     _partsSub?.cancel();
@@ -1487,6 +1520,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onSelected: (v) {
               if (v == 'disappear') _changeDisappearing();
               if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
+              if (v == 'screenshots') _toggleNoScreenshots();
             },
             itemBuilder: (_) => [
               PopupMenuItem(
@@ -1498,6 +1532,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   value: 'disappear',
                   child: Text('الرسائل المختفية: ${disappearLabel(_disappear)}'),
                 ),
+              const PopupMenuItem(
+                value: 'screenshots',
+                child: Text('منع/السماح بلقطات الشاشة'),
+              ),
             ],
           ),
         ],
