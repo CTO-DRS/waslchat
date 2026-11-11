@@ -3,11 +3,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'services/app_lock_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/security_screens.dart';
 import 'services/push_service.dart';
+import 'widgets/lock_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,7 +42,8 @@ class WaslApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       navigatorKey: navigatorKey,
-      home: const AuthGate(),
+      navigatorObservers: [ScreenshotService.routeObserver],
+      home: const LockGate(child: AuthGate()),
     );
   }
 }

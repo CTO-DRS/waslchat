@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/app_lock_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
@@ -57,6 +58,7 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('تغيير كلمة المرور'),
             onTap: () => openChangePassword(context),
           ),
+          const _AppLockTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('تسجيل الخروج'),
@@ -198,6 +200,52 @@ class _ProfileCardState extends State<_ProfileCard> {
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// بلاطة قفل التطبيق: بصمة الجهاز أو رمز قفله (المرحلة 2)
+class _AppLockTile extends StatefulWidget {
+  const _AppLockTile();
+
+  @override
+  State<_AppLockTile> createState() => _AppLockTileState();
+}
+
+class _AppLockTileState extends State<_AppLockTile> {
+  bool _enabled = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppLockService.isEnabled().then((v) {
+      if (mounted) setState(() => _enabled = v);
+    });
+  }
+
+  Future<void> _toggle(bool v) async {
+    setState(() => _busy = true);
+    final err = await AppLockService.setEnabled(v);
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        if (err == null) _enabled = v;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(err ??
+              (v ? 'فُعّل قفل التطبيق' : 'أُلغي قفل التطبيق'))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary: const Icon(Icons.fingerprint_rounded, color: WaslColors.violet),
+      title: const Text('قفل التطبيق'),
+      subtitle: const Text('بصمة الإصبع أو رمز قفل الجهاز عند الفتح والعودة'),
+      value: _enabled,
+      onChanged: _busy ? null : _toggle,
     );
   }
 }
