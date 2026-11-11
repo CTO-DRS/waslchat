@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../services/block_service.dart';
+import '../services/invite_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
@@ -76,6 +77,69 @@ class _NewChatScreenState extends State<NewChatScreen> {
     }
   }
 
+  /// الانضمام إلى مجموعة برمز دعوة أو رابط كامل ملصوق
+  Future<void> _joinByInvite() async {
+    final ctrl = TextEditingController();
+    final input = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('انضمام إلى مجموعة'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (v) => Navigator.pop(c, v),
+          decoration: const InputDecoration(
+            labelText: 'رمز الدعوة أو رابطها',
+            hintText: 'مثال: abcdefghjk أو الرابط كاملاً',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(c, ctrl.text), child: const Text('انضمام')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (input == null || input.trim().isEmpty) return;
+    if (InviteService.normalize(input) == null) {
+      _snack('الرمز غير صالح — تأكد من نسخه كاملاً');
+      return;
+    }
+    _snack('جارٍ الانضمام…');
+    try {
+      final convId = await InviteService.join(input);
+      // جلب اسم المجموعة لعرضه في الشريط
+      final conv = await supabase
+          .from('conversations')
+          .select('title')
+          .eq('id', convId)
+          .maybeSingle();
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            conversationId: convId,
+            title: ((conv?['title'] as String?) ?? 'مجموعة'),
+            isGroup: true,
+            encrypted: true,
+          ),
+        ),
+      );
+    } on FormatException {
+      _snack('الرمز غير صالح — تأكد من نسخه كاملاً');
+    } catch (_) {
+      // رسالة INVITE_INVALID أو خطأ شبكة/غياب ترحيل 017
+      _snack('تعذّر الانضمام: الرمز غير صالح أو منتهٍ (وتأكد من تحديث الخادم)');
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -89,6 +153,14 @@ class _NewChatScreenState extends State<NewChatScreen> {
             onChanged: _search,
             decoration: const InputDecoration(
                 hintText: 'ابحث باسم المستخدم', prefixIcon: Icon(Icons.search)),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: OutlinedButton.icon(
+            onPressed: _joinByInvite,
+            icon: const Icon(Icons.link_rounded),
+            label: const Text('انضمام إلى مجموعة برمز دعوة'),
           ),
         ),
         if (_searching) const LinearProgressIndicator(),

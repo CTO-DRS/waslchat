@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../config.dart';
 import '../services/e2e_service.dart';
+import '../services/invite_service.dart';
 import '../theme.dart';
 
 /// نتيجة شاشة معلومات المجموعة للمحادثة
@@ -29,6 +32,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   List<Map<String, dynamic>> _members = [];
   String _myRole = 'member';
   int _keyVersion = 1;
+  Map<String, dynamic>? _invite;
   bool _loading = true;
   bool _busy = false;
 
@@ -73,6 +77,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             'member';
         _loading = false;
       });
+      // الدعوة تُجلب بهدوء للمشرفين فقط (يفشل للبقية بلا أثر)
+      if (_isAdmin) _loadInvite();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
       _snack('تعذّر تحميل معلومات المجموعة');
@@ -89,6 +95,15 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         'admin' => 'مشرف',
         _ => '',
       };
+
+  Future<void> _loadInvite() async {
+    try {
+      final inv = await InviteService.fetch(widget.conversationId);
+      if (mounted) setState(() => _invite = inv);
+    } catch (_) {
+      // بلا ترحيل 017 أو ليس مشرفاً — لا شيء
+    }
+  }
 
   Future<void> _run(Future<void> Function() job, String fail) async {
     if (_busy) return;
@@ -107,6 +122,44 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   void _rotateNow() {
     E2eService.invalidateGroupKey(widget.conversationId);
     unawaited(E2eService.groupKey(widget.conversationId).then((_) => _load()));
+  }
+
+  /// إدارة رابط الدعوة: إنشاء إن لم توجد، أو فتح ورقة العرض
+  Future<void> _manageInvite() async {
+    if (!InviteService.isActive(_invite)) {
+      await _run(() async {
+        final code = await InviteService.create(widget.conversationId);
+        await _loadInvite();
+        if (mounted) _showInviteSheet(code);
+      }, 'تعذّر إنشاء رابط الدعوة (تأكد من تطبيق ترحيل 017)');
+      return;
+    }
+    _showInviteSheet(_invite!['code'] as String);
+  }
+
+  void _showInviteSheet(String code) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: WaslColors.darkSurface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => _InviteSheet(
+        code: code,
+        onRegenerate: () async {
+          final c = await InviteService.create(widget.conversationId);
+          await _loadInvite();
+          if (ctx.mounted) {
+            Navigator.pop(ctx);
+            _showInviteSheet(c);
+          }
+        },
+        onRevoke: () async {
+          await InviteService.revoke(widget.conversationId);
+          await _loadInvite();
+          if (ctx.mounted) Navigator.pop(ctx);
+        },
+      ),
+    );
   }
 
   Future<bool> _confirm(String title, String body, String ok) async {
@@ -284,7 +337,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     subtitle: Text('إصدار مفتاح المجموعة: $_keyVersion — يتغيّر عند خروج أي عضو'),
                   ),
                   const Divider(),
-                  if (_isAdmin)
+                  if (_isAdmin) ...[
+                    ListTile(
+                      leading: const CircleAvatar(
+                        backgroundColor: WaslColors.teal,
+                        child: Icon(Icons.link_rounded, color: Colors.white),
+                      ),
+                      title: const Text('رابط الدعوة'),
+                      subtitle: Text(InviteService.isActive(_invite)
+                          ? 'فعّال — أي شخص لديه الرابط ينضم إلى المجموعة'
+                          : 'غير مفعل — اضغط لإنشاء رابط انضمام'),
+                      onTap: _busy ? null : _manageInvite,
+                    ),
                     ListTile(
                       leading: const CircleAvatar(
                         backgroundColor: WaslColors.indigo,
@@ -293,6 +357,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       title: const Text('إضافة أعضاء'),
                       onTap: _busy ? null : _addMembers,
                     ),
+                  ],
                   for (final m in _members)
                     ListTile(
                       leading: CircleAvatar(
@@ -423,6 +488,117 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
             ),
           ]),
         ),
+      ),
+    );
+  }
+}
+
+/// ورقة عرض رابط الدعوة: الرمز والرابط وQR والنسخ والتجديد والتعطيل
+class _InviteSheet extends StatelessWidget {
+  const _InviteSheet({
+    required this.code,
+    required this.onRegenerate,
+    required this.onRevoke,
+  });
+
+  final String code;
+  final Future<void> Function() onRegenerate;
+  final Future<void> Function() onRevoke;
+
+  String get _url => InviteService.urlFor(code);
+
+  void _copy(BuildContext context, String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('نُسخ $label إلى الحافظة')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('رابط دعوة المجموعة',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text('أي شخص يملك هذا الرابط ينضم إلى المجموعة فوراً.',
+              textAlign: TextAlign.center, style: const TextStyle(color: Colors.white60)),
+          const SizedBox(height: 16),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: QrImageView(
+                data: _url,
+                size: 170,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Colors.black),
+                dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square, color: Colors.black),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SelectableText(
+            _url,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, letterSpacing: 0.3),
+          ),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _copy(context, _url, 'الرابط'),
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('نسخ الرابط'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _copy(context, code, 'الرمز $code'),
+                icon: const Icon(Icons.dialpad_rounded, size: 18),
+                label: Text('الرمز: $code'),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextButton.icon(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.check_rounded, size: 18),
+                label: const Text('تم'),
+              ),
+            ),
+            Expanded(
+              child: TextButton.icon(
+                onPressed: () => onRegenerate(),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('تجديد الرمز'),
+              ),
+            ),
+            Expanded(
+              child: TextButton.icon(
+                onPressed: () => onRevoke(),
+                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                icon: const Icon(Icons.link_off_rounded, size: 18),
+                label: const Text('تعطيل'),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          const Text(
+            'تجديد الرمز يعطّل الرابط القديم فوراً. تعطيل الرابط يمنع أي انضمام جديد حتى تُنشئ رابطاً جديداً.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.5),
+          ),
+        ]),
       ),
     );
   }
