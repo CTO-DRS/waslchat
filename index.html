@@ -281,6 +281,59 @@
       .x-strip p:nth-child(odd) { color: var(--x-teal); }
       .x-strip p:nth-child(even) { color: var(--x-violet); }
       @media (min-width: 761px) { .x-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+      .x-strip p[hidden] { display: none; }
+      .x-strip p.x-count { color: var(--text-primary); direction: rtl; }
+      @media (max-width: 760px) { .x-strip:has(.x-count:not([hidden])) .x-count { grid-column: 1 / -1; } }
+      @media (min-width: 761px) { .x-strip:has(.x-count:not([hidden])) { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+
+      /* Hero web link */
+      .x-weblink { justify-self: start; display: inline-flex; align-items: center; min-height: var(--tap); margin: -8px 0; font: var(--type-label); color: var(--text-secondary); text-decoration: underline; text-underline-offset: 3px; }
+      .x-weblink:hover { color: var(--x-teal); }
+
+      /* Contact form */
+      .x-form-wrap { max-width: 52rem; display: grid; gap: 14px; }
+      .x-form {
+        display: grid;
+        gap: 16px;
+        padding: clamp(20px, 3vw, 28px);
+        border-radius: var(--r-l);
+        background: var(--x-glass);
+        border: 1px solid var(--x-glass-stroke);
+      }
+      .x-form__row { display: grid; gap: 16px; }
+      @media (min-width: 700px) { .x-form__row { grid-template-columns: 1fr 1fr; } }
+      .x-field { display: grid; gap: 6px; }
+      .x-field label { font: var(--type-label); color: var(--text-primary); }
+      .x-field label small { color: var(--text-secondary); font: var(--type-caption); }
+      .x-field input, .x-field textarea {
+        width: 100%;
+        min-height: var(--tap);
+        padding: 12px 14px;
+        border-radius: var(--r-s);
+        background: var(--x-navy);
+        border: 1px solid var(--stroke-primary);
+        color: var(--text-primary);
+        font: var(--type-body);
+        font-family: var(--sans);
+        transition: border-color var(--dur-quick) ease;
+      }
+      .x-field textarea { min-height: 150px; resize: vertical; line-height: 1.7; }
+      .x-field input:focus, .x-field textarea:focus { outline: none; border-color: var(--x-teal); box-shadow: 0 0 0 3px rgb(46 230 197 / 0.2); }
+      .x-field input[type="email"] { direction: ltr; text-align: right; }
+      .x-hp { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .x-form button { justify-self: start; border: 0; cursor: pointer; }
+      .x-form button:disabled { opacity: 0.6; cursor: progress; }
+      .x-form__err { font: var(--type-small); color: var(--fill-system-red); }
+      .x-form__err:empty { display: none; }
+      .x-form__ok {
+        padding: 24px;
+        border-radius: var(--r-l);
+        background: var(--x-glass);
+        border: 1px solid rgb(46 230 197 / 0.35);
+        font: var(--weight-medium) var(--size-prose)/1.6 var(--sans);
+        color: var(--text-primary);
+      }
+      .x-form-wrap .fineprint a { color: var(--x-teal); display: inline-flex; align-items: center; min-height: var(--tap); vertical-align: middle; }
 
       /* FAQ accordion */
       .x-faq { display: grid; gap: 10px; max-width: 52rem; }
@@ -352,6 +405,7 @@
           <a href="#privacy">الخصوصية</a>
           <a href="#ai">وصل AI</a>
           <a href="#faq">الأسئلة الشائعة</a>
+          <a href="#contact">تواصل</a>
         </nav>
         <div class="x-nav__end">
           <a class="x-btn x-btn--primary x-btn--sm" href="https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk">تحميل</a>
@@ -376,6 +430,7 @@
               </a>
               <a class="x-btn x-btn--ghost" href="#features">اكتشف المميزات</a>
             </div>
+            <a class="x-weblink" href="/web/">أو استخدم نسخة الويب ←</a>
             <p class="x-note"><span>نسخة تجريبية 0.1.8 · أندرويد · مجاني</span><span>آيفون قريباً</span></p>
           </div>
         </section>
@@ -531,6 +586,7 @@
           <p role="listitem">بدون إعلانات</p>
           <p role="listitem">عربي أولاً</p>
           <p role="listitem">مفتوح للتطوير</p>
+          <p role="listitem" class="x-count" id="dl-count" hidden></p>
         </div>
 
         <section class="section" id="faq">
@@ -545,7 +601,43 @@
             <details><summary>هل محادثاتي آمنة؟</summary><p>المحادثات الخاصة والمجموعات الخاصة مشفّرة من طرف لطرف، ولا نقرأ محتواها.</p></details>
             <details><summary>لماذا يطلب أندرويد السماح بالتثبيت؟</summary><p>لأن التطبيق يُوزّع من موقعنا مباشرة قبل نشره على Google Play.</p></details>
             <details><summary>ماذا لو نسيت كلمة سر النسخة الاحتياطية؟</summary><p>لا يمكن استرجاعها، ولن تتمكن من قراءة الرسائل المشفّرة القديمة على جهاز جديد.</p></details>
-            <details><summary>كيف أتواصل معكم؟</summary><p>عبر البريد <a href="mailto:contact@waslchat.app">contact@waslchat.app</a>.</p></details>
+            <details><summary>كيف أتواصل معكم؟</summary><p>عبر <a href="#contact">نموذج التواصل</a> في هذه الصفحة، أو البريد <a href="mailto:contact@waslchat.app">contact@waslchat.app</a>.</p></details>
+          </div>
+        </section>
+
+        <section class="section" id="contact">
+          <div class="head">
+            <p class="head__eyebrow">تواصل معنا</p>
+            <h2>عندك سؤال أو اقتراح؟ اكتب لنا.</h2>
+          </div>
+          <div class="x-form-wrap" id="contact-wrap">
+            <form class="x-form" id="contact-form" novalidate>
+              <div class="x-form__row">
+                <div class="x-field">
+                  <label for="cf-name">الاسم</label>
+                  <input id="cf-name" name="name" type="text" required maxlength="100" autocomplete="name" />
+                </div>
+                <div class="x-field">
+                  <label for="cf-email">البريد الإلكتروني</label>
+                  <input id="cf-email" name="email" type="email" required maxlength="200" autocomplete="email" />
+                </div>
+              </div>
+              <div class="x-field">
+                <label for="cf-subject">الموضوع <small>(اختياري)</small></label>
+                <input id="cf-subject" name="subject" type="text" maxlength="150" />
+              </div>
+              <div class="x-field">
+                <label for="cf-message">الرسالة</label>
+                <textarea id="cf-message" name="message" required maxlength="4000"></textarea>
+              </div>
+              <div class="x-hp" aria-hidden="true">
+                <label for="cf-website">Website</label>
+                <input id="cf-website" name="website" type="text" tabindex="-1" autocomplete="off" />
+              </div>
+              <p class="x-form__err" id="cf-err" role="alert"></p>
+              <button class="x-btn x-btn--primary" type="submit" id="cf-submit">أرسل</button>
+            </form>
+            <p class="fineprint">أو راسلنا مباشرة: <a href="mailto:contact@waslchat.app">contact@waslchat.app</a></p>
           </div>
         </section>
 
@@ -563,6 +655,7 @@
         <p><a class="x-brand" href="#top">وصل شات</a> <span>© 2026 وصل شات</span></p>
         <nav aria-label="روابط الموقع">
           <a href="https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk">تحميل لأندرويد</a>
+          <a href="/web/">نسخة الويب</a>
           <a href="/privacy/">سياسة الخصوصية والشروط</a>
           <a href="mailto:contact@waslchat.app">تواصل معنا</a>
         </nav>
@@ -586,6 +679,98 @@
           d.addEventListener("toggle", function () {
             if (d.open) items.forEach(function (o) { if (o !== d) o.open = false; });
           });
+        });
+      })();
+    </script>
+    <script>
+      (function () {
+        var SUPABASE_URL = "https://hplzbillnbdjtufazrlp.supabase.co";
+        var ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwbHpiaWxsbmJkanR1ZmF6cmxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwMTAyNjAsImV4cCI6MjEwOTU4NjI2MH0.EqWiUY_Pl70-RTJ-CM2mZqpI8Du1xuAIk8BagRpB9FI";
+        function headers(extra) {
+          var h = { apikey: ANON_KEY, Authorization: "Bearer " + ANON_KEY, "Content-Type": "application/json" };
+          if (extra) for (var k in extra) h[k] = extra[k];
+          return h;
+        }
+        function toNumber(v) {
+          if (Array.isArray(v)) v = v[0];
+          if (v && typeof v === "object") { for (var k in v) { v = v[k]; break; } }
+          var n = Number(v);
+          return isFinite(n) ? n : null;
+        }
+
+        /* 1) Download counter */
+        var countEl = document.getElementById("dl-count");
+        function showCount(n) {
+          if (n == null) return;
+          countEl.textContent = "+" + n.toLocaleString("ar-SA") + " تحميل";
+          countEl.hidden = false;
+        }
+        fetch(SUPABASE_URL + "/rest/v1/rpc/download_count", { method: "POST", headers: headers(), body: "{}" })
+          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function (d) { var n = toNumber(d); if (n == null) throw new Error("bad"); showCount(n); })
+          .catch(function () { countEl.hidden = true; });
+
+        document.addEventListener("click", function (e) {
+          var a = e.target.closest && e.target.closest('a[href$=".apk"]');
+          if (!a) return;
+          try {
+            fetch(SUPABASE_URL + "/rest/v1/rpc/track_download", {
+              method: "POST",
+              headers: headers(),
+              body: JSON.stringify({ p_version: "0.1.8", p_platform: "android-web" }),
+              keepalive: true
+            })
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (d) { if (d != null) showCount(toNumber(d)); })
+              .catch(function () {});
+          } catch (err) {}
+        });
+
+        /* 2) Contact form */
+        var form = document.getElementById("contact-form");
+        var btn = document.getElementById("cf-submit");
+        var errEl = document.getElementById("cf-err");
+        function success() {
+          var ok = document.createElement("p");
+          ok.className = "x-form__ok";
+          ok.setAttribute("role", "status");
+          ok.textContent = "وصلتنا رسالتك، بنرد عليك على بريدك قريباً.";
+          form.replaceWith(ok);
+        }
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          errEl.textContent = "";
+          if (!form.reportValidity()) return;
+          var f = form.elements;
+          if (f["website"].value) { success(); return; }
+          var body = {
+            name: f["name"].value.trim(),
+            email: f["email"].value.trim(),
+            subject: f["subject"].value.trim() || null,
+            message: f["message"].value.trim()
+          };
+          btn.disabled = true;
+          btn.textContent = "جارٍ الإرسال…";
+          fetch(SUPABASE_URL + "/rest/v1/contact_messages", {
+            method: "POST",
+            headers: headers({ Prefer: "return=minimal" }),
+            body: JSON.stringify(body)
+          })
+            .then(function (r) {
+              if (r.status === 201 || r.ok) { success(); return; }
+              return r.text().then(function (t) {
+                errEl.textContent = /rate_limited/.test(t || "")
+                  ? "أرسلت رسائل كثيرة، جرّب بعد ساعة."
+                  : "تعذّر الإرسال، راسلنا على contact@waslchat.app";
+                btn.disabled = false;
+                btn.textContent = "أرسل";
+              });
+            })
+            .catch(function () {
+              errEl.textContent = "تعذّر الإرسال، راسلنا على contact@waslchat.app";
+              btn.disabled = false;
+              btn.textContent = "أرسل";
+            });
         });
       })();
     </script>
