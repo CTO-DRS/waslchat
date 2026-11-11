@@ -15,6 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/ai_service.dart';
+import '../services/block_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/webio/web_files.dart';
@@ -23,6 +24,7 @@ import '../services/presence_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/media_bubbles.dart';
+import '../widgets/report_dialog.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
@@ -82,6 +84,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _searching = false;
   final _searchCtrl = TextEditingController();
   String get _query => _searchCtrl.text.trim().toLowerCase();
+
+  // الحظر: أنا حظرتُ الطرف الآخر في محادثة فردية؟
+  bool _iBlockedPeer = false;
 
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
@@ -186,6 +191,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _text.addListener(_onTextChanged);
     if (widget.isGroup) _loadMembers();
     _loadMeta();
+    _refreshBlockState();
 
     // بث «يكتب الآن» بين أعضاء المحادثة
     _room = supabase.channel('room:${widget.conversationId}');
@@ -329,7 +335,63 @@ class _ChatScreenState extends State<ChatScreen> {
           onShowStarred: () => setState(() => _starredOnly = true),
         ),
       ),
-    ).then((_) => _loadMeta());
+    ).then((changed) {
+      if (changed == true) {
+        _refreshBlockState();
+      } else {
+        _loadMeta();
+      }
+    });
+  }
+
+  Future<void> _refreshBlockState() async {
+    final other = widget.otherId;
+    if (widget.isGroup || other == null) return;
+    await BlockService.ensureLoaded();
+    if (mounted) setState(() => _iBlockedPeer = BlockService.isBlocked(other));
+  }
+
+  Future<void> _unblockPeer() async {
+    final other = widget.otherId;
+    if (other == null) return;
+    try {
+      await BlockService.unblock(other);
+      if (mounted) setState(() => _iBlockedPeer = false);
+    } catch (_) {
+      _snack('تعذّر إلغاء الحظر');
+    }
+  }
+
+  Widget _blockedBanner() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.block_rounded, color: Colors.redAccent, size: 18),
+            SizedBox(width: 8),
+            Text('أنت تحظر هذا الاتصال',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: 4),
+          const Text('لن تصل رسائله الجديدة إليك، ولا يمكن الإرسال إليه.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white60, fontSize: 12)),
+          TextButton(
+            onPressed: _unblockPeer,
+            child: const Text('إلغاء الحظر'),
+          ),
+        ]),
+      ),
+    );
   }
 
   String? _statusLine() {
@@ -505,8 +567,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'content': payload,
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
-    } catch (_) {
-      _snack('تعذّر إرسال الرسالة');
+    } catch (e) {
+      _snack(BlockService.isBlockedError(e)
+          ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
+          : 'تعذّر إرسال الرسالة');
     }
   }
 
@@ -554,8 +618,10 @@ class _ChatScreenState extends State<ChatScreen> {
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
       if (mounted) setState(() => _replyTo = null);
-    } catch (_) {
-      _snack('تعذّر رفع الملف');
+    } catch (e) {
+      _snack(BlockService.isBlockedError(e)
+          ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
+          : 'تعذّر رفع الملف');
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -1212,6 +1278,19 @@ class _ChatScreenState extends State<ChatScreen> {
                 _delete(m);
               },
             ),
+          if (!mine)
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+              title: const Text('الإبلاغ عن الرسالة',
+                  style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                showReportDialog(context,
+                    targetUser: m['sender_id'] as String?,
+                    messageId: m['id'] as String?,
+                    targetName: _senderName(m['sender_id'] as String?));
+              },
+            ),
         ]),
       ),
     );
@@ -1578,7 +1657,9 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
           if (widget.canPost && _composeBanner() != null) _composeBanner()!,
-          if (!widget.canPost)
+          if (_iBlockedPeer)
+            _blockedBanner()
+          else if (!widget.canPost)
             SafeArea(
               top: false,
               child: Container(

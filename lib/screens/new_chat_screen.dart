@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/block_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
@@ -16,6 +17,12 @@ class _NewChatScreenState extends State<NewChatScreen> {
   final _query = TextEditingController();
   List<Map<String, dynamic>> _results = [];
   bool _searching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    BlockService.ensureLoaded();
+  }
 
   @override
   void dispose() {
@@ -37,7 +44,11 @@ class _NewChatScreenState extends State<NewChatScreen> {
           .ilike('username', '%$q%')
           .neq('id', supabase.auth.currentUser!.id)
           .limit(20);
-      if (mounted) setState(() => _results = List<Map<String, dynamic>>.from(data));
+      if (mounted) {
+        setState(() => _results = List<Map<String, dynamic>>.from(data)
+            .where((u) => !BlockService.isBlocked(u['id'] as String))
+            .toList());
+      }
     } finally {
       if (mounted) setState(() => _searching = false);
     }
