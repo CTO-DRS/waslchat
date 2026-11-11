@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
+import '../services/update_service.dart';
 import '../theme.dart';
 import 'channels_screen.dart';
 import 'chats_screen.dart';
@@ -29,7 +30,34 @@ class _HomeScreenState extends State<HomeScreen> {
     // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkE2eKeys(context);
+      _checkUpdates();
     });
+  }
+
+  /// فحص «تحديث متوفر» بعد فتح التطبيق بثوانٍ (حتى لا يزاحم حوار المفاتيح)
+  Future<void> _checkUpdates() async {
+    await Future.delayed(const Duration(seconds: 4));
+    final update = await UpdateService.check();
+    if (update == null || !mounted) return;
+    final notes = (update['notes'] as String?) ?? '';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تحديث متوفر'),
+        content: Text(
+            'الإصدار ${update['version'] ?? ''} متاح الآن.${notes.isEmpty ? '' : '\n\n$notes'}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('لاحقاً')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              UpdateService.openDownload();
+            },
+            child: const Text('تحميل الآن'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

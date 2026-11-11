@@ -47,7 +47,7 @@
 ## Supabase (الخادم)
 - مشروع `wasl-chat`، ref `hplzbillnbdjtufazrlp`، منطقة Frankfurt، خطة Free.
 - URL: https://hplzbillnbdjtufazrlp.supabase.co — حساب Supabase: cto.drs@gmail.com.
-- الترحيلات 001–014 مطبّقة (`supabase/`). التالي 015.
+- الترحيلات 001–014 مطبّقة (`supabase/`). **015_blocks_reports.sql و016_app_version.sql جديدتان — بانتظار تطبيقهما في SQL Editor بالترتيب.**
 - 014_site_admin.sql: `contact_messages` (إدراج عام، قراءة للمشرف)، `site_downloads` + `track_download()`/`download_count()`، `app_admins` + `is_app_admin()`، و`admin_stats()`/`admin_users()`/`admin_downloads_daily()`.
 - المشرفون: cto.drs@gmail.com وinfo@cto-drs.com (إضافة مشرف: insert into app_admins(user_id) ...).
 - Auth redirect allow-list يتضمن `https://waslchat.app/**`.
