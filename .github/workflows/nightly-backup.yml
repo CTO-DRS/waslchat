@@ -1,0 +1,62 @@
+name: Nightly DB backup
+
+# نسخة احتياطية ليلية لقاعدة بيانات Supabase (pg_dump بصيغة مضغوطة -Fc)
+# تُرفع كـ Artifact داخل هذا المستودع الخاص — لا تُرسل لأي خدمة خارجية.
+#
+# مطلوب من المالك (مرة واحدة):
+#   Settings → Secrets and variables → Actions → New repository secret
+#   الاسم: SUPABASE_DB_URL
+#   القيمة: سلسلة الاتصال «Session pooler» من
+#           Supabase → Project Settings → Database → Connection string
+#           مع استبدال [YOUR-PASSWORD] بكلمة مرور قاعدة البيانات.
+#
+# التخزين: حصة Artifacts المجانية 500 م.ب — نحتفظ بـ 7 نسخ فقط (retention).
+# الأمان: القاعدة تحتوي نصوصاً مشفّرة بين الطرفين (v1.) — الـdump لا يكشف محتواها،
+#         لكنه يحتوي بيانات الملفات الشخصية، لذلك أبقِ المستودع خاصاً.
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 05:00 صباحاً بتوقيت السعودية (UTC+3)
+  workflow_dispatch: {} # تشغيل يدوي للتجربة
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: فحص وجود سر الاتصال
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::error::السر SUPABASE_DB_URL غير موجود — راجع docs/RUNBOOK_URGENT.md §7"
+            exit 1
+          fi
+
+      - name: تثبيت عميل PostgreSQL 17 (متوافق مع خوادم Supabase الحالية)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yqq wget ca-certificates gnupg
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/keyrings/pgdg.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -yqq postgresql-client-17
+          pg_dump --version
+
+      - name: تفريغ قاعدة البيانات
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          STAMP=$(date -u +%Y-%m-%d)
+          pg_dump "$SUPABASE_DB_URL" \
+            --no-owner --no-privileges \
+            --format=custom \
+            --file "wasl_db_${STAMP}.dump"
+          ls -lh wasl_db_${STAMP}.dump
+
+      - name: رفع النسخة كـ Artifact (تبقى 7 أيام)
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: wasl_db_*.dump
+          retention-days: 7
+          if-no-files-found: error
