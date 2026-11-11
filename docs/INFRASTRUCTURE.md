@@ -47,7 +47,10 @@
 ## Supabase (الخادم)
 - مشروع `wasl-chat`، ref `hplzbillnbdjtufazrlp`، منطقة Frankfurt، خطة Free.
 - URL: https://hplzbillnbdjtufazrlp.supabase.co — حساب Supabase: cto.drs@gmail.com.
-- الترحيلات 001–013 مطبّقة (`supabase/`). التالي 014.
+- الترحيلات 001–014 مطبّقة (`supabase/`). التالي 015.
+- 014_site_admin.sql: `contact_messages` (إدراج عام، قراءة للمشرف)، `site_downloads` + `track_download()`/`download_count()`، `app_admins` + `is_app_admin()`، و`admin_stats()`/`admin_users()`/`admin_downloads_daily()`.
+- المشرفون: cto.drs@gmail.com وinfo@cto-drs.com (إضافة مشرف: insert into app_admins(user_id) ...).
+- Auth redirect allow-list يتضمن `https://waslchat.app/**`.
 - Edge Functions: `ai`، `push`، `media-cleanup`.
 - pg_cron: `wasl-purge-expired` (كل 15 دقيقة)، `wasl-media-cleanup` (كل ساعة).
 - Auth: بريد + Google + TOTP. `mailer_autoconfirm` مفعّل مؤقتاً حتى ربط SMTP (Brevo).
@@ -72,3 +75,9 @@
 - إلغاء رمز GitHub القديم المكشوف وإنشاء رمز جديد.
 - تغيير كلمة مرور قاعدة بيانات Supabase.
 - إبقاء المستودع `wasl-chat` خاصاً دائماً.
+
+## صفحات الموقع (2026-11-11)
+- `/` الرئيسية: نموذج تواصل (يُحفظ في `contact_messages`) وعداد تحميلات.
+- `/admin/` لوحة الإدارة (noindex): إحصاءات، رسائل التواصل، المستخدمون، التحميلات. تتطلب حساب مشرف.
+- `/web/` نسخة ويب من نفس تطبيق Flutter (`flutter build web --release --base-href /web/`، وcanvaskit من gstatic). الإشعارات غير مفعّلة على الويب. التشفير يتطلب استعادة نسخة المفاتيح الاحتياطية بعبارة المرور.
+- النشر: `gh_overlay.py CTO-DRS/waslchat "msg" dir:prefix` يضيف الملفات دون حذف الباقي.
