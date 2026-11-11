@@ -1,0 +1,27 @@
+# منع إيقاف مشروع Supabase المجاني بسبب الخمول (المرحلة 0)
+# طلب يومي خفيف على REST يُبقي المشروع نشطاً. المفتاح هنا هو anon publishable
+# (مفتاح عام موجود أصلاً في lib/config.dart — ليست سراً).
+name: Supabase keep-alive
+on:
+  schedule:
+    - cron: '0 5 * * *' # يومياً 05:00 UTC = 08:00 بتوقيت السعودية
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://hplzbillnbdjtufazrlp.supabase.co/rest/v1/profiles?select=id&limit=1" \
+              -H "apikey: $SUPABASE_ANON_KEY" || true)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 10
+          done
+          if [ "$code" != "200" ]; then
+            echo "::warning::Supabase ping returned HTTP $code — راجع لوحة Supabase"
+          fi
+        env:
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwbHpiaWxsbmJkanR1ZmF6cmxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwMTAyNjAsImV4cCI6MjEwOTU4NjI2MH0.EqWiUY_Pl70-RTJ-CM2mZqpI8Du1xuAIk8BagRpB9FI
