@@ -8,6 +8,9 @@ class AppConfig {
   static const appVersion = '0.6.0';
   static const appBuild = 31;
 
+  /// رابط الموقع الرسمي (يُستخدم لروابط الدعوة وصفحات الويب)
+  static const siteUrl = 'https://waslchat.app';
+
   /// رابط تحميل آخر إصدار APK (Release في المستودع العام)
   static const apkUrl =
       'https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk';
