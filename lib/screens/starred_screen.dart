@@ -52,9 +52,9 @@ class _StarredScreenState extends State<StarredScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _rows.isEmpty
-              ? Center(
+              ? const Center(
                   child: Text('اضغط مطوّلاً على أي رسالة ثم «تمييز بنجمة»',
-                      style: TextStyle(color: context.wasl.textFaint)))
+                      style: TextStyle(color: Colors.white60)))
               : ListView(children: [
                   for (final (c, n) in _rows)
                     ListTile(
@@ -68,7 +68,7 @@ class _StarredScreenState extends State<StarredScreen> {
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                         Text('$n'),
                         const SizedBox(width: 4),
-                        Icon(Icons.star_rounded, color: context.wasl.warning, size: 18),
+                        const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
                       ]),
                       onTap: () => Navigator.push(
                         context,

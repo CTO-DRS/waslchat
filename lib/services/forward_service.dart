@@ -11,10 +11,10 @@ import 'media_service.dart';
 class ForwardService {
   ForwardService._();
 
-  /// مفتاح محادثة هدف (صف من my_chats) — fresh لأن إعادة التوجيه إرسال
+  /// مفتاح محادثة هدف (صف من my_chats)
   static Future<SecretKey?> _keyFor(Map<String, dynamic> chat) {
     final conv = chat['conversation_id'] as String;
-    if (chat['is_group'] == true) return E2eService.groupKey(conv, fresh: true);
+    if (chat['is_group'] == true) return E2eService.groupKey(conv);
     final other = chat['other_id'] as String?;
     if (other == null) return Future.value(null);
     return E2eService.dmKey(conv, other);
@@ -30,8 +30,7 @@ class ForwardService {
   }) async {
     try {
       final conv = target['conversation_id'] as String;
-      final me = supabase.auth.currentUser?.id;
-      if (me == null) return false;
+      final me = supabase.auth.currentUser!.id;
       final key = await _keyFor(target);
       if (key == null) return false;
       if (type == 'text') {
@@ -41,20 +40,6 @@ class ForwardService {
           'conversation_id': conv,
           'sender_id': me,
           'type': 'text',
-          'content': payload,
-        });
-        return true;
-      }
-      // رسائل المحتوى-فقط (0.4.6): الاستطلاعات والموقع وبطاقات جهات
-      // الاتصال — نصّها المفكوك يُشفَّر بمفتاح الهدف بلا أي وسائط
-      // (يصلح توجيه الاستطلاعات الذي كان يفشل صامتاً)
-      if (type == 'poll' || type == 'location' || type == 'contact') {
-        if (text == null || !E2eService.withinPlainLimit(text)) return false;
-        final payload = await E2eService.encryptText(key, conv, text);
-        await supabase.from('messages').insert({
-          'conversation_id': conv,
-          'sender_id': me,
-          'type': type,
           'content': payload,
         });
         return true;

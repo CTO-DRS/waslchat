@@ -12,8 +12,6 @@ String previewText(Map<String, dynamic> row, {String empty = 'لا توجد رس
       return '🎬 فيديو';
     case 'file':
       return '📎 ملف';
-    case 'sticker':
-      return '🩹 ملصق';
     default:
       return (row['last_message'] as String?) ?? empty;
   }
@@ -60,7 +58,7 @@ Future<(String, String)?> askNameAndDescription(
   return showDialog<(String, String)>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: context.wasl.surface,
+      backgroundColor: WaslColors.darkSurface,
       title: Text(title),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: name, autofocus: true, decoration: InputDecoration(hintText: nameHint)),
@@ -97,10 +95,7 @@ class SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
         child: Text(text,
-            style: TextStyle(
-                color: context.wasl.textFaint,
-                fontWeight: FontWeight.w700,
-                fontSize: 13)),
+            style: const TextStyle(color: Colors.white60, fontWeight: FontWeight.w700, fontSize: 13)),
       );
 }
 

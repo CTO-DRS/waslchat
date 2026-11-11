@@ -21,7 +21,7 @@ String disappearLabel(int? s) {
 Future<int?> pickDisappearing(BuildContext context, String convId, int? current) async {
   final picked = await showModalBottomSheet<int>(
     context: context,
-    backgroundColor: context.wasl.surface,
+    backgroundColor: WaslColors.darkSurface,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (ctx) => SafeArea(
@@ -83,110 +83,12 @@ class _ContactScreenState extends State<ContactScreen> {
   Map<String, dynamic>? _p;
   bool _muted = false;
   int? _disappear;
-  bool _blockedByMe = false;
-  bool _screenshotBlock = false;
 
   @override
   void initState() {
     super.initState();
     _disappear = widget.disappearSeconds;
     _load();
-    _loadBlocked();
-  }
-
-  Future<void> _loadBlocked() async {
-    try {
-      final row = await supabase
-          .from('user_blocks')
-          .select('blocked_id')
-          .eq('blocker_id', supabase.auth.currentUser?.id ?? '')
-          .eq('blocked_id', widget.otherId)
-          .maybeSingle();
-      if (mounted) setState(() => _blockedByMe = row != null);
-    } catch (_) {}
-  }
-
-  Future<void> _toggleBlock() async {
-    if (_blockedByMe) {
-      try {
-        await supabase.rpc('unblock_user', params: {'p_target': widget.otherId});
-        if (mounted) setState(() => _blockedByMe = false);
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('تعذّر إلغاء الحظر')));
-        }
-      }
-      return;
-    }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('حظر المستخدم؟'),
-        content: const Text(
-            'لن يستطيع مراسلتك في المحادثة الفردية بينكما، ولن يظهر في البحث عن أسماء المستخدمين. يمكنك إلغاء الحظر في أي وقت من هذه الصفحة.',
-            style: TextStyle(height: 1.6)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
-          FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: c.wasl.danger),
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('حظر')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await supabase.rpc('block_user', params: {'p_target': widget.otherId});
-      if (mounted) {
-        setState(() => _blockedByMe = true);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('تم حظر المستخدم')));
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('تعذّر تنفيذ الحظر')));
-      }
-    }
-  }
-
-  Future<void> _reportUser() async {
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (c) => SimpleDialog(
-        title: const Text('لماذا تُبلّغ عن هذا المستخدم؟'),
-        children: [
-          for (final (v, label) in const [
-            ('spam', 'محتوى مزعج أو إعلانات'),
-            ('inappropriate', 'محتوى غير لائق'),
-            ('harassment', 'تنمر أو مضايقة'),
-            ('fraud', 'احتيال أو انتحال'),
-            ('other', 'سبب آخر'),
-          ])
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(c, v),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(label),
-              ),
-            ),
-        ],
-      ),
-    );
-    if (reason == null || !mounted) return;
-    try {
-      await supabase.from('abuse_reports').insert({
-        'target_user_id': widget.otherId,
-        'conversation_id': widget.conversationId,
-        'reason': reason,
-      });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('تم إرسال البلاغ. شكراً لك')));
-    } catch (_) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('تعذّر إرسال البلاغ')));
-    }
   }
 
   Future<void> _load() async {
@@ -201,37 +103,17 @@ class _ContactScreenState extends State<ContactScreen> {
             .from('conversation_participants')
             .select('muted_until')
             .eq('conversation_id', widget.conversationId)
-            .eq('user_id', supabase.auth.currentUser?.id ?? '')
+            .eq('user_id', supabase.auth.currentUser!.id)
             .single(),
-        supabase
-            .from('conversations')
-            .select('screenshot_block')
-            .eq('id', widget.conversationId)
-            .maybeSingle(),
       ]);
-      final mu = results[1]?['muted_until'] as String?;
+      final mu = results[1]['muted_until'] as String?;
       if (!mounted) return;
       setState(() {
         _p = results[0];
         _muted = mu != null &&
             (mu == 'infinity' || (DateTime.tryParse(mu)?.isAfter(DateTime.now()) ?? false));
-        _screenshotBlock = results[2]?['screenshot_block'] as bool? ?? false;
       });
     } catch (_) {}
-  }
-
-  Future<void> _toggleScreenshotBlock(bool v) async {
-    setState(() => _screenshotBlock = v);
-    try {
-      await supabase.rpc('set_screenshot_block',
-          params: {'p_conv': widget.conversationId, 'p_block': v});
-    } catch (_) {
-      if (mounted) {
-        setState(() => _screenshotBlock = !v);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('تعذّر الحفظ')));
-      }
-    }
   }
 
   Future<void> _toggleMute() async {
@@ -261,13 +143,13 @@ class _ContactScreenState extends State<ContactScreen> {
           if (_p != null)
             Center(
                 child: Text('@${_p!['username']}',
-                    style: TextStyle(color: context.wasl.textFaint))),
+                    style: const TextStyle(color: Colors.white60))),
           if (bio != null && bio.isNotEmpty) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                  color: context.wasl.glass, borderRadius: BorderRadius.circular(18)),
+                  color: WaslColors.glass, borderRadius: BorderRadius.circular(18)),
               child: Text(bio),
             ),
           ],
@@ -288,17 +170,9 @@ class _ContactScreenState extends State<ContactScreen> {
               if (v != null && mounted) setState(() => _disappear = v == 0 ? null : v);
             },
           ),
-          SwitchListTile(
-            secondary: const Icon(Icons.screenshot_monitor_outlined, color: WaslColors.teal),
-            title: const Text('منع لقطات الشاشة'),
-            subtitle: const Text(
-                'يخفي هذه المحادثة من لقطات الشاشة ومعاينة التطبيقات على أندرويد'),
-            value: _screenshotBlock,
-            onChanged: _toggleScreenshotBlock,
-          ),
           if (widget.onShowStarred != null)
             ListTile(
-              leading: Icon(Icons.star_outline_rounded, color: context.wasl.warning),
+              leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
               title: const Text('الرسائل المميزة بنجمة'),
               onTap: () {
                 Navigator.pop(context);
@@ -310,24 +184,6 @@ class _ContactScreenState extends State<ContactScreen> {
             title: const Text('كتم الإشعارات'),
             value: _muted,
             onChanged: (_) => _toggleMute(),
-          ),
-          const Divider(height: 32),
-          ListTile(
-            leading: Icon(_blockedByMe ? Icons.lock_open_rounded : Icons.block_rounded,
-                color: _blockedByMe ? WaslColors.teal : context.wasl.danger),
-            title: Text(_blockedByMe ? 'إلغاء الحظر' : 'حظر المستخدم',
-                style: TextStyle(color: _blockedByMe ? null : context.wasl.danger)),
-            subtitle: _blockedByMe
-                ? const Text('يمكنه مراسلتك في المحادثة الفردية من جديد')
-                : const Text('يمنعه من مراسلتك هنا ومن ظهورك له في البحث'),
-            onTap: _toggleBlock,
-          ),
-          ListTile(
-            leading: Icon(Icons.flag_outlined, color: context.wasl.warning),
-            title: Text('إبلاغ عن المستخدم',
-                style: TextStyle(color: context.wasl.warning)),
-            subtitle: const Text('يُراجع البلاغ يدوياً من فريق التطبيق'),
-            onTap: _reportUser,
           ),
         ],
       ),

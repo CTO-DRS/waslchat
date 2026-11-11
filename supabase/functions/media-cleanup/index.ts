@@ -9,23 +9,8 @@ const db = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-// مقارنة سرّية بزمن ثابت
-async function timingSafeEqual(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const [ha, hb] = await Promise.all([
-    crypto.subtle.digest("SHA-256", enc.encode(a)),
-    crypto.subtle.digest("SHA-256", enc.encode(b)),
-  ]);
-  const va = new Uint8Array(ha);
-  const vb = new Uint8Array(hb);
-  let diff = 0;
-  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
-  return diff === 0;
-}
-
 Deno.serve(async (req) => {
-  const provided = req.headers.get("x-webhook-secret") ?? "";
-  if (!webhookSecret || !(await timingSafeEqual(provided, webhookSecret))) {
+  if (!webhookSecret || req.headers.get("x-webhook-secret") !== webhookSecret) {
     return new Response("unauthorized", { status: 401 });
   }
   let removed = 0;

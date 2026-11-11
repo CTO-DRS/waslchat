@@ -1,12 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
-import 'discover_screen.dart';
 
 class NewChatScreen extends StatefulWidget {
   const NewChatScreen({super.key});
@@ -19,63 +16,30 @@ class _NewChatScreenState extends State<NewChatScreen> {
   final _query = TextEditingController();
   List<Map<String, dynamic>> _results = [];
   bool _searching = false;
-  Timer? _debounce;
-  int _seq = 0; // تجاهل استجابات البحث المتأخرة
-  Set<String> _blocked = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _loadBlocked();
-  }
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _query.dispose();
     super.dispose();
   }
 
-  /// من حظرتهم أنا لا يظهروا في نتائج البحث
-  Future<void> _loadBlocked() async {
-    try {
-      final ids = await supabase.rpc('my_blocked_ids');
-      if (mounted) setState(() => _blocked = Set<String>.from(ids as List));
-    } catch (_) {}
-  }
-
-  void _onQueryChanged(String q) {
-    _debounce?.cancel();
-    if (q.trim().length < 2) {
+  Future<void> _search(String q) async {
+    q = q.trim();
+    if (q.length < 2) {
       setState(() => _results = []);
       return;
     }
-    _debounce = Timer(const Duration(milliseconds: 300), () => _doSearch(q.trim()));
-  }
-
-  Future<void> _doSearch(String q) async {
-    final seq = ++_seq;
     setState(() => _searching = true);
     try {
       final data = await supabase
           .from('profiles')
           .select('id, username, display_name, avatar_url, bio')
           .ilike('username', '%$q%')
-          .neq('id', supabase.auth.currentUser?.id ?? '')
+          .neq('id', supabase.auth.currentUser!.id)
           .limit(20);
-      if (!mounted || seq != _seq) return;
-      setState(() {
-        _results = List<Map<String, dynamic>>.from(data)
-            .where((u) => !_blocked.contains(u['id']))
-            .toList();
-        _searching = false;
-      });
-    } catch (_) {
-      if (!mounted || seq != _seq) return;
-      setState(() {
-        _results = [];
-        _searching = false;
-      });
+      if (mounted) setState(() => _results = List<Map<String, dynamic>>.from(data));
+    } finally {
+      if (mounted) setState(() => _searching = false);
     }
   }
 
@@ -94,12 +58,10 @@ class _NewChatScreenState extends State<NewChatScreen> {
           ),
         ),
       );
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().contains('blocked')
-              ? 'لا يمكن بدء المحادثة: هذا المستخدم حظرك'
-              : 'تعذّر بدء المحادثة')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('تعذّر بدء المحادثة')));
     }
   }
 
@@ -108,25 +70,12 @@ class _NewChatScreenState extends State<NewChatScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('محادثة جديدة')),
       body: Column(children: [
-        ListTile(
-          leading: CircleAvatar(
-              radius: 22,
-              backgroundColor: WaslColors.teal.withValues(alpha: 0.15),
-              child: Icon(Icons.person_search, color: WaslColors.teal, size: 22)),
-          title: const Text('اكتشاف من جهات الاتصال'),
-          subtitle: const Text('بأرقام مُجزّأة على جهازك — لا يُرفع رقم خام',
-              style: TextStyle(fontSize: 12)),
-          trailing: const Icon(Icons.chevron_left, size: 20),
-          onTap: () => Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const DiscoverScreen())),
-        ),
-        const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.all(12),
           child: TextField(
             controller: _query,
             autofocus: true,
-            onChanged: _onQueryChanged,
+            onChanged: _search,
             decoration: const InputDecoration(
                 hintText: 'ابحث باسم المستخدم', prefixIcon: Icon(Icons.search)),
           ),

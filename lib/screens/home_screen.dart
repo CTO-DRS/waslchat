@@ -2,8 +2,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-import '../config.dart';
-import '../services/deep_link_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
@@ -11,7 +9,6 @@ import 'channels_screen.dart';
 import 'chats_screen.dart';
 import 'communities_screen.dart';
 import 'e2e_key_screen.dart';
-import 'join_invite_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -29,68 +26,14 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
-    // رابط دعوة فُتح به التطبيق (app.waslchat://join/CODE) — بند المرحلة 1
-    DeepLinkService.pendingCode.addListener(_consumeInvite);
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      // أولاً: استهلاك رمز الدعوة إن وُجد (قبل أي نوافذ أخرى ليظل ظاهراً)
-      _consumeInvite();
-      await checkE2eKeys(context);
-      // شاشة «تحديث متوفر» تقرأ آخر إصدار من الخادم (جدول app_releases)
-      await Future.delayed(const Duration(seconds: 2));
-      if (mounted) await _checkUpdate();
+    // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) checkE2eKeys(context);
     });
-  }
-
-  /// يفتح شاشة الانضمام مرة واحدة لكل رمز وصل عبر الرابط العميق
-  void _consumeInvite() {
-    final code = DeepLinkService.pendingCode.value;
-    if (code == null || !mounted) return;
-    DeepLinkService.pendingCode.value = null;
-    Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => JoinInviteScreen(initialCode: code)));
-  }
-
-  /// يعرض تنبيهاً إن وُجد إصدار أحدث من إصدار هذا الجهاز
-  Future<void> _checkUpdate() async {
-    try {
-      final rows = await supabase.rpc('check_app_update',
-          params: {'p_version_code': AppConfig.versionCode});
-      if (!mounted || rows is! List || rows.isEmpty) return;
-      final r = rows.first as Map<String, dynamic>;
-      final notes = (r['notes'] as String?) ?? '';
-      await showDialog<void>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('تحديث متوفر'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('الإصدار الجديد: ${r['version_name'] ?? ''}',
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
-              if (notes.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(notes, style: const TextStyle(height: 1.5)),
-              ],
-              const SizedBox(height: 12),
-              Text('حمّله من هنا:', style: TextStyle(color: c.wasl.textFaint)),
-              SelectableText((r['url'] as String?) ?? '',
-                  style: const TextStyle(color: WaslColors.teal, fontSize: 13)),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c), child: const Text('لاحقاً')),
-            FilledButton(onPressed: () => Navigator.pop(c), child: const Text('حسناً')),
-          ],
-        ),
-      );
-    } catch (_) {}
   }
 
   @override
   void dispose() {
-    DeepLinkService.pendingCode.removeListener(_consumeInvite);
     PresenceService.stop();
     super.dispose();
   }
@@ -117,14 +60,14 @@ class _HomeScreenState extends State<HomeScreen> {
               filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
               child: Container(
                 decoration: BoxDecoration(
-                  color: context.wasl.glass,
+                  color: WaslColors.glass,
                   borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: context.wasl.glassStrong),
+                  border: Border.all(color: const Color(0x22FFFFFF)),
                 ),
                 child: NavigationBar(
                   height: 68,
                   backgroundColor: Colors.transparent,
-                  indicatorColor: context.wasl.bubbleMine,
+                  indicatorColor: const Color(0x556366F1),
                   selectedIndex: _index,
                   onDestinationSelected: (i) => setState(() => _index = i),
                   destinations: const [
@@ -175,8 +118,7 @@ class _ComingSoon extends StatelessWidget {
           children: [
             Icon(icon, size: 64, color: WaslColors.teal),
             const SizedBox(height: 12),
-            Text('قريباً في المرحلة القادمة',
-                style: TextStyle(color: context.wasl.textFaint)),
+            const Text('قريباً في المرحلة القادمة', style: TextStyle(color: Colors.white60)),
           ],
         ),
       ),
