@@ -4,6 +4,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// ضع هنا بيانات مشروعك من Supabase:
 /// Project Settings > API > Project URL و anon public key
 class AppConfig {
+  /// إصدار هذا البناء — يُحدّث مع كل إصدار (وليس تلقائياً)
+  static const appVersion = '0.6.0';
+  static const appBuild = 31;
+
+  /// رابط تحميل آخر إصدار APK (Release في المستودع العام)
+  static const apkUrl =
+      'https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk';
+
   /// رابط العودة للتطبيق بعد الدخول بجوجل أو استعادة كلمة المرور
   static String get authRedirect =>
       kIsWeb ? 'https://waslchat.app/web/' : 'app.waslchat://login-callback';

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../config.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
+import '../services/update_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
@@ -93,8 +94,39 @@ class SettingsScreen extends StatelessWidget {
             },
           ),
           const SizedBox(height: 24),
-          const Center(
-              child: Text('وصل شات · الإصدار 0.1.8', style: TextStyle(color: Colors.white38))),
+          ListTile(
+            leading: const Icon(Icons.system_update_alt_rounded, color: WaslColors.teal),
+            title: const Text('فحص وجود تحديث'),
+            subtitle: Text('الإصدار ${AppConfig.appVersion}+${AppConfig.appBuild}'),
+            onTap: () async {
+              final u = await UpdateService.check();
+              if (!context.mounted) return;
+              if (u == null) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text('لديك أحدث إصدار')));
+                return;
+              }
+              final go = await showDialog<bool>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('تحديث متوفر'),
+                  content: Text(
+                      'الإصدار ${u['version'] ?? ''} متاح الآن.${((u['notes'] as String?) ?? '').isEmpty ? '' : '\n\n${u['notes']}'}'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('لاحقاً')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(c, true),
+                        child: const Text('تحميل الآن')),
+                  ],
+                ),
+              );
+              if (go == true) await UpdateService.openDownload();
+            },
+          ),
+          const SizedBox(height: 8),
+          Center(
+              child: Text('وصل شات · الإصدار ${AppConfig.appVersion}+${AppConfig.appBuild}',
+                  style: const TextStyle(color: Colors.white38))),
         ],
       ),
     );
