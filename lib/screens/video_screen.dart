@@ -3,17 +3,24 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../services/webio/web_files.dart';
+
 /// تشغيل فيديو مفكوك التشفير من ملف مؤقت على الجهاز
 class VideoScreen extends StatefulWidget {
-  const VideoScreen({super.key, required this.file});
-  final File file;
+  const VideoScreen({super.key, this.file, this.url});
+  final File? file;
+
+  /// على الويب: رابط blob مؤقت
+  final String? url;
 
   @override
   State<VideoScreen> createState() => _VideoScreenState();
 }
 
 class _VideoScreenState extends State<VideoScreen> {
-  late final VideoPlayerController _c = VideoPlayerController.file(widget.file);
+  late final VideoPlayerController _c = widget.url != null
+      ? VideoPlayerController.networkUrl(Uri.parse(widget.url!))
+      : VideoPlayerController.file(widget.file!);
   bool _ready = false;
   bool _failed = false;
 
@@ -36,7 +43,8 @@ class _VideoScreenState extends State<VideoScreen> {
   void dispose() {
     _c.dispose();
     // الملف المؤقت مفكوك التشفير: نحذفه عند الخروج
-    widget.file.delete().ignore();
+    widget.file?.delete().ignore();
+    if (widget.url != null) webRevoke(widget.url!);
     super.dispose();
   }
 

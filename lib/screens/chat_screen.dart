@@ -17,6 +17,7 @@ import '../config.dart';
 import '../services/ai_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
+import '../services/webio/web_files.dart';
 import '../services/media_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
@@ -617,7 +618,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// يفك الملف إلى مجلد مؤقت ثم يفتحه (الفيديو داخل التطبيق، وغيره بتطبيق مناسب)
   Future<void> _openMedia(Map<String, dynamic> m) async {
-    if (kIsWeb) return;
+    if (kIsWeb) return _openMediaWeb(m);
     setState(() => _uploading = true);
     try {
       final bytes = await _mediaBytes(m['media_url'] as String);
@@ -639,6 +640,34 @@ class _ChatScreenState extends State<ChatScreen> {
       } else {
         final res = await OpenFilex.open(file.path);
         if (res.type != ResultType.done) _snack('لا يوجد تطبيق يفتح هذا الملف');
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الملف');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// الويب: الفيديو يُشغَّل من رابط blob، والملفات تُنزَّل عبر المتصفح
+  Future<void> _openMediaWeb(Map<String, dynamic> m) async {
+    setState(() => _uploading = true);
+    try {
+      final bytes = await _mediaBytes(m['media_url'] as String);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الملف');
+        return;
+      }
+      final meta = _metaOf(m);
+      var name = (meta?['name'] as String?) ?? (m['type'] == 'video' ? 'video.mp4' : 'file');
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      if (!mounted) return;
+      if (m['type'] == 'video') {
+        final mime = name.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
+        final url = webBlobUrl(bytes, mime);
+        await Navigator.push(
+            context, MaterialPageRoute(builder: (_) => VideoScreen(url: url)));
+      } else {
+        webDownload(bytes, name, 'application/octet-stream');
       }
     } catch (_) {
       _snack('تعذّر فتح الملف');
@@ -697,17 +726,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ---------- التسجيل الصوتي (اضغط مطولاً) ----------
   Future<void> _startRec() async {
-    if (kIsWeb) {
-      _snack('التسجيل الصوتي متاح على تطبيق الجوال');
-      return;
-    }
     if (!await _recorder.hasPermission()) {
       _snack('اسمح للتطبيق باستخدام الميكروفون');
       return;
     }
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+    if (kIsWeb) {
+      // المتصفح يسجّل Opus داخل WebM، والمسار يُتجاهل
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.opus), path: '');
+    } else {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+    }
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
     setState(() {
       _recording = true;
@@ -726,8 +756,8 @@ class _ChatScreenState extends State<ChatScreen> {
     await _sendMedia(
       type: 'voice',
       bytes: bytes,
-      ext: 'm4a',
-      contentType: 'audio/mp4',
+      ext: kIsWeb ? 'webm' : 'm4a',
+      contentType: kIsWeb ? 'audio/webm' : 'audio/mp4',
       durationMs: ms,
     );
   }

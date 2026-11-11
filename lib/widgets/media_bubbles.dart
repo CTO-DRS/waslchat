@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
+
+import '../services/webio/web_files.dart';
 
 /// تُحمّل بايتات الوسيط (بعد فك التشفير إن كان مشفّراً)
 typedef MediaLoader = Future<Uint8List?> Function();
@@ -106,11 +109,17 @@ class _VoiceBubbleState extends State<VoiceBubble> {
       if (!_ready) {
         final bytes = await widget.loader();
         if (bytes == null) throw Exception('no bytes');
-        final dir = await getTemporaryDirectory();
-        final f =
-            File('${dir.path}/voice_enc_${DateTime.now().millisecondsSinceEpoch}.m4a');
-        await f.writeAsBytes(bytes, flush: true);
-        await _player.setFilePath(f.path);
+        if (kIsWeb) {
+          final webm = bytes.length > 4 &&
+              bytes[0] == 0x1A && bytes[1] == 0x45 && bytes[2] == 0xDF && bytes[3] == 0xA3;
+          await _player.setUrl(webBlobUrl(bytes, webm ? 'audio/webm' : 'audio/mp4'));
+        } else {
+          final dir = await getTemporaryDirectory();
+          final f = File(
+              '${dir.path}/voice_enc_${DateTime.now().millisecondsSinceEpoch}.m4a');
+          await f.writeAsBytes(bytes, flush: true);
+          await _player.setFilePath(f.path);
+        }
         _ready = true;
       }
       if (_player.processingState == ProcessingState.completed) {
