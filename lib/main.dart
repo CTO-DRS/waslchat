@@ -13,6 +13,7 @@ import 'widgets/lock_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ThemeService.load();
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.supabaseAnonKey,
@@ -28,22 +29,25 @@ class WaslApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'وصل شات',
-      debugShowCheckedModeBanner: false,
-      theme: WaslTheme.light,
-      darkTheme: WaslTheme.dark,
-      themeMode: ThemeMode.dark,
-      locale: const Locale('ar'),
-      supportedLocales: const [Locale('ar'), Locale('en')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      navigatorKey: navigatorKey,
-      navigatorObservers: [ScreenshotService.routeObserver],
-      home: const LockGate(child: AuthGate()),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeService.mode,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'وصل شات',
+        debugShowCheckedModeBanner: false,
+        theme: WaslTheme.light,
+        darkTheme: WaslTheme.dark,
+        themeMode: mode,
+        locale: const Locale('ar'),
+        supportedLocales: const [Locale('ar'), Locale('en')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        navigatorKey: navigatorKey,
+        navigatorObservers: [ScreenshotService.routeObserver],
+        home: const LockGate(child: AuthGate()),
+      ),
     );
   }
 }
