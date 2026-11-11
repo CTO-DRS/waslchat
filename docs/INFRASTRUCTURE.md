@@ -67,7 +67,7 @@
 - PayPal للدعم: الرابط في README و`.github/FUNDING.yml`.
 
 ## التطبيق
-- معرّف الحزمة: `app.waslchat.wasl_chat`. الإصدار الحالي 0.1.8+15.
+- معرّف الحزمة: `app.waslchat.wasl_chat`. الإصدار الحالي 0.6.0+31.
 - مفتاح التوقيع: `secrets/wasl-release.jks` (alias `wasl`). **لا تفقده.**
 - رابط الدخول العميق: `app.waslchat://login-callback`.
 
