@@ -47,10 +47,18 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare
   peer uuid;
   is_group boolean;
+  n_parts int;
 begin
   select c.is_group into is_group from conversations c where c.id = new.conversation_id;
   if coalesce(is_group, true) then
     return new; -- المجموعات/القنوات لا تُفرض هنا (الإشراف أدواته لاحقاً)
+  end if;
+
+  -- اطمئنان إضافي: الحظر يُفرض في المحادثات الفردية بعنصرَين فقط
+  select count(*) into n_parts
+  from conversation_participants where conversation_id = new.conversation_id;
+  if coalesce(n_parts, 0) <> 2 then
+    return new;
   end if;
 
   select p.user_id into peer
