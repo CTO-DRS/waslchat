@@ -13,6 +13,12 @@ import 'profile_screen.dart';
 import 'starred_screen.dart';
 import 'security_screens.dart';
 
+String _modeLabel(ThemeMode m) => switch (m) {
+      ThemeMode.dark => 'داكن',
+      ThemeMode.light => 'فاتح (تجريبي)',
+      ThemeMode.system => 'حسب النظام',
+    };
+
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -57,6 +63,45 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.password, color: WaslColors.teal),
             title: const Text('تغيير كلمة المرور'),
             onTap: () => openChangePassword(context),
+          ),
+          ListTile(
+            leading: const Icon(Icons.dark_mode_outlined, color: WaslColors.violet),
+            title: const Text('المظهر'),
+            subtitle: ValueListenableBuilder<ThemeMode>(
+              valueListenable: ThemeService.mode,
+              builder: (_, m, __) => Text(_modeLabel(m)),
+            ),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () async {
+              final m = await showModalBottomSheet<ThemeMode>(
+                context: context,
+                backgroundColor: Theme.of(context).brightness == Brightness.dark
+                    ? WaslColors.darkSurface
+                    : null,
+                shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+                builder: (ctx) => SafeArea(
+                  child: Wrap(children: [
+                    const ListTile(
+                      title: Text('المظهر',
+                          style: TextStyle(fontWeight: FontWeight.w800)),
+                      subtitle: Text('الفاتح تجريبي: بعض الشاشات محسّنة للداكن حتى الآن'),
+                    ),
+                    for (final m in ThemeMode.values)
+                      ListTile(
+                        leading: Icon(
+                            ThemeService.mode.value == m
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: WaslColors.teal),
+                        title: Text(_modeLabel(m)),
+                        onTap: () => Navigator.pop(ctx, m),
+                      ),
+                  ]),
+                ),
+              );
+              if (m != null) ThemeService.set(m);
+            },
           ),
           const _AppLockTile(),
           ListTile(
