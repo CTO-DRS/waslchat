@@ -33,7 +33,9 @@
 | TXT (مُدار) | @ | v=spf1 include:spf.efwd.spaceship.net ~all |
 
 ## الموقع https://waslchat.app
-- مستضاف على GitHub Pages من المستودع **العام** `CTO-DRS/waslchat` (فرع main، الجذر). يحتوي `index.html` (سياسة الخصوصية والشروط) و`CNAME`.
+- مستضاف على GitHub Pages من المستودع **العام** `CTO-DRS/waslchat` (فرع main، الجذر). الصفحة الرئيسية `index.html` (موقع تعريفي بأسلوب واتساب) مع `hark.css` و`hark-hero.css` و`hark.js` والصور، وسياسة الخصوصية والشروط في `privacy/index.html` (https://waslchat.app/privacy/)، و`CNAME`.
+- رابط التحميل الثابت: https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk (ارفع APK كل إصدار كـRelease جديد في `CTO-DRS/waslchat` باسم `wasl_chat.apk`).
+- مصدر الصفحة الرئيسية: صفحة Hark «Wasl Chat Official Site».
 - الدومين المخصص `waslchat.app`، الشهادة من GitHub (تتجدد تلقائياً)، Enforce HTTPS مفعّل.
 - `www.waslchat.app` والرابط القديم `cto-drs.github.io/waslchat` يحوّلان تلقائياً إلى https://waslchat.app/.
 - للتعديل: عدّل `index.html` في `CTO-DRS/waslchat`.
