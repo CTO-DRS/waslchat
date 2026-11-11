@@ -3,6 +3,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+# توفير دقائق Actions المجانية: أي دفع جديد يلغي البناء السابق المعلّق لنفس الفرع
+concurrency:
+  group: build-apk-main
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
