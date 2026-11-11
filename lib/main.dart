@@ -1,3 +1,7 @@
+import 'dart:ui';
+
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,7 +23,26 @@ Future<void> main() async {
     publishableKey: AppConfig.supabaseAnonKey,
   );
   await PushService.init();
+  _initCrashlytics();
   runApp(const WaslApp());
+}
+
+/// تقارير الأعطال إلى Firebase Crashlytics (أندرويد فقط).
+/// PushService.init يهيّئ Firebase قبله؛ إن فشلت التهيئة (لا خدمات Google) نتجاهل بهدوء.
+void _initCrashlytics() {
+  if (kIsWeb) return;
+  try {
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+  } catch (_) {
+    // Firebase غير مهيّأ — تقارير الأعطال اختيارية ولا يمنع تشغيل التطبيق
+  }
 }
 
 final navigatorKey = GlobalKey<NavigatorState>();

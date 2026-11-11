@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // تقارير الأعطال: يجب أن يأتي بعد com.android.application
+    id("com.google.firebase.crashlytics")
 }
 
 android {
@@ -57,5 +59,11 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// لا نرفع خرائط الذاكرة (mapping) من CI — كود Dart يُرمَّز عبر إضافة Crashlytics نفسها،
+// وتعطيل الرفع يجعل البناء أسرع ويمنع أي فشل بحثاً عن بيانات Firebase في الـGradle.
+configure<com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension> {
+    mappingFileUploadEnabled = false
 }
 
