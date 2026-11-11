@@ -140,11 +140,11 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                     ),
                   ),
                   if (_discover.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
+                    const Padding(
+                      padding: EdgeInsets.all(24),
                       child: Center(
                           child: Text('لا توجد مجتمعات جديدة. أنشئ أول مجتمع بزر +',
-                              style: TextStyle(color: context.wasl.textFaint))),
+                              style: TextStyle(color: Colors.white60))),
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _avatar(c['name'] as String),

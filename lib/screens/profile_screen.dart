@@ -17,7 +17,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _name = TextEditingController();
   final _bio = TextEditingController();
-  final String _me = supabase.auth.currentUser?.id ?? '';
+  final String _me = supabase.auth.currentUser!.id;
   String _username = '';
   String? _avatar;
   bool _loading = true;
@@ -66,7 +66,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final x = await ImagePicker()
         .pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 85);
     if (x == null) return;
-    if (!mounted) return; // قد يغادر المستخدم الشاشة أثناء اختيار الصورة
     setState(() => _uploading = true);
     try {
       final bytes = await x.readAsBytes();
@@ -164,7 +163,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 const SizedBox(height: 8),
                 Center(
-                    child: Text('@$_username', style: TextStyle(color: context.wasl.textFaint))),
+                    child: Text('@$_username', style: const TextStyle(color: Colors.white60))),
                 const SizedBox(height: 24),
                 TextField(
                   controller: _name,
@@ -181,8 +180,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   decoration: const InputDecoration(labelText: 'نبذة عنك'),
                 ),
                 const SizedBox(height: 8),
-                Text('صورتك واسمك ونبذتك يراها أي مستخدم في وصل.',
-                    style: TextStyle(color: context.wasl.textFaint, fontSize: 12)),
+                const Text('صورتك واسمك ونبذتك يراها أي مستخدم في وصل.',
+                    style: TextStyle(color: Colors.white54, fontSize: 12)),
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: _saving ? null : _save,

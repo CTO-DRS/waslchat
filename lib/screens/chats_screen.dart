@@ -2,18 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
-import '../services/draft_service.dart';
 import '../services/e2e_service.dart';
-import '../services/mention_service.dart';
 import '../services/presence_service.dart';
-import '../services/privacy_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
-import '../widgets/stories_strip.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
-import 'join_invite_screen.dart';
 import 'new_chat_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
@@ -30,13 +25,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
   // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
   final Map<String, String> _previews = {};
   bool _showArchived = false;
-  final GlobalKey<StoriesStripState> _stripKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
-    // المسودات المحفوظة محلياً (تظهر «مسودة: …» في المعاينة)
-    DraftService.load();
     _load();
     // تحديث القائمة فور وصول أي رسالة جديدة
     _channel = supabase
@@ -66,8 +58,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _loading = false;
       });
       _decryptPreviews(chats);
-      // شريط الحالات يُحدّث معها (حالاتي وحالات جهات الاتصال)
-      _stripKey.currentState?.refresh();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -90,10 +80,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
               content: lm,
             );
       job.then((plain) {
-        if (mounted) {
-          // رسالة عليها إشارات @: المعاينة تعرض نصّها لا بنيتها
-          setState(() => _previews[lm] = MentionCodec.displayText(plain));
-        }
+        if (mounted) setState(() => _previews[lm] = plain);
       });
     }
   }
@@ -105,11 +92,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   String _preview(Map<String, dynamic> c) {
-    // المسودة المحلية تتقدم على معاينة الخادم (نفس سلوك واتساب)
-    final draft = DraftService.get(c['conversation_id'] as String?);
-    if (draft != null) return 'مسودة: $draft';
-    // رسالتي المجدولة (آخر رسالة) تظهر بعلامة الجدولة
-    if (c['last_scheduled'] == true) return '⏰ رسالة مجدولة';
     switch (c['last_type']) {
       case 'image':
         return '📷 صورة';
@@ -119,16 +101,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
         return '🎬 فيديو';
       case 'file':
         return '📎 ملف';
-      case 'poll':
-        return '📊 استطلاع';
-      case 'location':
-        // الخادم يرسل معاينة عامة أصلاً (ترحيل 024) — هذه حماية إضافية
-        return '📍 موقع';
-      case 'contact':
-        return '👤 جهة اتصال';
-      case 'poll_vote':
-        // نظرياً لا يصل: my_chats يتخطى الأصوات (ترحيل 022) — حماية إضافية
-        return '📊 استطلاع';
       default:
         final raw = (c['last_message'] as String?) ?? 'ابدأ المحادثة';
         if (E2eService.isEncrypted(raw)) {
@@ -146,7 +118,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   void _showNewSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: context.wasl.surface,
+      backgroundColor: WaslColors.darkSurface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -165,14 +137,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
             onTap: () {
               Navigator.pop(ctx);
               _open(const CreateGroupScreen());
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.link_rounded, color: WaslColors.violet),
-            title: const Text('الانضمام إلى مجموعة برمز دعوة'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _open(const JoinInviteScreen());
             },
           ),
         ]),
@@ -205,7 +169,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final archived = c['archived'] == true;
     showModalBottomSheet(
       context: context,
-      backgroundColor: context.wasl.surface,
+      backgroundColor: WaslColors.darkSurface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -300,37 +264,29 @@ class _ChatsScreenState extends State<ChatsScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: visible.isEmpty && archivedCount == 0
-                  ? ListView(children: [
-                      if (!_showArchived) StoriesStrip(key: _stripKey),
-                      const SizedBox(height: 130),
+                  ? ListView(children: const [
+                      SizedBox(height: 160),
                       Center(
                           child: Text('لا توجد محادثات بعد.\nاضغط ✏️ لبدء محادثة جديدة',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: context.wasl.textFaint))),
+                              style: TextStyle(color: Colors.white60))),
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),
-                      itemCount:
-                          visible.length +
-                              (!_showArchived ? 1 : 0) +
-                              (!_showArchived && archivedCount > 0 ? 1 : 0),
+                      itemCount: visible.length + (!_showArchived && archivedCount > 0 ? 1 : 0),
                       itemBuilder: (context, i) {
-                        if (!_showArchived) {
-                          if (i == 0) return StoriesStrip(key: _stripKey);
-                          i -= 1;
-                        }
                         if (!_showArchived && archivedCount > 0) {
                           if (i == 0) {
                             return ListTile(
-                              leading: CircleAvatar(
+                              leading: const CircleAvatar(
                                 radius: 26,
-                                backgroundColor: context.wasl.glass,
-                                child: const Icon(Icons.archive_outlined, color: WaslColors.violet),
+                                backgroundColor: WaslColors.glass,
+                                child: Icon(Icons.archive_outlined, color: WaslColors.violet),
                               ),
                               title: const Text('المؤرشفة',
                                   style: TextStyle(fontWeight: FontWeight.w700)),
                               trailing: Text('$archivedCount',
-                                  style: TextStyle(color: context.wasl.textFaint)),
+                                  style: const TextStyle(color: Colors.white60)),
                               onTap: () => setState(() => _showArchived = true),
                             );
                           }
@@ -352,23 +308,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               icon: isGroup ? Icons.groups_2 : null,
                             ),
                             if (!isGroup)
-                              ListenableBuilder(
-                                listenable: Listenable.merge([
-                                  PresenceService.online,
-                                  PrivacyService.hidePresence,
-                                ]),
-                                builder: (context, _) =>
-                                    // قاعدة المبادلة: من يخفي حالته لا يرى حالة الآخرين
-                                    (!PresenceService.canShowPresence ||
-                                            PresenceService.isOnline(otherId))
-                                        ? PositionedDirectional(
+                              ValueListenableBuilder<Set<String>>(
+                                valueListenable: PresenceService.online,
+                                builder: (context, online, _) => online.contains(otherId)
+                                    ? PositionedDirectional(
                                         bottom: 0,
                                         end: 0,
                                         child: Container(
                                           width: 14,
                                           height: 14,
                                           decoration: BoxDecoration(
-                                            color: context.wasl.success,
+                                            color: Colors.greenAccent.shade400,
                                             shape: BoxShape.circle,
                                             border: Border.all(
                                                 color: Theme.of(context).scaffoldBackgroundColor,
@@ -387,19 +337,18 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             ),
                             if (muted) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.notifications_off_outlined,
-                                  size: 16, color: context.wasl.textFaint),
+                              const Icon(Icons.notifications_off_outlined,
+                                  size: 16, color: Colors.white54),
                             ],
                             if (pinned) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.push_pin, size: 15, color: context.wasl.textFaint),
+                              const Icon(Icons.push_pin, size: 15, color: Colors.white54),
                             ],
                           ]),
                           onLongPress: () => _chatMenu(c),
                           subtitle: Text(_preview(c), maxLines: 1, overflow: TextOverflow.ellipsis),
                           subtitleTextStyle: unread > 0
-                              ? TextStyle(
-                                  color: context.wasl.textPrimary, fontWeight: FontWeight.w600)
+                              ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)
                               : null,
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -407,7 +356,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             children: [
                               Text(_time(c['last_at'] as String?),
                                   style: TextStyle(
-                                      color: unread > 0 ? WaslColors.teal : context.wasl.textFaint,
+                                      color: unread > 0 ? WaslColors.teal : Colors.white54,
                                       fontSize: 12)),
                               if (unread > 0) ...[
                                 const SizedBox(height: 4),
@@ -415,12 +364,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
                                     gradient: muted ? null : WaslColors.gradient,
-                                    color: muted ? context.wasl.border : null,
+                                    color: muted ? Colors.white24 : null,
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(unread > 99 ? '99+' : '$unread',
-                                      style: TextStyle(
-                                          color: muted ? context.wasl.textPrimary : Colors.white,
+                                      style: const TextStyle(
+                                          color: Colors.white,
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold)),
                                 ),

@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../theme.dart';
-
 /// تُحمّل بايتات الوسيط (بعد فك التشفير إن كان مشفّراً)
 typedef MediaLoader = Future<Uint8List?> Function();
 
@@ -41,12 +39,11 @@ class _ImageBubbleState extends State<ImageBubble> {
             height: 120,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: context.wasl.glass,
+              color: Colors.white10,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Text('🔒 تعذّر فك تشفير الصورة',
-                style: TextStyle(
-                    color: context.wasl.textSecondary, fontSize: 13)),
+            child: const Text('🔒 تعذّر فك تشفير الصورة',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
           );
         }
         return GestureDetector(
@@ -79,54 +76,6 @@ class _FullImage extends StatelessWidget {
   }
 }
 
-/// فقاعة ملصق (0.4.9): بلا خلفية فقاعة — الصورة الشفافة نفسها.
-/// GIF/webp المتحركة تعمل تلقائياً عبر Image.memory. تعذّر فك meta
-/// أو التحميل = نص بديل صادق.
-class StickerBubble extends StatefulWidget {
-  const StickerBubble({super.key, required this.loader});
-  final MediaLoader loader;
-
-  @override
-  State<StickerBubble> createState() => _StickerBubbleState();
-}
-
-class _StickerBubbleState extends State<StickerBubble> {
-  late final Future<Uint8List?> _future = widget.loader();
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Uint8List?>(
-      future: _future,
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const SizedBox(
-            width: 140,
-            height: 140,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          );
-        }
-        final bytes = snap.data;
-        if (bytes == null) {
-          return Text('🩹 ملصق',
-              style: TextStyle(
-                  color: context.wasl.textSecondary, fontSize: 15));
-        }
-        return Image.memory(
-          bytes,
-          width: 140,
-          height: 140,
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-          filterQuality: FilterQuality.medium,
-          errorBuilder: (_, __, ___) => Text('🩹 ملصق',
-              style: TextStyle(
-                  color: context.wasl.textSecondary, fontSize: 15)),
-        );
-      },
-    );
-  }
-}
-
 /// فقاعة رسالة صوتية: تشغيل/إيقاف وشريط تقدم ومدة
 /// (يُفكّ تشفير الملف ويُكتب مؤقتاً ثم يُشغّل محلياً)
 class VoiceBubble extends StatefulWidget {
@@ -141,14 +90,10 @@ class VoiceBubble extends StatefulWidget {
 class _VoiceBubbleState extends State<VoiceBubble> {
   final _player = AudioPlayer();
   bool _ready = false;
-  File? _file; // النسخة المفكوكة التشفير على القرص — تُحذف عند مغادرة الشاشة
 
   @override
   void dispose() {
     _player.dispose();
-    try {
-      _file?.deleteSync();
-    } catch (_) {}
     super.dispose();
   }
 
@@ -163,9 +108,8 @@ class _VoiceBubbleState extends State<VoiceBubble> {
         if (bytes == null) throw Exception('no bytes');
         final dir = await getTemporaryDirectory();
         final f =
-            File('${dir.path}/voice_plain_${DateTime.now().millisecondsSinceEpoch}.m4a');
+            File('${dir.path}/voice_enc_${DateTime.now().millisecondsSinceEpoch}.m4a');
         await f.writeAsBytes(bytes, flush: true);
-        _file = f;
         await _player.setFilePath(f.path);
         _ready = true;
       }
@@ -196,7 +140,7 @@ class _VoiceBubbleState extends State<VoiceBubble> {
             IconButton(
               onPressed: _toggle,
               icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: context.wasl.textPrimary, size: 30),
+                  color: Colors.white, size: 30),
             ),
             SizedBox(
               width: 140,
@@ -218,14 +162,13 @@ class _VoiceBubbleState extends State<VoiceBubble> {
                         child: LinearProgressIndicator(
                           value: value,
                           minHeight: 4,
-                          backgroundColor: context.wasl.border,
-                          color: context.wasl.textPrimary,
+                          backgroundColor: Colors.white24,
+                          color: Colors.white,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(_fmt(playing ? pos : total),
-                          style: TextStyle(
-                              color: context.wasl.textSecondary, fontSize: 11)),
+                          style: const TextStyle(color: Colors.white70, fontSize: 11)),
                     ],
                   );
                 },

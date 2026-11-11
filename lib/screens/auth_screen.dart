@@ -120,7 +120,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 const Text('وصل شات',
                     style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 6),
-                Text('تواصل بلا حدود', style: TextStyle(color: context.wasl.textFaint)),
+                const Text('تواصل بلا حدود', style: TextStyle(color: Colors.white60)),
                 const SizedBox(height: 32),
                 if (_isSignUp) ...[
                   TextField(
@@ -171,13 +171,13 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: TextButton(onPressed: _forgot, child: const Text('نسيت كلمة المرور؟')),
                   ),
                 const SizedBox(height: 4),
-                Row(children: [
-                  Expanded(child: Divider(color: context.wasl.border)),
+                Row(children: const [
+                  Expanded(child: Divider(color: Colors.white24)),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('أو', style: TextStyle(color: context.wasl.textFaint)),
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('أو', style: TextStyle(color: Colors.white54)),
                   ),
-                  Expanded(child: Divider(color: context.wasl.border)),
+                  Expanded(child: Divider(color: Colors.white24)),
                 ]),
                 const SizedBox(height: 12),
                 SizedBox(
@@ -186,13 +186,13 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _loading ? null : _google,
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: context.wasl.border),
+                      side: const BorderSide(color: Colors.white24),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                     ),
-                    icon: Text('G',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: context.wasl.textPrimary)),
-                    label: Text('المتابعة باستخدام Google',
-                        style: TextStyle(color: context.wasl.textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
+                    icon: const Text('G',
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
+                    label: const Text('المتابعة باستخدام Google',
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 TextButton(

@@ -128,15 +128,12 @@ class _AiScreenState extends State<AiScreen> {
                               BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
                           decoration: BoxDecoration(
                             gradient: mine ? WaslColors.gradient : null,
-                            color: mine ? null : context.wasl.bubbleOther,
-                            border: mine ? null : Border.all(color: context.wasl.violetSoft),
+                            color: mine ? null : WaslColors.darkSurface,
+                            border: mine ? null : Border.all(color: const Color(0x33A855F7)),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: SelectableText(t['text']!,
-                              style: TextStyle(
-                                  color: mine ? context.wasl.onBubbleMine : context.wasl.textPrimary,
-                                  fontSize: 16,
-                                  height: 1.5)),
+                              style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.5)),
                         ),
                       ),
                     );
