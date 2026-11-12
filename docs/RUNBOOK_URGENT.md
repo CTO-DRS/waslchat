@@ -7,6 +7,8 @@
 
 ## 0) إصلاح فاتورة GitHub Actions — أولوية قصوى (يوقف كل البناء الآن)
 
+**تم الحل جزئياً في 2026-11-12**: البناء والنشر يعملان الآن من المستودع العام `CTO-DRS/waslchat` فرع `app` (دقائق Actions مجانية غير محدودة للمستودعات العامة): نسخة الكود هناك بلا مجلد `secrets/`، ومادة التوقيع تمر بأسرار Actions المشفّرة (`KEYSTORE_BASE64` و`KEYSTORE_PASSWORD`)، وكل دفع لفرع `app` يبني APK موقّعاً وينشره تلقائياً في Releases باسم `wasl_chat.apk` — وهو الرابط نفسه الذي تقرؤه شاشة «تحديث متوفر» داخل التطبيق. كما يعمل keep-alive هناك فيمنع خمول Supabase. آخر إصدار منشور: v0.7.2. للإبقاء على البناء هنا أيضاً (wasl-chat): انتظر تجديد الحصة أو ارفع الحد — وإذا جُعل هذا المستودع عاماً فيجب أولاً إزالة `secrets/` من التاريخ.
+
 **الظاهرة**: كل بناء بعد ~2026-11-11 23:45 UTC يفشل فوراً برسالة:
 «The job was not started because recent account payments have failed or your spending limit needs to be increased.»
 
