@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/e2e_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/group_avatar.dart';
 import 'chat_screen.dart';
 
 /// المحادثات التي فيها رسائل مميزة بنجمة. الرسائل تُفك داخل المحادثة نفسها.
@@ -16,6 +18,9 @@ class StarredScreen extends StatefulWidget {
 class _StarredScreenState extends State<StarredScreen> {
   List<(Map<String, dynamic>, int)> _rows = [];
   bool _loading = true;
+
+  /// أسماء المجموعات المفكوكة: الاسم المشفر -> الصريح
+  final Map<String, String> _titles = {};
 
   @override
   void initState() {
@@ -40,9 +45,30 @@ class _StarredScreenState extends State<StarredScreen> {
         ];
         _loading = false;
       });
+      _decryptTitles();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// فك أسماء المجموعات المشفرة في الخلفية (القديم الصريح يمر كما هو)
+  void _decryptTitles() {
+    for (final (c, _) in _rows) {
+      if (c['is_group'] != true) continue;
+      final cid = c['conversation_id'] as String;
+      final t = (c['title'] ?? '') as String;
+      if (_titles.containsKey(t)) continue;
+      _titles[t] = E2eService.isEncrypted(t) ? '🔒 مجموعة مشفرة' : t;
+      E2eService.groupTitle(cid, t).then((plain) {
+        if (mounted) setState(() => _titles[t] = plain);
+      });
+    }
+  }
+
+  /// الاسم المعروض (مفكوكاً إن كان مشفراً)
+  String _nameOf(Map<String, dynamic> c) {
+    final t = (c['title'] ?? '') as String;
+    return _titles[t] ?? (E2eService.isEncrypted(t) ? 'مجموعة' : t);
   }
 
   @override
@@ -57,33 +83,44 @@ class _StarredScreenState extends State<StarredScreen> {
                       style: TextStyle(color: context.textTertiary)))
               : ListView(children: [
                   for (final (c, n) in _rows)
-                    ListTile(
-                      leading: UserAvatar(
-                        name: (c['title'] ?? '') as String,
-                        url: c['avatar_url'] as String?,
-                        color: c['is_group'] == true ? WaslColors.teal : WaslColors.indigo,
-                        icon: c['is_group'] == true ? Icons.groups_2 : null,
-                      ),
-                      title: Text((c['title'] ?? '') as String),
-                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text('$n'),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
-                      ]),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ChatScreen(
-                            conversationId: c['conversation_id'] as String,
-                            title: (c['title'] ?? '') as String,
-                            isGroup: c['is_group'] == true,
-                            otherId: c['other_id'] as String?,
-                            encrypted: true,
-                            starredOnly: true,
+                    Builder(builder: (_) {
+                      final isGroup = c['is_group'] == true;
+                      final name = _nameOf(c);
+                      final groupAvatar = c['avatar_url'] as String?;
+                      return ListTile(
+                        leading: isGroup && (groupAvatar ?? '').isNotEmpty
+                            ? GroupAvatar(
+                                conversationId: c['conversation_id'] as String,
+                                path: groupAvatar,
+                                name: name,
+                              )
+                            : UserAvatar(
+                                name: name,
+                                url: isGroup ? null : c['avatar_url'] as String?,
+                                color: isGroup ? WaslColors.teal : WaslColors.indigo,
+                                icon: isGroup ? Icons.groups_2 : null,
+                              ),
+                        title: Text(name),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text('$n'),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
+                        ]),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatScreen(
+                              conversationId: c['conversation_id'] as String,
+                              title: name,
+                              isGroup: isGroup,
+                              otherId: c['other_id'] as String?,
+                              encrypted: true,
+                              starredOnly: true,
+                            ),
                           ),
-                        ),
-                      ).then((_) => _load()),
-                    ),
+                        ).then((_) => _load()),
+                      );
+                    }),
                 ]),
     );
   }

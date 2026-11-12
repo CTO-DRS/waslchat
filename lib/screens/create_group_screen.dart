@@ -52,13 +52,27 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     }
     setState(() => _creating = true);
     try {
+      // يُنشأ الاسم كعنوان عام مؤقت ثم يُستبدل بنسخة مشفرة بمفتاح المجموعة
+      // (المفتاح لا وجود له قبل إنشاء المحادثة — أسوأ حالة تعطل: يبقى «مجموعة»)
       final id = await supabase.rpc('create_group_chat', params: {
-        'p_title': title,
+        'p_title': 'مجموعة',
         'p_members': _selected.keys.toList(),
       });
-      // تثبيت مبكر لمفتاح المجموعة وتغليفه للأعضاء (في الخلفية — لا يعطّل التنقل)
       final convId = id as String;
-      E2eService.initGroupKey(convId);
+      // تهيئة المفتاح وتغليفه للأعضاء الآن (لا في الخلفية) حتى يُشفَّر الاسم به فوراً
+      final key = await E2eService.groupKey(convId);
+      if (key != null) {
+        try {
+          final enc = await E2eService.encryptText(key, convId, title);
+          await supabase.rpc('group_rename', params: {'p_conv': convId, 'p_title': enc});
+        } catch (_) {
+          // غالباً ترحيل 022 غير مطبق: يبقى العنوان العام «مجموعة» — بلا كشف بيانات
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('تعذّر تشفير اسم المجموعة — تأكد من تطبيق ترحيل 022')));
+          }
+        }
+      }
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

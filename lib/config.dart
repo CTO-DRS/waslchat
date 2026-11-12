@@ -5,8 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Project Settings > API > Project URL و anon public key
 class AppConfig {
   /// إصدار هذا البناء — يُحدّث مع كل إصدار (وليس تلقائياً)
-  static const appVersion = '0.9.0';
-  static const appBuild = 39;
+  static const appVersion = '0.10.0';
+  static const appBuild = 40;
 
   /// رابط الموقع الرسمي (يُستخدم لروابط الدعوة وصفحات الويب)
   static const siteUrl = 'https://waslchat.app';

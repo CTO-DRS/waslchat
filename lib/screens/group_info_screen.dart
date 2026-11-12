@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/invite_service.dart';
+import '../services/media_service.dart';
 import '../theme.dart';
+import '../widgets/group_avatar.dart';
 
 /// نتيجة شاشة معلومات المجموعة للمحادثة
 class GroupInfoResult {
@@ -33,6 +36,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   String _myRole = 'member';
   int _keyVersion = 1;
   Map<String, dynamic>? _invite;
+  String? _avatarPath;
   bool _loading = true;
   bool _busy = false;
 
@@ -53,7 +57,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     try {
       final conv = await supabase
           .from('conversations')
-          .select('title, group_key_version')
+          .select('title, group_key_version, avatar_url')
           .eq('id', widget.conversationId)
           .maybeSingle();
       final rows = await supabase
@@ -67,9 +71,14 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         if (r != 0) return r;
         return _nameOf(a).compareTo(_nameOf(b));
       });
+      final rawTitle = (conv?['title'] as String?) ?? '';
       if (!mounted) return;
       setState(() {
-        _title = (conv?['title'] as String?) ?? _title;
+        // الاسم المشفر: نُبقي الاسم المفكوك القادم من القائمة لحين اكتمال الفك
+        _title = E2eService.isEncrypted(rawTitle)
+            ? _title
+            : (rawTitle.isEmpty ? _title : rawTitle);
+        _avatarPath = conv?['avatar_url'] as String?;
         _keyVersion = (conv?['group_key_version'] as int?) ?? 1;
         _members = list;
         _myRole = (list.firstWhere((m) => m['user_id'] == _me,
@@ -77,6 +86,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             'member';
         _loading = false;
       });
+      if (E2eService.isEncrypted(rawTitle)) {
+        E2eService.groupTitle(widget.conversationId, rawTitle).then((p) {
+          if (mounted) setState(() => _title = p);
+        });
+      }
       // الدعوة تُجلب بهدوء للمشرفين فقط (يفشل للبقية بلا أثر)
       if (_isAdmin) _loadInvite();
     } catch (_) {
@@ -194,10 +208,86 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     ctrl.dispose();
     if (name == null || name.isEmpty || name == _title) return;
     await _run(
-      () => supabase.rpc('group_rename',
-          params: {'p_conv': widget.conversationId, 'p_title': name}),
+      () async {
+        // الاسم يُخزّن مشفراً بمفتاح المجموعة — الخادم لا يراه
+        final key = await E2eService.groupKey(widget.conversationId);
+        if (key == null) throw Exception('no group key');
+        final enc = await E2eService.encryptText(key, widget.conversationId, name);
+        await supabase.rpc('group_rename',
+            params: {'p_conv': widget.conversationId, 'p_title': enc});
+        if (mounted) setState(() => _title = name);
+      },
       'تعذّر تغيير الاسم',
     );
+  }
+
+  /// ورقة صورة المجموعة: تغيير أو إزالة (للمشرفين)
+  Future<void> _avatarSheet() async {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Wrap(children: [
+          ListTile(
+            leading: const Icon(Icons.photo_outlined, color: WaslColors.teal),
+            title: const Text('تغيير الصورة'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _changeAvatar();
+            },
+          ),
+          if ((_avatarPath ?? '').isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title: const Text('إزالة الصورة', style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _removeAvatar();
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _changeAvatar() async {
+    final x = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 85);
+    if (x == null) return;
+    final bytes = await x.readAsBytes();
+    await _run(() async {
+      // البايتات تُشفَّر بمفتاح المجموعة قبل الرفع — التخزين لا يرى الصورة
+      final key = await E2eService.groupKey(widget.conversationId);
+      if (key == null) throw Exception('no group key');
+      final enc = await E2eService.encryptBytes(key, widget.conversationId, bytes);
+      final path = await MediaService.upload(
+        conversationId: widget.conversationId,
+        bytes: enc,
+        ext: 'enc.bin',
+        contentType: 'application/octet-stream',
+      );
+      final old = await supabase.rpc('group_set_avatar',
+          params: {'p_conv': widget.conversationId, 'p_url': path});
+      if (old is String && old.isNotEmpty) MediaService.remove(old);
+      GroupAvatar.evict(path);
+      if (mounted) setState(() => _avatarPath = path);
+    }, 'تعذّر رفع الصورة');
+  }
+
+  Future<void> _removeAvatar() async {
+    final ok = await _confirm('إزالة الصورة؟', 'ستُزال صورة المجموعة عند كل الأعضاء.', 'إزالة');
+    if (!ok) return;
+    await _run(() async {
+      final old = await supabase.rpc('group_set_avatar',
+          params: {'p_conv': widget.conversationId, 'p_url': null});
+      if (old is String && old.isNotEmpty) MediaService.remove(old);
+      if (mounted) setState(() => _avatarPath = null);
+    }, 'تعذّرت إزالة الصورة');
   }
 
   Future<void> _remove(Map<String, dynamic> m) async {
@@ -306,12 +396,32 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 children: [
                   const SizedBox(height: 8),
-                  const Center(
-                    child: CircleAvatar(
-                      radius: 40,
-                      backgroundColor: WaslColors.teal,
-                      child: Icon(Icons.groups_2, color: Colors.white, size: 40),
-                    ),
+                  GestureDetector(
+                    onTap: (_isAdmin && !_busy) ? _avatarSheet : null,
+                    child: Stack(children: [
+                      GroupAvatar(
+                        conversationId: widget.conversationId,
+                        path: _avatarPath,
+                        name: _title,
+                        radius: 40,
+                      ),
+                      if (_isAdmin)
+                        PositionedDirectional(
+                          bottom: 0,
+                          end: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(5),
+                            decoration: BoxDecoration(
+                              color: WaslColors.teal,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                            ),
+                            child: const Icon(Icons.photo_camera_outlined,
+                                color: Colors.white, size: 16),
+                          ),
+                        ),
+                    ]),
                   ),
                   const SizedBox(height: 12),
                   Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -334,7 +444,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ListTile(
                     leading: const Icon(Icons.lock_outline, color: WaslColors.teal),
                     title: const Text('الرسائل مشفّرة بين الأعضاء'),
-                    subtitle: Text('إصدار مفتاح المجموعة: $_keyVersion — يتغيّر عند خروج أي عضو'),
+                    subtitle: Text(
+                        'إصدار مفتاح المجموعة: $_keyVersion — الرسائل والاسم والصورة والتفاعلات كلها مشفّرة'),
                   ),
                   const Divider(),
                   if (_isAdmin) ...[

@@ -7,6 +7,7 @@ import '../services/presence_service.dart';
 import '../theme.dart';
 import '../services/status_service.dart';
 import '../widgets/common.dart';
+import '../widgets/group_avatar.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
@@ -26,6 +27,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
   RealtimeChannel? _channel;
   // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
   final Map<String, String> _previews = {};
+
+  /// أسماء المجموعات المفكوكة: الاسم المشفر -> الصريح
+  final Map<String, String> _titles = {};
   bool _showArchived = false;
   // الحالات/القصص: مجمّعة حسب صاحبها (حالتي أولاً)
   List<Map<String, dynamic>> _statusGroups = [];
@@ -67,9 +71,30 @@ class _ChatsScreenState extends State<ChatsScreen> {
           .where((c) => c['archived'] != true && c['muted'] != true)
           .fold<int>(0, (s, c) => s + ((c['unread'] as num?)?.toInt() ?? 0));
       _decryptPreviews(chats);
+      _decryptTitles(chats);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// فك أسماء المجموعات المشفرة في الخلفية (القديم الصريح يمر كما هو)
+  void _decryptTitles(List<Map<String, dynamic>> chats) {
+    for (final c in chats) {
+      if (c['is_group'] != true) continue;
+      final cid = c['conversation_id'] as String;
+      final t = (c['title'] ?? '') as String;
+      if (_titles.containsKey(t)) continue;
+      _titles[t] = E2eService.isEncrypted(t) ? '🔒 مجموعة مشفرة' : t;
+      E2eService.groupTitle(cid, t).then((plain) {
+        if (mounted) setState(() => _titles[t] = plain);
+      });
+    }
+  }
+
+  /// الاسم المعروض لصف المحادثة (مفكوكاً إن كان مشفراً)
+  String _nameOf(Map<String, dynamic> c) {
+    final t = (c['title'] ?? '') as String;
+    return _titles[t] ?? (E2eService.isEncrypted(t) ? 'مجموعة' : t);
   }
 
   /// جلب الحالات النشطة وتجميعها (صامت عند الفشل — الشريط اختياري)
@@ -214,8 +239,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       builder: (ctx) => SafeArea(
         child: Wrap(children: [
           ListTile(
-            title: Text((c['title'] ?? '') as String,
-                style: const TextStyle(fontWeight: FontWeight.w800)),
+            title: Text(_nameOf(c), style: const TextStyle(fontWeight: FontWeight.w800)),
           ),
           ListTile(
             leading: Icon(pinned ? Icons.push_pin_outlined : Icons.push_pin, color: WaslColors.teal),
@@ -345,18 +369,26 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         final c = visible[i];
                         final pinned = c['pinned'] == true;
                         final muted = c['muted'] == true;
-                        final name = (c['title'] ?? '') as String;
+                        final name = _nameOf(c);
                         final isGroup = c['is_group'] == true;
                         final unread = (c['unread'] as num?)?.toInt() ?? 0;
                         final otherId = c['other_id'] as String?;
+                        final groupAvatar = c['avatar_url'] as String?;
                         return ListTile(
                           leading: Stack(clipBehavior: Clip.none, children: [
-                            UserAvatar(
-                              name: name,
-                              url: c['avatar_url'] as String?,
-                              color: isGroup ? WaslColors.teal : WaslColors.indigo,
-                              icon: isGroup ? Icons.groups_2 : null,
-                            ),
+                            if (isGroup && (groupAvatar ?? '').isNotEmpty)
+                              GroupAvatar(
+                                conversationId: c['conversation_id'] as String,
+                                path: groupAvatar,
+                                name: name,
+                              )
+                            else
+                              UserAvatar(
+                                name: name,
+                                url: isGroup ? null : c['avatar_url'] as String?,
+                                color: isGroup ? WaslColors.teal : WaslColors.indigo,
+                                icon: isGroup ? Icons.groups_2 : null,
+                              ),
                             if (!isGroup)
                               ValueListenableBuilder<Set<String>>(
                                 valueListenable: PresenceService.online,
