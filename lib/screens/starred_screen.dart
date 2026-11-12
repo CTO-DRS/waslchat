@@ -52,9 +52,9 @@ class _StarredScreenState extends State<StarredScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _rows.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text('اضغط مطوّلاً على أي رسالة ثم «تمييز بنجمة»',
-                      style: TextStyle(color: Colors.white60)))
+                      style: TextStyle(color: context.textTertiary)))
               : ListView(children: [
                   for (final (c, n) in _rows)
                     ListTile(

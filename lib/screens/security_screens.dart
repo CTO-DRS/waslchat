@@ -137,8 +137,8 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
                 const Text('التحقق بخطوتين مفعّل',
                     textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                const Text('سيُطلب منك رمز من تطبيق المصادقة عند كل تسجيل دخول.',
-                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+                Text('سيُطلب منك رمز من تطبيق المصادقة عند كل تسجيل دخول.',
+                    textAlign: TextAlign.center, style: TextStyle(color: context.textTertiary)),
                 const SizedBox(height: 24),
                 OutlinedButton(onPressed: _disable, child: const Text('إيقاف التحقق بخطوتين')),
               ] else if (p == null) ...[
@@ -147,8 +147,8 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
                 const Text('احمِ حسابك بخطوة إضافية',
                     textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                const Text('تحتاج تطبيق مصادقة مثل Google Authenticator أو Microsoft Authenticator.',
-                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+                Text('تحتاج تطبيق مصادقة مثل Google Authenticator أو Microsoft Authenticator.',
+                    textAlign: TextAlign.center, style: TextStyle(color: context.textTertiary)),
                 const SizedBox(height: 24),
                 _primary('تفعيل', _enroll),
               ] else ...[
@@ -163,7 +163,7 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('أو انسخ المفتاح وألصقه في التطبيق:', style: TextStyle(color: Colors.white60)),
+                Text('أو انسخ المفتاح وألصقه في التطبيق:', style: TextStyle(color: context.textTertiary)),
                 const SizedBox(height: 6),
                 InkWell(
                   onTap: () {
@@ -172,7 +172,7 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
                   },
                   child: Container(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: WaslColors.glass, borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(color: context.glass, borderRadius: BorderRadius.circular(12)),
                     child: Row(children: [
                       Expanded(
                         child: SelectableText(p.totp?.secret ?? '',
@@ -239,8 +239,8 @@ class _MfaVerifyScreenState extends State<MfaVerifyScreen> {
               const SizedBox(height: 16),
               const Text('رمز التحقق', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
-              const Text('افتح تطبيق المصادقة واكتب الرمز الظاهر لـ «Wasl Chat»',
-                  textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+              Text('افتح تطبيق المصادقة واكتب الرمز الظاهر لـ «Wasl Chat»',
+                  textAlign: TextAlign.center, style: TextStyle(color: context.textTertiary)),
               const SizedBox(height: 24),
               _codeField(_code),
               const SizedBox(height: 20),

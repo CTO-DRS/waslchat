@@ -42,11 +42,11 @@ class _ImageBubbleState extends State<ImageBubble> {
             height: 120,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: context.hairline,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Text('🔒 تعذّر فك تشفير الصورة',
-                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            child: Text('🔒 تعذّر فك تشفير الصورة',
+                style: TextStyle(color: context.textSecondary, fontSize: 13)),
           );
         }
         return GestureDetector(

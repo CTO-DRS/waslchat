@@ -133,7 +133,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(shortTime(c['last_at'] as String?),
-                              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                              style: TextStyle(color: context.textFaint, fontSize: 12)),
                           const SizedBox(height: 4),
                           UnreadBadge(unread),
                         ],
@@ -143,7 +143,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                           ? null
                           : () => showModalBottomSheet(
                                 context: context,
-                                backgroundColor: WaslColors.darkSurface,
+                                backgroundColor: context.surfaceAlt,
                                 builder: (ctx) => SafeArea(
                                   child: ListTile(
                                     leading: const Icon(Icons.logout, color: Colors.redAccent),
@@ -170,11 +170,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                     ),
                   ),
                   if (_discover.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
+                    Padding(
+                      padding: const EdgeInsets.all(24),
                       child: Center(
                           child: Text('لا توجد قنوات جديدة. أنشئ قناتك بزر +',
-                              style: TextStyle(color: Colors.white60))),
+                              style: TextStyle(color: context.textTertiary))),
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _icon(),

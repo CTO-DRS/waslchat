@@ -23,7 +23,7 @@ String disappearLabel(int? s) {
 Future<int?> pickDisappearing(BuildContext context, String convId, int? current) async {
   final picked = await showModalBottomSheet<int>(
     context: context,
-    backgroundColor: WaslColors.darkSurface,
+    backgroundColor: context.surfaceAlt,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (ctx) => SafeArea(
@@ -216,13 +216,13 @@ class _ContactScreenState extends State<ContactScreen> {
           if (_p != null)
             Center(
                 child: Text('@${_p!['username']}',
-                    style: const TextStyle(color: Colors.white60))),
+                    style: TextStyle(color: context.textTertiary))),
           if (bio != null && bio.isNotEmpty) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                  color: WaslColors.glass, borderRadius: BorderRadius.circular(18)),
+                  color: context.glass, borderRadius: BorderRadius.circular(18)),
               child: Text(bio),
             ),
           ],
@@ -262,7 +262,7 @@ class _ContactScreenState extends State<ContactScreen> {
           ListTile(
             leading: Icon(
                 _blocked ? Icons.block_rounded : Icons.block_outlined,
-                color: _blocked ? Colors.redAccent : Colors.white70),
+                color: _blocked ? Colors.redAccent : context.iconStd),
             title: Text(
                 _blocked ? 'إلغاء حظر هذا الاتصال' : 'حظر هذا الاتصال',
                 style: TextStyle(color: _blocked ? Colors.redAccent : null)),
