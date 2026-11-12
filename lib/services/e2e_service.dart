@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config.dart';
+import 'platform_name.dart';
 import 'ratchet.dart';
 
 /// نتائج مسح رمز تحقق QR
@@ -41,6 +43,19 @@ enum VerifyScanResult {
 ///   (سحب ذري لا يتكرر) ويشتق سرّ X3DH ثم يدير جلسة Double Ratchet محلياً
 ///   (lib/services/ratchet.dart) — فسرقة مفتاح الهوية لاحقاً لا تكشف الرسائل السابقة.
 /// - الصيغة: "v2.<ترويسة b64>.<ciphertext b64>.<mac b64>" وAAD = conv + الترويسة.
+///
+/// المرحلة 2-ب — تعدد الأجهزة المرتبطة (v3):
+/// - كل جهاز يسجّل نفسه في جدول devices (ترحيل 021) بهوية X25519 ومخزون مفاتيح
+///   أولية خاصّين به (e2e_prekeys.device_id) ويضبط e2e_version = 3.
+/// - رسالة خاصة واحدة = ظرف v3 واحد: مفتاح محتوى عشوائي يشفّر النص مرة واحدة،
+///   ويُغلَّف لكل جهاز من أجهزة الطرف بجلسة متدرجة مستقلة (X3DH على هويتَي
+///   الجهازين + Double Ratchet لكل زوج جهازين)، ولأجهزة حساب المرسل نفسه
+///   (وبمن فيه) بتغليف ذاتي ثابت — فتقرأ كل أجهزته رسائله، وتبقى رسائله
+///   المرسلة مقروءة على جهازه بعد إعادة فتح التطبيق.
+/// - الصيغة: "v3.<ترويسة b64>.<جسم v1>" والتفاصيل في V3Codec (ratchet.dart).
+/// - سباق بدء الجلسة من الطرفين: الافتتاحية الناجحة تُتبنّى دائماً وتُؤرشف
+///   السابقة (V3MultiSession) — بلا قاعدة ترتيب ولا فقد رسائل.
+/// - من لا يدعم v3 (e2e_version < 3 أو بلا أجهزة) يبقى على v2/v1 كما هي.
 /// - من لا يملك الطرف الآخر مفاتيح أولية (تطبيق قديم) يبقى على مسار v1 تلقائياً،
 ///   والقاعدة: الأصغر معرفاً يبدأ v2 — يمنع سباق بدء مزدوج بلا وساطة.
 /// - الوسائط تبقى على مفتاح v1 الثابت في هذا الإصدار (تغليف مفاتيح الوسائط
@@ -78,8 +93,9 @@ class E2eService {
 
   // ---------- الحالة ----------
 
-  /// هل النص مشفّر بصيغة v1 أو v2؟
+  /// هل النص مشفّر بصيغة v1 أو v2 أو v3؟
   static bool isEncrypted(String content) {
+    if (content.startsWith('v3.')) return content.split('.').length == 6;
     if (content.startsWith('v2.')) return content.split('.').length == 4;
     return content.startsWith('v1.') && '.'.allMatches(content).length >= 3;
   }
@@ -135,6 +151,15 @@ class E2eService {
     _previewCache.clear();
     _verCache.clear();
     _allLoaded.clear();
+    _v3Cache.clear();
+    _devicesCache.clear();
+    _peerVerCache.clear();
+  }
+
+  /// بعد جاهزية الهوية: مخزون الحساب (v2) ثم تسجيل الجهاز ومخزونه (v3)
+  static void _onReady() {
+    unawaited(ensurePrekeys());
+    unawaited(ensureDevice());
   }
 
   /// بصمة قصيرة للمفتاح العام (16 hex)
@@ -173,7 +198,7 @@ class E2eService {
         _clearKeyCaches();
         await _publishMyKey();
         _ready = true;
-        unawaited(ensurePrekeys());
+        _onReady();
         return E2eKeyState.needsBackup;
       }
       if (local != null) {
@@ -182,12 +207,12 @@ class E2eService {
         if (published == null || published.isEmpty) {
           await _publishMyKey();
           _ready = true;
-          unawaited(ensurePrekeys());
+          _onReady();
           return hasBackup ? E2eKeyState.ready : E2eKeyState.needsBackup;
         }
         if (published == mine) {
           _ready = true;
-          unawaited(ensurePrekeys());
+          _onReady();
           return hasBackup ? E2eKeyState.ready : E2eKeyState.needsBackup;
         }
       }
@@ -251,7 +276,7 @@ class E2eService {
           .maybeSingle();
       if (prof?['identity_public_key'] != pub) await _publishMyKey();
       _ready = true;
-      unawaited(ensurePrekeys());
+      _onReady();
       return true;
     } catch (_) {
       return false;
@@ -279,14 +304,16 @@ class E2eService {
     try {
       final all = await _storage.readAll();
       for (final k in all.keys) {
-        if (k.startsWith(_prekeyPrivPrefix) || k.startsWith(_sessionPrefix)) {
+        if (k.startsWith(_prekeyPrivPrefix) ||
+            k.startsWith(_sessionPrefix) ||
+            k.startsWith(_r3Prefix)) {
           await _storage.delete(key: k);
         }
       }
     } catch (_) {}
     await createBackup(passphrase);
     _ready = true;
-    unawaited(ensurePrekeys());
+    _onReady();
   }
 
   /// عند تسجيل الخروج: مسح المفاتيح المحفوظة على الجهاز (تُستعاد بكلمة سر النسخة الاحتياطية)
@@ -296,6 +323,8 @@ class E2eService {
     _pubCache.clear();
     _changedPeers.clear();
     _sessionCache.clear();
+    _deviceId = null;
+    _devicePair = null;
     _ready = false;
   }
 
@@ -797,11 +826,22 @@ class E2eService {
     }
   }
 
-  /// تشفير نص محادثة خاصة: مسار v2 (سرية أمامية) إن أمكن، وإلا v1 الثابت.
-  /// null = لا سبيل للتشفير (مفتاح مفقود) — يعرض المرسل رسالة واضحة.
+  /// تشفير نص محادثة خاصة: مسار v3 (أجهزة مرتبطة) إن أمكن، ثم v2 (سرية أمامية)،
+  /// وإلا v1 الثابت. null = لا سبيل للتشفير — يعرض المرسل رسالة واضحة.
   static Future<String?> encryptDmText(
       String conversationId, String otherUserId, String plain) async {
     if (!_ready) return null;
+    // v3: الطرف ينشر أجهزته — ظرف واحد يغلف مفتاح المحتوى لكل جهاز مستقبِل
+    if (await _peerVersion(otherUserId) >= 3) {
+      final v3 = await _withSession(conversationId, () async {
+        try {
+          return await _encryptDmV3(conversationId, otherUserId, plain);
+        } catch (_) {
+          return null;
+        }
+      });
+      if (v3 != null) return v3;
+    }
     final v2 = await _withSession(conversationId, () async {
       try {
         var st = await _loadSession(conversationId);
@@ -819,10 +859,19 @@ class E2eService {
     return encryptText(key, conversationId, plain);
   }
 
-  /// فك نص محادثة خاصة: v2 (جلسة متدرجة) أو v1 (ثابت) أو نص قديم صريح.
+  /// فك نص محادثة خاصة: v3 (أجهزة مرتبطة) أو v2 (جلسة متدرجة) أو v1 (ثابت)
+  /// أو نص قديم صريح.
   static Future<String?> decryptDmText(
       String conversationId, String otherUserId, String content) async {
     if (!isEncrypted(content)) return content;
+    if (content.startsWith('v3.')) {
+      if (!_ready) return null;
+      try {
+        return await _decryptDmV3(conversationId, otherUserId, content);
+      } catch (_) {
+        return null;
+      }
+    }
     if (content.startsWith('v2.')) {
       if (!_ready) return null;
       return _withSession(conversationId, () async {
@@ -853,9 +902,556 @@ class E2eService {
     return decryptText(key, conversationId, content);
   }
 
-  /// حذف جلسة محادثة (عند سحب رسالة/تغيّر مفتاح الطرف — تُعاد البداية تلقائياً)
-  static Future<void> dropDmSession(String conversationId) =>
-      _deleteSession(conversationId);
+  /// حذف جلسات محادثة (عند سحب رسالة/تغيّر مفتاح الطرف — تُعاد البداية تلقائياً):
+  /// جلسة v2 للحساب + كل جلسات v3 لكل أجهزة الطرف على هذه المحادثة
+  static Future<void> dropDmSession(String conversationId) async {
+    await _deleteSession(conversationId);
+    try {
+      final prefix = '$_r3Prefix$conversationId#';
+      final all = await _storage.readAll();
+      for (final k in all.keys) {
+        if (k.startsWith(prefix)) {
+          await _storage.delete(key: k);
+          _v3Cache.remove('${k.substring(_r3Prefix.length)}');
+        }
+      }
+    } catch (_) {}
+  }
+
+  // ---------- تعدد الأجهزة المرتبطة (v3) ----------
+
+  static const _deviceIdKey = 'e2e_device_id';
+  static const _devicePrivKey = 'e2e_device_priv_v1';
+  static const _r3Prefix = 'e2e_r3_';
+
+  /// حجم مخزون المفاتيح الأولية غير المستهلكة لكل جهاز
+  static const _devicePrekeyPool = 25;
+
+  /// مدة صلاحية ذاكرة قدرات الطرف وقائمة أجهزته
+  static const _capsTtl = Duration(seconds: 45);
+
+  static String? _deviceId;
+  static SimpleKeyPair? _devicePair;
+  static final Map<String, V3MultiSession> _v3Cache = {};
+  static final Map<String, (List<DeviceRow>, DateTime)> _devicesCache = {};
+  static final Map<String, (int, DateTime)> _peerVerCache = {};
+
+  /// معرف هذا الجهاز المرتبط (null قبل إتمام التسجيل)
+  static String? get currentDeviceId => _deviceId;
+
+  /// معرف uuid v4 عشوائي (بلا حزم خارجية)
+  static String _newUuid() {
+    final r = Random.secure();
+    final b = List<int>.generate(16, (_) => r.nextInt(256));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    final h = b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+    return '${h.substring(0, 8)}-${h.substring(8, 12)}-'
+        '${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
+  }
+
+  /// هوية هذا الجهاز: توليد محلي عند أول حاجة — الخاص لا يغادر الجهاز
+  static Future<(String, SimpleKeyPair)> _loadDevice() async {
+    final cid = _deviceId;
+    final cp = _devicePair;
+    if (cid != null && cp != null) return (cid, cp);
+    final id = await _storage.read(key: _deviceIdKey);
+    final priv = await _storage.read(key: _devicePrivKey);
+    if (id != null && priv != null && priv.isNotEmpty) {
+      try {
+        final pair = await _x25519.newKeyPairFromSeed(base64Decode(priv));
+        _deviceId = id;
+        _devicePair = pair;
+        return (id, pair);
+      } catch (_) {}
+    }
+    await _resetDeviceIdentity();
+    return (_deviceId!, _devicePair!);
+  }
+
+  static Future<void> _resetDeviceIdentity() async {
+    final nid = _newUuid();
+    final made = await _x25519.newKeyPair();
+    await _storage.write(key: _deviceIdKey, value: nid);
+    await _storage.write(
+        key: _devicePrivKey,
+        value: base64Encode(await made.extractPrivateKeyBytes()));
+    _deviceId = nid;
+    _devicePair = made;
+  }
+
+  static String _deviceName() {
+    final p = devicePlatformLabel();
+    return p == 'الويب' ? 'متصفح الويب' : 'جهاز $p';
+  }
+
+  /// تسجيل هذا الجهاز في devices ورفع القدرة v3 — صامتة دائماً (ناريَ ونسيان).
+  /// جهاز أُبطل من مالك الحساب يعود بهوية جديدة كلياً (سجل جديد يراه المالك).
+  static Future<void> ensureDevice() async {
+    if (!_ready) return;
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return;
+      var (id, pair) = await _loadDevice();
+      final row = await supabase
+          .from('devices')
+          .select('id, revoked_at')
+          .eq('id', id)
+          .maybeSingle();
+      if (row == null || row['revoked_at'] != null) {
+        await _resetDeviceIdentity();
+        (id, pair) = await _loadDevice();
+      }
+      final pub = base64Encode((await pair.extractPublicKey()).bytes);
+      if (row == null || row['revoked_at'] != null) {
+        await supabase.from('devices').upsert({
+          'id': id,
+          'user_id': uid,
+          'name': _deviceName(),
+          'platform': devicePlatformLabel(),
+          'identity_public_key': pub,
+          'key_fp': await fingerprint(base64Decode(pub)),
+        });
+      } else {
+        await supabase.from('devices').update({
+          'last_seen_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', id);
+      }
+      _devicesCache.remove(uid);
+      // رفع علم القدرة v3 (لا ننزل به أبداً — الأجهزة المسجلة تدعم v3)
+      final prof = await supabase
+          .from('profiles')
+          .select('e2e_version')
+          .eq('id', uid)
+          .maybeSingle();
+      if (((prof?['e2e_version'] as int?) ?? 1) < 3) {
+        await supabase.from('profiles').update({'e2e_version': 3}).eq('id', uid);
+      }
+      unawaited(_ensureDevicePrekeys());
+    } catch (_) {}
+  }
+
+  /// مخزون مفاتيح أولية لهذا الجهاز (نفس نمط مخزون الحساب في v2)
+  static Future<void> _ensureDevicePrekeys() async {
+    if (!_ready) return;
+    final devId = _deviceId;
+    if (devId == null) return;
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return;
+      final rows = await supabase
+          .from('e2e_prekeys')
+          .select('id, consumed_at, is_last_resort')
+          .eq('user_id', uid)
+          .eq('device_id', devId);
+      var unconsumed = 0;
+      var hasLastResort = false;
+      for (final r in rows) {
+        if (r['is_last_resort'] == true) {
+          hasLastResort = true;
+        } else if (r['consumed_at'] == null) {
+          unconsumed += 1;
+        }
+      }
+      final toMake = <Map<String, dynamic>>[];
+      final need = _devicePrekeyPool - unconsumed;
+      if (!hasLastResort) {
+        toMake.add({'is_last_resort': true, 'device_id': devId});
+      }
+      for (var i = 0; i < need && i < 60; i++) {
+        toMake.add({'is_last_resort': false, 'device_id': devId});
+      }
+      if (toMake.isNotEmpty) {
+        // نولّد الأزواج محلياً ثم نرفعها ونعرف الخاص بمعرّف الخادم عبر مطابقة العام
+        final pairs = <SimpleKeyPair>[];
+        for (final row in toMake) {
+          final p = await RatchetCrypto.newKeyPair();
+          pairs.add(p);
+          row['public_key'] = base64Encode((await p.extractPublicKey()).bytes);
+        }
+        final inserted = await supabase
+            .from('e2e_prekeys')
+            .insert(toMake)
+            .select('id, public_key');
+        for (final row in inserted) {
+          final pub = row['public_key'] as String;
+          for (final p in pairs) {
+            if (base64Encode((await p.extractPublicKey()).bytes) == pub) {
+              await _storage.write(
+                key: '$_prekeyPrivPrefix${row['id']}',
+                value: base64Encode(await p.extractPrivateKeyBytes()),
+              );
+              break;
+            }
+          }
+        }
+      }
+      // تقليم المستهلكة الأقدم من 30 يوماً (pg_cron ينظف أيضاً على الخادم)
+      final cutoff = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 30))
+          .toIso8601String();
+      final stale = rows
+          .where((r) =>
+              r['is_last_resort'] != true &&
+              r['consumed_at'] is String &&
+              (r['consumed_at'] as String).compareTo(cutoff) < 0)
+          .map((r) => r['id'] as int)
+          .toList();
+      for (final id in stale) {
+        await supabase.from('e2e_prekeys').delete().eq('id', id);
+        await _storage.delete(key: '$_prekeyPrivPrefix$id');
+      }
+    } catch (_) {}
+  }
+
+  /// إصدار قدرات الطرف (e2e_version) — ذاكرة قصيرة
+  static Future<int> _peerVersion(String userId) async {
+    final hit = _peerVerCache[userId];
+    if (hit != null && DateTime.now().difference(hit.$2) < _capsTtl) {
+      return hit.$1;
+    }
+    var v = 1;
+    try {
+      final prof = await supabase
+          .from('profiles')
+          .select('e2e_version')
+          .eq('id', userId)
+          .maybeSingle();
+      v = ((prof?['e2e_version'] as int?) ?? 1);
+    } catch (_) {}
+    _peerVerCache[userId] = (v, DateTime.now());
+    return v;
+  }
+
+  /// الأجهزة النشطة لحساب (مفاتيحها عامة) — ذاكرة قصيرة
+  static Future<List<DeviceRow>> _activeDevices(String userId) async {
+    final hit = _devicesCache[userId];
+    if (hit != null && DateTime.now().difference(hit.$2) < _capsTtl) {
+      return hit.$1;
+    }
+    final out = <DeviceRow>[];
+    try {
+      final rows = await supabase
+          .from('devices')
+          .select('id, name, platform, identity_public_key, key_fp, last_seen_at')
+          .eq('user_id', userId)
+          .filter('revoked_at', 'is', null)
+          .order('created_at');
+      for (final r in rows) {
+        final pub = r['identity_public_key'] as String?;
+        final id = r['id'] as String?;
+        if (pub == null || pub.isEmpty || id == null) continue;
+        out.add(DeviceRow(
+          id: id,
+          name: (r['name'] as String?) ?? '',
+          platform: (r['platform'] as String?) ?? '',
+          fp: (r['key_fp'] as String?) ?? '',
+          pub: pub,
+          lastSeen: DateTime.tryParse((r['last_seen_at'] as String?) ?? '') ??
+              DateTime.now(),
+        ));
+      }
+    } catch (_) {}
+    _devicesCache[userId] = (out, DateTime.now());
+    return out;
+  }
+
+  // ----- جلسات v3: سجل لكل زوج (محادثة، جهاز الطرف) -----
+
+  static String _v3StorageKey(String convId, String peerDevId) =>
+      '$_r3Prefix$convId#$peerDevId';
+
+  static String _v3CacheKey(String convId, String peerDevId) =>
+      '$convId#$peerDevId';
+
+  static Future<V3MultiSession> _loadV3(String convId, String peerDevId) async {
+    final ck = _v3CacheKey(convId, peerDevId);
+    final hit = _v3Cache[ck];
+    if (hit != null) return hit;
+    final raw = await _storage.read(key: _v3StorageKey(convId, peerDevId));
+    final ms =
+        raw == null ? V3MultiSession() : V3MultiSession.tryDecode(raw) ?? V3MultiSession();
+    _v3Cache[ck] = ms;
+    return ms;
+  }
+
+  static Future<void> _saveV3(
+      String convId, String peerDevId, V3MultiSession ms) async {
+    _v3Cache[_v3CacheKey(convId, peerDevId)] = ms;
+    await _storage.write(
+        key: _v3StorageKey(convId, peerDevId), value: ms.encode());
+  }
+
+  /// بدء جلسة v3 نحو جهاز الطرف: سحب مفتاح من مخزونه الخاص + X3DH على هويتَي
+  /// الجهازين. بلا قاعدة ترتيب: سباق البدء يحل بتبنّي الافتتاحيات وأرشفتها.
+  static Future<V3MultiSession?> _startV3Session(
+      String convId, String peerUserId, DeviceRow peerDev) async {
+    final myPair = _devicePair;
+    final myId = _deviceId;
+    if (myPair == null || myId == null) return null;
+    final claimed = await supabase.rpc('e2e_claim_prekey', params: {
+      'p_user_id': peerUserId,
+      'p_device_id': peerDev.id,
+    });
+    if (claimed is! List || claimed.isEmpty) return null;
+    final row = claimed.first as Map<String, dynamic>;
+    final keyId = ((row['o_key_id'] ?? row['key_id']) as num?)?.toInt();
+    final pkB64 = (row['o_public_key'] ?? row['public_key']) as String?;
+    if (keyId == null || pkB64 == null) return null;
+    final myDevPubB64 = base64Encode((await myPair.extractPublicKey()).bytes);
+    final ek = await RatchetCrypto.newKeyPair();
+    final sk = await RatchetCrypto.initiatorSecret(
+      identityMine: myPair,
+      identityRemote: RatchetCrypto.publicKeyFromB64(peerDev.pub),
+      ephemeral: ek,
+      prekeyRemote: RatchetCrypto.publicKeyFromB64(pkB64),
+    );
+    final st = await DoubleRatchet.startInitiator(
+      sk: sk,
+      remoteRatchetPub: RatchetCrypto.publicKeyFromB64(pkB64),
+      ekB64: base64Encode((await ek.extractPublicKey()).bytes),
+      prekeyId: keyId,
+      identityPubB64: myDevPubB64,
+    );
+    final ms = V3MultiSession(cur: st);
+    await _saveV3(convId, peerDev.id, ms);
+    return ms;
+  }
+
+  /// تشفير نص بمسار v3: مفتاح محتوى عشوائي يشفّر النص مرة واحدة، ويُغلَّف
+  /// لكل جهاز من أجهزة الطرف (جلسة متدرجة) ولأجهزة حسابي (تغليف ذاتي).
+  static Future<String?> _encryptDmV3(
+      String convId, String peerUserId, String plain) async {
+    final myId = _deviceId;
+    final myPair = _devicePair;
+    if (myId == null || myPair == null) return null;
+    final peerDevs = await _activeDevices(peerUserId);
+    if (peerDevs.isEmpty) return null;
+    final me = supabase.auth.currentUser?.id;
+    final myDevs = me == null ? <DeviceRow>[] : await _activeDevices(me);
+    final limit = V3Codec.plainLimit(
+        peerDevices: peerDevs.length, myDevices: myDevs.length);
+    if (utf8.encode(plain).length > limit) return null;
+    final contentKey = await _aes.newSecretKey();
+    final kb = base64Encode(await contentKey.extractBytes());
+    final wraps = <String, String>{};
+    for (final d in peerDevs) {
+      try {
+        final ms = await _loadV3(convId, d.id);
+        var st = ms.cur;
+        st ??= (await _startV3Session(convId, peerUserId, d))?.cur;
+        if (st == null) continue; // مخزون الجهاز غير جاهز — يأتي في رسالة لاحقة
+        final wire = await DoubleRatchet.encrypt(st, convId, kb);
+        await _saveV3(convId, d.id, ms);
+        if (wire != null) wraps[d.id] = wire;
+      } catch (_) {}
+    }
+    if (wraps.isEmpty) return null;
+    final selfWraps = <String, String>{};
+    for (final d in myDevs) {
+      try {
+        selfWraps[d.id] = await V3Codec.selfWrap(
+          myDevice: myPair,
+          myDeviceId: myId,
+          targetDevice: RatchetCrypto.publicKeyFromB64(d.pub),
+          targetDeviceId: d.id,
+          conversationId: convId,
+          contentKey: contentKey,
+        );
+      } catch (_) {}
+    }
+    final body = await encryptText(contentKey, convId, plain);
+    return V3Codec.pack(
+        senderDeviceId: myId, wraps: wraps, selfWraps: selfWraps, body: body);
+  }
+
+  /// فك نص v3: جهازي إما في أظرفة أجهزة الطرف (جلسة متدرجة) أو في التغليف
+  /// الذاتي (رسالة من جهاز آخر لنفس الحساب).
+  static Future<String?> _decryptDmV3(
+      String convId, String peerUserId, String content) async {
+    final pkt = V3Codec.parse(content);
+    if (pkt == null) return null;
+    final myId = _deviceId;
+    if (myId == null) return null;
+
+    // 1) رسالة من جهاز آخر لنفس الحساب — تغليف ذاتي ثابت
+    final selfW = pkt.selfWraps[myId];
+    if (selfW != null) {
+      return _openSelfWrap(convId, pkt.senderDeviceId, selfW, pkt.body);
+    }
+
+    // 2) رسالة من جهاز الطرف — جلسة متدرجة لزوج الجهازين
+    final wire = pkt.wraps[myId];
+    if (wire == null) return null;
+    return _withSession(convId, () async {
+      final ms = await _loadV3(convId, pkt.senderDeviceId);
+      String? kb;
+      // أ. الجلسة الحالية ثم المؤرشفة (رسائل سباق البدء الطائرة) — الفك على
+      // نسخٍ لأن فشل محاولة على جلسة بسلكٍ يخص أخرى يُدوّر حالتها ويفسدها؛
+      // النسخة الناجحة فقط هي التي تُكتب مكان الأصل.
+      final trials = <RatchetState?>[
+        if (ms.cur != null) _copyState(ms.cur!),
+        ...ms.old.map(_copyState),
+      ];
+      var hit = -1;
+      for (var i = 0; i < trials.length; i++) {
+        final st = trials[i];
+        if (st == null) continue;
+        try {
+          final k = await DoubleRatchet.decrypt(st, convId, wire);
+          if (k != null) {
+            kb = k;
+            hit = i;
+            break;
+          }
+        } catch (_) {}
+      }
+      if (hit >= 0) {
+        if (ms.cur != null && hit == 0) {
+          ms.cur = trials[hit];
+        } else {
+          ms.old[hit - (ms.cur == null ? 0 : 1)] = trials[hit]!;
+        }
+      }
+      // ب. افتتاحية جديدة: تبنّي تجريبي لا يُثبَّت إلا عند نجاح الفك
+      if (kb == null && DoubleRatchet.isInitialWire(wire)) {
+        final ek = DoubleRatchet.initialEphemeral(wire);
+        if (ek != null && !ms.knowsInitial(ek)) {
+          final (k, cand) =
+              await _buildV3Responder(convId, peerUserId, pkt, wire);
+          if (k != null && cand != null) {
+            kb = k;
+            ms.commitAdopt(cand);
+            ms.remember(ek);
+          }
+        }
+      }
+      await _saveV3(convId, pkt.senderDeviceId, ms);
+      if (kb == null) return null;
+      return decryptText(SecretKeyData(base64Decode(kb)), convId, pkt.body);
+    });
+  }
+
+  /// نسخة عميقة من حالة جلسة (للفك التجريبي بلا مساس بالأصل)
+  static RatchetState? _copyState(RatchetState st) =>
+      RatchetState.tryDecode(st.encode());
+
+  /// بناء جلسة مستجيب v3 من افتتاحية (بلا تثبيت): X3DH بهوية الجهازين، مع
+  /// تحقق أن هوية المرسل في الترويسة تطابق سجل جهازه العام في devices.
+  static Future<(String?, RatchetState?)> _buildV3Responder(
+      String convId, String peerUserId, V3Packet pkt, String wire) async {
+    try {
+      final p = wire.split('.');
+      final hdr = RatchetCrypto.decodeHeader(p[1]);
+      if (hdr == null || hdr['e'] is! String || hdr['k'] is! int) {
+        return (null, null);
+      }
+      final ikB64 = hdr['i'];
+      if (ikB64 is! String || ikB64.isEmpty) return (null, null);
+      final peerDevs = await _activeDevices(peerUserId);
+      final rows = peerDevs.where((d) => d.id == pkt.senderDeviceId).toList();
+      if (rows.isEmpty || rows.first.pub != ikB64) return (null, null);
+      final privB64 = await _storage.read(key: '$_prekeyPrivPrefix${hdr['k']}');
+      if (privB64 == null) return (null, null);
+      final myPair = _devicePair;
+      if (myPair == null) return (null, null);
+      final prekeyPair =
+          await RatchetCrypto.keyPairFromSeed(base64Decode(privB64));
+      final sk = await RatchetCrypto.responderSecret(
+        identityMine: myPair,
+        identityRemote: RatchetCrypto.publicKeyFromB64(ikB64),
+        prekeyMine: prekeyPair,
+        ephemeralRemote: RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
+      );
+      final st =
+          await DoubleRatchet.startResponder(sk: sk, ratchetPair: prekeyPair);
+      final k = await DoubleRatchet.decrypt(st, convId, wire);
+      if (k == null) return (null, null);
+      return (k, st);
+    } catch (_) {
+      return (null, null);
+    }
+  }
+
+  /// فك تغليف ذاتي: رسالة أرسلها جهاز آخر لنفس الحساب
+  static Future<String?> _openSelfWrap(
+      String convId, String senderDevId, String wrapped, String body) async {
+    try {
+      final myPair = _devicePair;
+      final myId = _deviceId;
+      if (myPair == null || myId == null) return null;
+      final me = supabase.auth.currentUser?.id;
+      if (me == null) return null;
+      final myDevs = await _activeDevices(me);
+      final rows = myDevs.where((d) => d.id == senderDevId).toList();
+      if (rows.isEmpty) return null;
+      final key = await V3Codec.selfUnwrap(
+        myDevice: myPair,
+        myDeviceId: myId,
+        senderDevice: RatchetCrypto.publicKeyFromB64(rows.first.pub),
+        senderDeviceId: senderDevId,
+        conversationId: convId,
+        wrapped: wrapped,
+      );
+      if (key == null) return null;
+      return await decryptText(key, convId, body);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ----- واجهة شاشة الأجهزة المرتبطة -----
+
+  /// حد الطول الفعلي الآن لمحادثة خاصة (v3 أضيق بزيادة عدد الأجهزة)
+  static Future<int> dmPlainLimit(String otherUserId) async {
+    if (!_ready) return _plainMaxBytes;
+    try {
+      if (await _peerVersion(otherUserId) >= 3) {
+        final peer = await _activeDevices(otherUserId);
+        if (peer.isNotEmpty) {
+          final me = supabase.auth.currentUser?.id;
+          final mine =
+              me == null ? <DeviceRow>[] : await _activeDevices(me);
+          final limit = V3Codec.plainLimit(
+              peerDevices: peer.length, myDevices: mine.length);
+          if (limit > 0) return limit;
+        }
+      }
+    } catch (_) {}
+    return _plainMaxBytes;
+  }
+
+  /// الأجهزة المرتبطة بالحساب (للعرض)
+  static Future<List<DeviceRow>> listDevices() async {
+    final me = supabase.auth.currentUser?.id;
+    if (me == null) return const [];
+    return _activeDevices(me);
+  }
+
+  /// إزالة جهاز مرتبط: يُحذف سجله ومخزون مفاتيحه فلا تصله رسائل v3 جديدة
+  /// حتى يفتح التطبيق من جديد (فتُسجَّل له هوية جديدة يراها المالك).
+  static Future<void> removeDevice(String deviceId) async {
+    final me = supabase.auth.currentUser?.id;
+    if (me == null) return;
+    try {
+      await supabase.from('e2e_prekeys').delete().eq('device_id', deviceId);
+    } catch (_) {}
+    try {
+      await supabase
+          .from('devices')
+          .delete()
+          .eq('id', deviceId)
+          .eq('user_id', me);
+    } catch (_) {}
+    _devicesCache.remove(me);
+    if (deviceId == _deviceId) {
+      await _storage.delete(key: _deviceIdKey);
+      await _storage.delete(key: _devicePrivKey);
+      _deviceId = null;
+      _devicePair = null;
+    }
+  }
 
   // ---------- الحالات/القصص ----------
 
@@ -1161,6 +1757,25 @@ class E2eService {
   static void initGroupKey(String conversationId) {
     unawaited(groupKey(conversationId));
   }
+}
+
+/// صف جهاز مرتبط بالحساب (للإرسال وللعرض)
+class DeviceRow {
+  DeviceRow({
+    required this.id,
+    required this.name,
+    required this.platform,
+    required this.fp,
+    required this.pub,
+    required this.lastSeen,
+  });
+
+  final String id; // معرف الجهاز (uuid يولده التطبيق)
+  final String name; // اسم معروض («جهاز أندرويد»…)
+  final String platform;
+  final String fp; // بصمة المفتاح العام (16 hex)
+  final String pub; // المفتاح العام (X25519 — ليس سراً)
+  final DateTime lastSeen;
 }
 
 /// حالة مفاتيح التشفير على هذا الجهاز

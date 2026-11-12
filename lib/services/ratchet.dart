@@ -180,6 +180,7 @@ class RatchetState {
     this.used = false,
     this.ekB64,
     this.prekeyId,
+    this.ikB64,
     Map<String, Uint8List>? skipped,
   }) : skipped = skipped ?? {};
 
@@ -195,6 +196,7 @@ class RatchetState {
   bool used; // جرحت الجلسة نجاحاً ولو مرة (يمنع استبدالها برسالة أولى معاد تشغيلها)
   String? ekB64; // المفتاح المؤقت لأول رسالة (يُمسح بعد أول إرسال)
   int? prekeyId; // رقم المفتاح الأولي المسحوب لأول رسالة
+  String? ikB64; // هوية جهاز المرسل (ترويسة الافتتاح فقط — جلسات v3 لكل جهاز)
   final Map<String, Uint8List> skipped; // "<rpubB64>:<n>" -> مفتاح الرسالة
 
   Map<String, dynamic> toJson() => {
@@ -210,6 +212,7 @@ class RatchetState {
         'used': used,
         'ek': ekB64,
         'pk': prekeyId,
+        'ik': ikB64,
         'sk': skipped.map((k, v) => MapEntry(k, base64Encode(v))),
       };
 
@@ -235,6 +238,7 @@ class RatchetState {
       used: j['used'] == true,
       ekB64: j['ek'] as String?,
       prekeyId: (j['pk'] as num?)?.toInt(),
+      ikB64: j['ik'] as String?,
       skipped: sk,
     );
   }
@@ -259,11 +263,13 @@ class DoubleRatchet {
 
   /// جلسة المبادر (بعد X3DH): يولّد مفتاح تدوير جديداً ويسلسل مع المفتاح الأولي للطرف.
   /// [ekB64] و[prekeyId] بيانات أول رسالة (توضع في ترويستها ثم تُمسح).
+  /// [identityPubB64] هوية جهاز المرسل لجلسات v3 (توضع في ترويسة الافتتاح فقط).
   static Future<RatchetState> startInitiator({
     required Uint8List sk,
     required SimplePublicKey remoteRatchetPub,
     String? ekB64,
     int? prekeyId,
+    String? identityPubB64,
   }) async {
     final pair = await RatchetCrypto.newKeyPair();
     final pub = await pair.extractPublicKey();
@@ -280,6 +286,7 @@ class DoubleRatchet {
       used: false,
       ekB64: ekB64,
       prekeyId: prekeyId,
+      ikB64: identityPubB64,
     );
   }
 
@@ -315,6 +322,7 @@ class DoubleRatchet {
     if (st.ekB64 != null && st.prekeyId != null) {
       header['e'] = st.ekB64;
       header['k'] = st.prekeyId;
+      if (st.ikB64 != null) header['i'] = st.ikB64;
     }
     final hdrB64 = RatchetCrypto.encodeHeader(header);
     st.cks = next;
@@ -384,6 +392,19 @@ class DoubleRatchet {
     return hdr != null && hdr['e'] is String && hdr['k'] is int;
   }
 
+  /// المفتاح المؤقت لترويسة افتتاحية (معرّف الجلسة — فريد لكل X3DH)
+  static String? initialEphemeral(String wire) {
+    if (!isInitialWire(wire)) return null;
+    return RatchetCrypto.decodeHeader(wire.split('.')[1])?['e'] as String?;
+  }
+
+  /// هوية جهاز المرسل في ترويسة افتتاحية v3 (null في غيرها)
+  static String? initialIdentity(String wire) {
+    if (!isInitialWire(wire)) return null;
+    final i = RatchetCrypto.decodeHeader(wire.split('.')[1])?['i'];
+    return i is String ? i : null;
+  }
+
   static Future<void> _skipMessageKeys(RatchetState st, int until) async {
     final rpub = st.rpub;
     if (rpub == null) return;
@@ -447,4 +468,234 @@ class DoubleRatchet {
     }
     return true;
   }
+}
+
+/// سجل جلسات زوج (محادثة، جهاز الطرف) — تعدد الأجهزة v3.
+///
+/// قد تبدأ الجلسة من الطرفين معاً (سباق بدء)؛ العلاج وفق نمط Signal: الافتتاحية
+/// الواردة تُتبنّى دائماً كجلسة حالية بعد نجاح فكّها، وتُؤرشف الجلسة السابقة
+/// (حتى رسالتين) لتبقى الرسائل الطائرة قابلة للفك، مع سجل «معرفات افتتاحيات
+/// شوهدت» يمنع إعادة تشغيل افتتاحية قديمة من قلب الجلسة أو تكرار الأرشفة.
+class V3MultiSession {
+  V3MultiSession({this.cur, List<RatchetState>? old, List<String>? seen})
+      : old = old ?? [],
+        seen = seen ?? [];
+
+  RatchetState? cur; // الجلسة الحالية (للإرسال والاستقبال)
+  final List<RatchetState> old; // مؤرشفة لرسائل طائرة (الأحدث أولاً، حد 2)
+  final List<String> seen; // معرفات الافتتاحيات (المفتاح المؤقت) — حد 32
+
+  bool knowsInitial(String ekB64) => seen.contains(ekB64);
+
+  void remember(String ekB64) {
+    if (ekB64.isEmpty || seen.contains(ekB64)) return;
+    seen.add(ekB64);
+    if (seen.length > 32) seen.removeAt(0);
+  }
+
+  /// تبنّي افتتاحية ناجحة: أرشِف الحالية واجعل الواردة حالية.
+  void commitAdopt(RatchetState incoming) {
+    final c = cur;
+    if (c != null) {
+      old.insert(0, c);
+      if (old.length > 2) old.removeLast();
+    }
+    cur = incoming;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'cur': cur?.toJson(),
+        'old': old.map((s) => s.toJson()).toList(),
+        'seen': seen,
+      };
+
+  static V3MultiSession? tryDecode(String s) {
+    try {
+      final v = jsonDecode(s);
+      if (v is! Map<String, dynamic>) return null;
+      final curJ = v['cur'];
+      final oldJ = v['old'];
+      final seenJ = v['seen'];
+      if (curJ != null && curJ is! Map<String, dynamic>) return null;
+      if (oldJ != null && oldJ is! List) return null;
+      if (seenJ != null && seenJ is! List) return null;
+      final old = <RatchetState>[];
+      for (final o in (oldJ as List? ?? const [])) {
+        if (o is! Map<String, dynamic>) return null;
+        final st = RatchetState.fromJson(o);
+        old.add(st);
+      }
+      return V3MultiSession(
+        cur: curJ == null ? null : RatchetState.fromJson(curJ),
+        old: old,
+        seen: (seenJ as List? ?? const []).whereType<String>().toList(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String encode() => jsonEncode(toJson());
+}
+
+/// مُرمِّز رسالة v3 — ظرف واحد يحمل تغليف مفتاح المحتوى لكل جهاز مستقبِل.
+///
+/// الصيغة على السلك:
+///   v3.<b64(json الترويسة)>.<جسم v1.n.ct.mac>
+///   الترويسة: {"c": جهاز المرسل,
+///              "w": {جهاز مستقبِل: سلك v2 متدرج يشفّر مفتاح المحتوى},
+///              "s": {جهاز من أجهزة حساب المرسل: تغليف ذاتي ثابت}}
+/// - جسم الرسالة نفسه يُشفَّر مرة واحدة بمفتاح محتوى عشوائي (AES-GCM، AAD =
+///   معرف المحادثة) — لا تكرار للنص لكل جهاز، فيبقى الحد داخل 4000 حرف.
+/// - أظرفة أجهزة الطرف عبر جلسات متدرجة (سرية أمامية)، وأظرفة أجهزة الحساب
+///   نفسه (بمن فيه جهاز المرسل — لتقرأ رسائله كل أجهزته وعادته بعد إعادة الفتح)
+///   بتغليف ثابت HKDF(X25519(جهاز↔جهاز)) — بلا سرية أمامية، وهي أجهزة المالك.
+class V3Codec {
+  V3Codec._();
+
+  static final AesGcm _aes = AesGcm.with256bits();
+  static final Hkdf _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
+  static const infoSelf = 'wasl-self-v1';
+
+  /// رأس ثابت تقديري بالبايت + نصيب كل جهاز من الترويسة (افتتاحية: الأسوأ)
+  static const _hdrBase = 60;
+  static const _perWrap = 360; // جهاز طرف: معرف + سلك افتتاحي كامل
+  static const _perSelf = 160; // جهاز حساب المرسل: معرف + تغليف ذاتي
+
+  /// الحد الأقصى لطول النص الصريح داخل v3 (يحفظ الرسالة كاملة داخل قيد 4000 حرف).
+  /// صفر = الترويسة أكلت الميزانية (أجهزة كثيرة جداً) — يرجع المرسل لمسار v2.
+  static int plainLimit({required int peerDevices, required int myDevices}) {
+    var hdrRaw = _hdrBase + _perWrap * peerDevices + _perSelf * myDevices;
+    hdrRaw = hdrRaw * 4 ~/ 3 + 4; // تضخم base64 للترويسة
+    final budget = (3950 - 3 - 1 - 45 - hdrRaw) * 3 ~/ 4;
+    if (budget < 500) return 0;
+    return budget.clamp(500, 2600);
+  }
+
+  /// حزم رسالة v3 كاملة. [body] بصيغة v1.<nonce>.<ct>.<mac> تحت مفتاح المحتوى.
+  static String pack({
+    required String senderDeviceId,
+    required Map<String, String> wraps,
+    required Map<String, String> selfWraps,
+    required String body,
+  }) {
+    final hdr = base64Encode(utf8.encode(jsonEncode({
+      'c': senderDeviceId,
+      'w': wraps,
+      's': selfWraps,
+    })));
+    return 'v3.$hdr.$body';
+  }
+
+  /// تفكيك رسالة v3 — null إن كان الشكل غير سليم.
+  static V3Packet? parse(String content) {
+    final parts = content.split('.');
+    if (parts.length != 6 || parts[0] != 'v3' || parts[2] != 'v1') return null;
+    try {
+      final v = jsonDecode(utf8.decode(base64Decode(parts[1])));
+      if (v is! Map<String, dynamic>) return null;
+      final c = v['c'];
+      if (c is! String || c.isEmpty) return null;
+      final body = 'v1.${parts[3]}.${parts[4]}.${parts[5]}';
+      return V3Packet(
+        senderDeviceId: c,
+        wraps: _stringMap(v['w']),
+        selfWraps: _stringMap(v['s']),
+        body: body,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Map<String, String> _stringMap(Object? raw) {
+    final out = <String, String>{};
+    if (raw is Map) {
+      raw.forEach((k, v) {
+        if (k is String && v is String) out[k] = v;
+      });
+    }
+    return out;
+  }
+
+  /// مفتاح التغليف الذاتي بين جهازين لنفس الحساب:
+  /// HKDF-SHA256(X25519(جهازي، الجهاز الآخر), salt = convId, info = 'wasl-self-v1')
+  static Future<SecretKey> selfKey({
+    required SimpleKeyPair myDevice,
+    required SimplePublicKey otherDevice,
+    required String conversationId,
+  }) async {
+    final shared = await X25519()
+        .sharedSecretKey(keyPair: myDevice, remotePublicKey: otherDevice);
+    return _hkdf.deriveKey(
+      secretKey: shared,
+      nonce: utf8.encode(conversationId),
+      info: utf8.encode(infoSelf),
+    );
+  }
+
+  /// يغلّف مفتاح محتوى لجهاز من أجهزة الحساب نفسه (v1-format، AAD يربط الطرفين)
+  static Future<String> selfWrap({
+    required SimpleKeyPair myDevice,
+    required String myDeviceId,
+    required SimplePublicKey targetDevice,
+    required String targetDeviceId,
+    required String conversationId,
+    required SecretKey contentKey,
+  }) async {
+    final kek = await selfKey(
+        myDevice: myDevice,
+        otherDevice: targetDevice,
+        conversationId: conversationId);
+    final aad = utf8.encode('$conversationId|self|$myDeviceId|$targetDeviceId');
+    final kb = await contentKey.extractBytes();
+    final box = await _aes.encrypt(kb,
+        secretKey: kek, nonce: _aes.newNonce(), aad: aad);
+    return 'v1.${base64Encode(box.nonce)}.'
+        '${base64Encode(box.cipherText)}.${base64Encode(box.mac.bytes)}';
+  }
+
+  /// يفك تغليفاً ذاتياً موجّهاً لهذا الجهاز (null عند الفشل)
+  static Future<SecretKey?> selfUnwrap({
+    required SimpleKeyPair myDevice,
+    required String myDeviceId,
+    required SimplePublicKey senderDevice,
+    required String senderDeviceId,
+    required String conversationId,
+    required String wrapped,
+  }) async {
+    try {
+      final kek = await selfKey(
+          myDevice: myDevice,
+          otherDevice: senderDevice,
+          conversationId: conversationId);
+      final aad = utf8.encode('$conversationId|self|$senderDeviceId|$myDeviceId');
+      final p = wrapped.split('.');
+      if (p.length != 4) return null;
+      final kb = await _aes.decrypt(
+        SecretBox(base64Decode(p[2]),
+            nonce: base64Decode(p[1]), mac: Mac(base64Decode(p[3]))),
+        secretKey: kek,
+        aad: aad,
+      );
+      return SecretKeyData(kb);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// رسالة v3 مفكوكة الترويسة (قبل فك التغليف)
+class V3Packet {
+  V3Packet({
+    required this.senderDeviceId,
+    required this.wraps,
+    required this.selfWraps,
+    required this.body,
+  });
+
+  final String senderDeviceId; // جهاز المرسل ("c")
+  final Map<String, String> wraps; // أجهزة الطرف → سلك متدرج ("w")
+  final Map<String, String> selfWraps; // أجهزة حساب المرسل → تغليف ذاتي ("s")
+  final String body; // v1.<nonce>.<ct>.<mac> تحت مفتاح المحتوى
 }
