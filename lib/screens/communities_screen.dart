@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/moderation_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'community_screen.dart';
@@ -73,8 +74,8 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
       await _load();
       if (!mounted) return;
       _snack('انضممت إلى ${c['name']}');
-    } catch (_) {
-      _snack('تعذّر الانضمام');
+    } catch (e) {
+      _snack(ModerationService.joinErrorHint(e) ?? 'تعذّر الانضمام');
     }
   }
 
