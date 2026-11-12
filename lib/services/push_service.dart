@@ -102,13 +102,12 @@ class PushService {
   static void _showInAppBanner(String title, String body) {
     final ctx = navigatorKey.currentContext;
     if (ctx == null) return;
-    OverlayState? overlay;
+    late final OverlayState overlay;
     try {
       overlay = Overlay.of(ctx, rootOverlay: true);
     } catch (_) {
       return;
     }
-    if (overlay == null) return;
     late final OverlayEntry entry;
     entry = OverlayEntry(
       builder: (_) => _InAppBanner(

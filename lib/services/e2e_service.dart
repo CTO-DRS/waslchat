@@ -6,6 +6,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config.dart';
+import 'ratchet.dart';
 
 /// نتائج مسح رمز تحقق QR
 enum VerifyScanResult {
@@ -34,6 +35,17 @@ enum VerifyScanResult {
 /// - الوسائط: ملف ثنائي = nonce(12بايت) + ciphertext + mac(16بايت) بامتداد .enc.bin
 /// - الرسائل القديمة (بدون بادئة v1.) تُعرض كما هي — توافق رجعي كامل.
 ///
+/// المرحلة 2-أ — السرية الأمامية (v2، المحادثات الخاصة فقط):
+/// - كل حساب ينشر مفاتيح X25519 أولية «لمرة واحدة» في e2e_prekeys (ترحيل 020)
+///   ويضبط profiles.e2e_version = 2؛ من يبدأ يسحب واحداً بـ e2e_claim_prekey
+///   (سحب ذري لا يتكرر) ويشتق سرّ X3DH ثم يدير جلسة Double Ratchet محلياً
+///   (lib/services/ratchet.dart) — فسرقة مفتاح الهوية لاحقاً لا تكشف الرسائل السابقة.
+/// - الصيغة: "v2.<ترويسة b64>.<ciphertext b64>.<mac b64>" وAAD = conv + الترويسة.
+/// - من لا يملك الطرف الآخر مفاتيح أولية (تطبيق قديم) يبقى على مسار v1 تلقائياً،
+///   والقاعدة: الأصغر معرفاً يبدأ v2 — يمنع سباق بدء مزدوج بلا وساطة.
+/// - الوسائط تبقى على مفتاح v1 الثابت في هذا الإصدار (تغليف مفاتيح الوسائط
+///   داخل الرسائل المتدرجة متأجل) — موثق في E2EE_PLAN حدود المرحلة.
+///
 /// المرحلة 2 — المجموعات الخاصة:
 /// - مفتاح مجموعة عشوائي 32B يثبّته مؤسس المجموعة أول مرة (دالة RPC بقفل استشاري
 ///   تمنع تثبيت مفتاحين متنافسين)، ويُغلَّف لكل عضو بـ HKDF(X25519(المُغلّف↔العضو)).
@@ -49,7 +61,9 @@ class E2eService {
   static const _infoDm = 'wasl-dm-v1';
   static const _infoGroup = 'wasl-group-v1';
   static const _privKeyStoreKey = 'e2e_identity_priv_v1';
-  static const _plainMaxBytes = 2900; // يبقي النص المشفّر داخل قيد messages (4000 حرف)
+  // 2600 يبقي نص v2 (ترويسة + تشفير + mac) داخل قيد messages (4000 حرف) حتى في
+  // أول رسالة (الأثقل ترويسةً)
+  static const _plainMaxBytes = 2600;
 
   static final X25519 _x25519 = X25519();
   static final AesGcm _aes = AesGcm.with256bits();
@@ -64,9 +78,11 @@ class E2eService {
 
   // ---------- الحالة ----------
 
-  /// هل النص مشفّر بصيغة v1؟
-  static bool isEncrypted(String content) =>
-      content.startsWith('v1.') && '.'.allMatches(content).length >= 3;
+  /// هل النص مشفّر بصيغة v1 أو v2؟
+  static bool isEncrypted(String content) {
+    if (content.startsWith('v2.')) return content.split('.').length == 4;
+    return content.startsWith('v1.') && '.'.allMatches(content).length >= 3;
+  }
 
   /// هل مسار الوسيط مشفّر؟ (نخزّنه بامتداد .enc.bin)
   static bool isEncryptedPath(String path) => path.endsWith('.enc.bin');
@@ -157,6 +173,7 @@ class E2eService {
         _clearKeyCaches();
         await _publishMyKey();
         _ready = true;
+        unawaited(ensurePrekeys());
         return E2eKeyState.needsBackup;
       }
       if (local != null) {
@@ -165,10 +182,12 @@ class E2eService {
         if (published == null || published.isEmpty) {
           await _publishMyKey();
           _ready = true;
+          unawaited(ensurePrekeys());
           return hasBackup ? E2eKeyState.ready : E2eKeyState.needsBackup;
         }
         if (published == mine) {
           _ready = true;
+          unawaited(ensurePrekeys());
           return hasBackup ? E2eKeyState.ready : E2eKeyState.needsBackup;
         }
       }
@@ -232,6 +251,7 @@ class E2eService {
           .maybeSingle();
       if (prof?['identity_public_key'] != pub) await _publishMyKey();
       _ready = true;
+      unawaited(ensurePrekeys());
       return true;
     } catch (_) {
       return false;
@@ -248,8 +268,25 @@ class E2eService {
     // أظرفتي القديمة لا تُفك بالمفتاح الجديد، والأظرفة التي غلّفتُها لغيري تعتمد على مفتاحي القديم:
     // نحذفها ليعيد أعضاء يملكون المفتاح تغليفه تلقائياً.
     await supabase.rpc('e2e_drop_my_envelopes');
+    // المفاتيح الأولية القديمة مرتبطة بالهوية المنقرضة: حذفها من الخادم والجهاز
+    // مع الجلسات، ثم نشر مخزون جديد بالهوية الجديدة.
+    final uid = supabase.auth.currentUser?.id;
+    if (uid != null) {
+      try {
+        await supabase.from('e2e_prekeys').delete().eq('user_id', uid);
+      } catch (_) {}
+    }
+    try {
+      final all = await _storage.readAll();
+      for (final k in all.keys) {
+        if (k.startsWith(_prekeyPrivPrefix) || k.startsWith(_sessionPrefix)) {
+          await _storage.delete(key: k);
+        }
+      }
+    } catch (_) {}
     await createBackup(passphrase);
     _ready = true;
+    unawaited(ensurePrekeys());
   }
 
   /// عند تسجيل الخروج: مسح المفاتيح المحفوظة على الجهاز (تُستعاد بكلمة سر النسخة الاحتياطية)
@@ -258,6 +295,7 @@ class E2eService {
     _clearKeyCaches();
     _pubCache.clear();
     _changedPeers.clear();
+    _sessionCache.clear();
     _ready = false;
   }
 
@@ -469,9 +507,7 @@ class E2eService {
     final hit = _previewCache[raw];
     if (hit != null) return hit;
     if (otherId == null) return '🔒 رسالة مشفرة';
-    final key = await dmKey(conversationId, otherId);
-    if (key == null) return '🔒 رسالة مشفرة';
-    final plain = await decryptText(key, conversationId, raw);
+    final plain = await decryptDmText(conversationId, otherId, raw);
     final out = plain ?? '🔒 رسالة مشفرة';
     if (_previewCache.length > 300) _previewCache.clear();
     _previewCache[raw] = out;
@@ -545,6 +581,281 @@ class E2eService {
       return null;
     }
   }
+
+  // ---------- السرية الأمامية (v2): مفاتيح أولية وجلسات متدرجة ----------
+
+  static const _sessionPrefix = 'e2e_ratchet_';
+  static const _prekeyPrivPrefix = 'e2e_prekey_priv_';
+
+  /// حجم مخزون المفاتيح الأولية غير المستهلكة الذي نحافظ عليه
+  static const _prekeyPool = 25;
+
+  /// جلسات v2 بالذاكرة (محادثة ← حالة) — النسخة الدائمة في المخزن الآمن
+  static final Map<String, RatchetState> _sessionCache = {};
+
+  /// سلاسل تنفيذ لكل محادثة: تمنع فقدان تحديث حالة الجلسة بين await المتوازية
+  static final Map<String, Future<void>> _sessionChains = {};
+
+  static Future<T> _withSession<T>(
+      String convId, Future<T> Function() body) {
+    final prev = _sessionChains[convId] ?? Future.value();
+    final done = Completer<void>();
+    _sessionChains[convId] = done.future;
+    return prev
+        .then((_) => body())
+        .whenComplete(() {
+      done.complete();
+      if (identical(_sessionChains[convId], done.future)) {
+        _sessionChains.remove(convId);
+      }
+    });
+  }
+
+  static Future<RatchetState?> _loadSession(String convId) async {
+    final hit = _sessionCache[convId];
+    if (hit != null) return hit;
+    final raw = await _storage.read(key: '$_sessionPrefix$convId');
+    if (raw == null) return null;
+    final st = RatchetState.tryDecode(raw);
+    if (st == null) return null;
+    _sessionCache[convId] = st;
+    return st;
+  }
+
+  static Future<void> _saveSession(String convId, RatchetState st) async {
+    _sessionCache[convId] = st;
+    await _storage.write(key: '$_sessionPrefix$convId', value: st.encode());
+  }
+
+  static Future<void> _deleteSession(String convId) async {
+    _sessionCache.remove(convId);
+    try {
+      await _storage.delete(key: '$_sessionPrefix$convId');
+    } catch (_) {}
+  }
+
+  /// ينشر مخزون المفاتيح الأولية ويضبط e2e_version = 2 ويقلم المستهلكة القديمة.
+  /// صامتة دائماً (ناريَ ونسيان) — تُستدعى بعد جاهزية الهوية.
+  static Future<void> ensurePrekeys() async {
+    if (!_ready) return;
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return;
+      final rows = await supabase
+          .from('e2e_prekeys')
+          .select('id, consumed_at, is_last_resort')
+          .eq('user_id', uid);
+      var unconsumed = 0;
+      var hasLastResort = false;
+      for (final r in rows) {
+        if (r['is_last_resort'] == true) {
+          hasLastResort = true;
+        } else if (r['consumed_at'] == null) {
+          unconsumed += 1;
+        }
+      }
+      final toMake = <Map<String, dynamic>>[];
+      var need = _prekeyPool - unconsumed;
+      if (!hasLastResort) toMake.add({'is_last_resort': true});
+      for (var i = 0; i < need && i < 60; i++) {
+        toMake.add({'is_last_resort': false});
+      }
+      if (toMake.isNotEmpty) {
+        // نولّد الأزواج محلياً ثم نرفعها ونعرف الخاص بمعرّف الخادم عبر مطابقة العام
+        final pairs = <SimpleKeyPair>[];
+        for (final row in toMake) {
+          final p = await RatchetCrypto.newKeyPair();
+          pairs.add(p);
+          row['public_key'] =
+              base64Encode((await p.extractPublicKey()).bytes);
+        }
+        final inserted = await supabase
+            .from('e2e_prekeys')
+            .insert(toMake)
+            .select('id, public_key');
+        for (final row in inserted) {
+          final pub = row['public_key'] as String;
+          for (final p in pairs) {
+            if (base64Encode((await p.extractPublicKey()).bytes) == pub) {
+              await _storage.write(
+                key: '$_prekeyPrivPrefix${row['id']}',
+                value: base64Encode(await p.extractPrivateKeyBytes()),
+              );
+              break;
+            }
+          }
+        }
+      }
+      // رفع علم القدرة (v2) إن لم يُرفع
+      final prof = await supabase
+          .from('profiles')
+          .select('e2e_version')
+          .eq('id', uid)
+          .maybeSingle();
+      if (((prof?['e2e_version'] as int?) ?? 1) < 2) {
+        await supabase.from('profiles').update({'e2e_version': 2}).eq('id', uid);
+      }
+      // تقليم: المستهلكة الأقدم من 30 يوماً (نظّام pg_cron ينظف أيضاً)
+      final cutoff = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 30))
+          .toIso8601String();
+      final stale = rows
+          .where((r) =>
+              r['is_last_resort'] != true &&
+              r['consumed_at'] is String &&
+              (r['consumed_at'] as String).compareTo(cutoff) < 0)
+          .map((r) => r['id'] as int)
+          .toList();
+      for (final id in stale) {
+        await supabase.from('e2e_prekeys').delete().eq('id', id);
+        await _storage.delete(key: '$_prekeyPrivPrefix$id');
+      }
+    } catch (_) {}
+  }
+
+  /// هل يدعم الطرف v2 (نشر مفاتيح أولية)؟
+  static Future<bool> _peerSupportsV2(String otherUserId) async {
+    try {
+      final prof = await supabase
+          .from('profiles')
+          .select('e2e_version')
+          .eq('id', otherUserId)
+          .maybeSingle();
+      return ((prof?['e2e_version'] as int?) ?? 1) >= 2;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// بدء جلسة من الصفر (المبادر): سحب مفتاح أولي + X3DH.
+  /// القاعدة: الأصغر معرفاً يبدأ — تمنع سباق بدء مزدوج متنافر بلا وساطة.
+  static Future<RatchetState?> _startSession(
+      String convId, String otherUserId) async {
+    final me = supabase.auth.currentUser?.id;
+    if (me == null || me.compareTo(otherUserId) >= 0) return null;
+    if (!await _peerSupportsV2(otherUserId)) return null;
+    final claimed = await supabase
+        .rpc('e2e_claim_prekey', params: {'p_user_id': otherUserId});
+    if (claimed is! List || claimed.isEmpty) return null;
+    final row = claimed.first as Map<String, dynamic>;
+    final keyId = ((row['o_key_id'] ?? row['key_id']) as num?)?.toInt();
+    final pkB64 = (row['o_public_key'] ?? row['public_key']) as String?;
+    if (keyId == null || pkB64 == null) return null;
+    final other = await _publicKeyOf(otherUserId);
+    if (other == null) return null;
+    final my = await _loadMyPair();
+    final ek = await RatchetCrypto.newKeyPair();
+    final sk = await RatchetCrypto.initiatorSecret(
+      identityMine: my,
+      identityRemote: other,
+      ephemeral: ek,
+      prekeyRemote: RatchetCrypto.publicKeyFromB64(pkB64),
+    );
+    final st = await DoubleRatchet.startInitiator(
+      sk: sk,
+      remoteRatchetPub: RatchetCrypto.publicKeyFromB64(pkB64),
+      ekB64: base64Encode((await ek.extractPublicKey()).bytes),
+      prekeyId: keyId,
+    );
+    await _saveSession(convId, st);
+    return st;
+  }
+
+  /// تبني رسالة افتتاحية من الطرف (المستجيب): فك الترويسة، تركيب X3DH من خاص
+  /// المفتاح الأولي المسحوب بنا، فك الرسالة أولًا — لا جلسة إلا بعد نجاح الفك.
+  static Future<String?> _adoptInitial(
+      String convId, String otherUserId, String wire) async {
+    final p = wire.split('.');
+    if (p.length != 4) return null;
+    final hdr = RatchetCrypto.decodeHeader(p[1]);
+    if (hdr == null || hdr['e'] is! String || hdr['k'] is! int) return null;
+    final privB64 =
+        await _storage.read(key: '$_prekeyPrivPrefix${hdr['k']}');
+    if (privB64 == null) return null;
+    final other = await _publicKeyOf(otherUserId);
+    if (other == null) return null;
+    try {
+      final my = await _loadMyPair();
+      final prekeyPair =
+          await RatchetCrypto.keyPairFromSeed(base64Decode(privB64));
+      final sk = await RatchetCrypto.responderSecret(
+        identityMine: my,
+        identityRemote: other,
+        prekeyMine: prekeyPair,
+        ephemeralRemote:
+            RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
+      );
+      final st = await DoubleRatchet.startResponder(
+          sk: sk, ratchetPair: prekeyPair);
+      final plain = await DoubleRatchet.decrypt(st, convId, wire);
+      if (plain == null) return null;
+      await _saveSession(convId, st);
+      return plain;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// تشفير نص محادثة خاصة: مسار v2 (سرية أمامية) إن أمكن، وإلا v1 الثابت.
+  /// null = لا سبيل للتشفير (مفتاح مفقود) — يعرض المرسل رسالة واضحة.
+  static Future<String?> encryptDmText(
+      String conversationId, String otherUserId, String plain) async {
+    if (!_ready) return null;
+    final v2 = await _withSession(conversationId, () async {
+      try {
+        var st = await _loadSession(conversationId);
+        st ??= await _startSession(conversationId, otherUserId);
+        if (st == null) return null;
+        return await DoubleRatchet.encrypt(st, conversationId, plain);
+      } catch (_) {
+        return null;
+      }
+    });
+    if (v2 != null) return v2;
+    // رجوع v1 الثابت (طرف قديم أو نفاد مفاتيح الطرف الأولية)
+    final key = await dmKey(conversationId, otherUserId);
+    if (key == null) return null;
+    return encryptText(key, conversationId, plain);
+  }
+
+  /// فك نص محادثة خاصة: v2 (جلسة متدرجة) أو v1 (ثابت) أو نص قديم صريح.
+  static Future<String?> decryptDmText(
+      String conversationId, String otherUserId, String content) async {
+    if (!isEncrypted(content)) return content;
+    if (content.startsWith('v2.')) {
+      if (!_ready) return null;
+      return _withSession(conversationId, () async {
+        final st = await _loadSession(conversationId);
+        if (st != null) {
+          String? plain;
+          try {
+            plain = await DoubleRatchet.decrypt(st, conversationId, content);
+          } catch (_) {}
+          // نحفظ دائماً: فشل فك بعد تدوير يحفظ الحالة المتسقة ذاتياً العلاج
+          await _saveSession(conversationId, st);
+          if (plain != null) return plain;
+        }
+        // رسالة افتتاحية: نتبناها فقط إن لم تكن جلستنا مستخدمة بعد
+        // (يمنع رسالة قديمة معاد تشغيلها من تحطيم جلسة قائمة)
+        if (DoubleRatchet.isInitialWire(content)) {
+          final cur = await _loadSession(conversationId);
+          if (cur == null || !cur.used) {
+            return _adoptInitial(conversationId, otherUserId, content);
+          }
+        }
+        return null;
+      });
+    }
+    // v1
+    final key = await dmKey(conversationId, otherUserId);
+    if (key == null) return null;
+    return decryptText(key, conversationId, content);
+  }
+
+  /// حذف جلسة محادثة (عند سحب رسالة/تغيّر مفتاح الطرف — تُعاد البداية تلقائياً)
+  static Future<void> dropDmSession(String conversationId) =>
+      _deleteSession(conversationId);
 
   // ---------- الحالات/القصص ----------
 

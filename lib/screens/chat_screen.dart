@@ -120,11 +120,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     return E2eService.groupKey(widget.conversationId);
   }
 
-  /// يفك نصاً مشفّراً واحداً (للمجموعات: يجرّب كل إصدارات المفتاح المعروفة)
+  /// يفك نصاً مشفّراً واحداً (للمحادثات الخاصة: جلسة متدرجة v2 أو ثابت v1،
+  /// وللمجموعات: يجرّب كل إصدارات المفتاح المعروفة)
   Future<String?> _decrypt(String content) async {
     if (!widget.isGroup) {
-      final key = await _convKey();
-      return key == null ? null : E2eService.decryptText(key, widget.conversationId, content);
+      final other = widget.otherId;
+      if (other == null) return null;
+      return E2eService.decryptDmText(widget.conversationId, other, content);
     }
     var plain = await E2eService.decryptGroupText(widget.conversationId, content);
     if (plain == null) {
@@ -600,16 +602,32 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         _snack('الرسالة طويلة جداً');
         return;
       }
-      final key = await _convKey();
-      if (key == null) {
-        _snack(_keyMissingMsg());
-        return;
-      }
-      try {
-        payload = await E2eService.encryptText(key, widget.conversationId, content);
-      } catch (_) {
-        _snack('تعذّر تشفير الرسالة');
-        return;
+      if (!widget.isGroup && widget.otherId != null) {
+        // المحادثات الخاصة: جلسة متدرجة v2 (سرية أمامية) أو رجوع v1
+        try {
+          final p = await E2eService.encryptDmText(
+              widget.conversationId, widget.otherId!, content);
+          if (p == null) {
+            _snack(_keyMissingMsg());
+            return;
+          }
+          payload = p;
+        } catch (_) {
+          _snack('تعذّر تشفير الرسالة');
+          return;
+        }
+      } else {
+        final key = await _convKey();
+        if (key == null) {
+          _snack(_keyMissingMsg());
+          return;
+        }
+        try {
+          payload = await E2eService.encryptText(key, widget.conversationId, content);
+        } catch (_) {
+          _snack('تعذّر تشفير الرسالة');
+          return;
+        }
       }
     }
     _text.clear();
@@ -657,6 +675,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       var upExt = ext;
       var upType = contentType;
       if (_e2e) {
+        // بايتات الوسيط تبقى على مفتاح المحادثة الثابت في هذا الإصدار،
+        // وبيانات الوصف/التسمية تمر عبر الجلسة المتدرجة في الخاص
         final key = await _convKey();
         if (key == null) {
           _snack(_keyMissingMsg());
@@ -664,7 +684,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         }
         payload = await E2eService.encryptBytes(key, widget.conversationId, bytes);
         if (content.isNotEmpty) {
-          content = await E2eService.encryptText(key, widget.conversationId, content);
+          if (!widget.isGroup && widget.otherId != null) {
+            final p = await E2eService.encryptDmText(
+                widget.conversationId, widget.otherId!, content);
+            if (p == null) {
+              _snack(_keyMissingMsg());
+              return;
+            }
+            content = p;
+          } else {
+            content = await E2eService.encryptText(key, widget.conversationId, content);
+          }
         }
         upExt = 'enc.bin';
         upType = 'application/octet-stream';

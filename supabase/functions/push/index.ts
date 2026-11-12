@@ -74,8 +74,8 @@ Deno.serve(async (req) => {
 
   const name = sender?.display_name ?? sender?.username ?? "وصل شات";
   const title = conv?.is_group ? `${name} · ${conv.title ?? "مجموعة"}` : name;
-  // الرسائل المشفرة بين الطرفين (بادئة v1.) لا يفكها السيرفر أبداً: نص إشعار عام
-  const encrypted = typeof m.content === "string" && m.content.startsWith("v1.");
+  // الرسائل المشفرة بين الطرفين (v1 ثابت أو v2 متدرج) لا يفكها السيرفر أبداً: نص إشعار عام
+  const encrypted = typeof m.content === "string" && /^v[12]\./.test(m.content);
   const body = m.type === "image"
     ? "📷 صورة"
     : m.type === "voice"

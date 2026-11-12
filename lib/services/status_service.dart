@@ -3,7 +3,6 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import 'e2e_service.dart';
