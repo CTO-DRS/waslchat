@@ -62,6 +62,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _chats = chats;
         _loading = false;
       });
+      // إجمالي غير المقروء (المؤرشفة والمكتومة لا تحسب) لشارة تبويب المحادثات
+      UnreadHub.total.value = chats
+          .where((c) => c['archived'] != true && c['muted'] != true)
+          .fold<int>(0, (s, c) => s + ((c['unread'] as num?)?.toInt() ?? 0));
       _decryptPreviews(chats);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -288,11 +292,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 90),
-        child: FloatingActionButton(
-          backgroundColor: WaslColors.indigo,
-          onPressed: _showNewSheet,
-          child: const Icon(Icons.edit_outlined, color: Colors.white),
-        ),
+        child: WaslFab(onPressed: _showNewSheet, icon: Icons.edit_outlined),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -301,12 +301,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 await Future.wait([_load(), _loadStatuses()]);
               },
               child: visible.isEmpty && archivedCount == 0
-                  ? ListView(children: [
-                      const SizedBox(height: 160),
-                      Center(
-                          child: Text('لا توجد محادثات بعد.\nاضغط ✏️ لبدء محادثة جديدة',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: context.textTertiary))),
+                  ? ListView(children: const [
+                      SizedBox(height: 60),
+                      GlassEmptyState(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        title: 'لا توجد محادثات بعد',
+                        subtitle: 'اضغط زر القلم لبدء محادثتك الأولى،\nوكل رسائلك مشفّرة طرف-لطرف',
+                      ),
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),

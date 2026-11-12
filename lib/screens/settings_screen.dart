@@ -103,6 +103,7 @@ class SettingsScreen extends StatelessWidget {
           const _FontSizeTile(),
           const _WallpaperTile(),
           const _AppLockTile(),
+          const _NotificationsTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('تسجيل الخروج'),
@@ -456,6 +457,30 @@ class _AppLockTileState extends State<_AppLockTile> {
       subtitle: const Text('بصمة الإصبع أو رمز قفل الجهاز عند الفتح والعودة'),
       value: _enabled,
       onChanged: _busy ? null : _toggle,
+    );
+  }
+}
+
+/// مفتاح الإشعارات العام: إيقافه يحذف رمز الجهاز من الخادم فوراً
+/// فلا تصل أي تنبيهات، وتشغيله يعيد التسجيل ويطلب الصلاحيات.
+class _NotificationsTile extends StatelessWidget {
+  const _NotificationsTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: PushService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: Icon(
+            on ? Icons.notifications_active_outlined : Icons.notifications_off_outlined,
+            color: WaslColors.indigo),
+        title: const Text('الإشعارات'),
+        subtitle: Text(on
+            ? 'تنبيهات الرسائل الجديدة مفعّلة على هذا الجهاز'
+            : 'التنبيهات موقوفة — لن يصلك أي إشعار حتى تفعّلها'),
+        value: on,
+        onChanged: (v) => PushService.setEnabled(v),
+      ),
     );
   }
 }

@@ -17,11 +17,19 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   List<Map<String, dynamic>> _discover = [];
   bool _loading = true;
   String _q = '';
+  // تهدئة البحث: تنفيذ الطلب بعد توقف الكتابة بدل ضرب الخادم بكل حرف
+  final _debounce = Debouncer();
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _debounce.dispose();
+    super.dispose();
   }
 
   void _snack(String m) =>
@@ -91,10 +99,15 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     _load();
   }
 
-  Widget _icon() => const CircleAvatar(
-        radius: 26,
-        backgroundColor: WaslColors.violet,
-        child: Icon(Icons.campaign, color: Colors.white),
+  Widget _icon() => Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          gradient: WaslColors.gradient,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        alignment: Alignment.center,
+        child: const Icon(Icons.campaign, color: Colors.white, size: 26),
       );
 
   @override
@@ -105,11 +118,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 90),
-        child: FloatingActionButton(
-          backgroundColor: WaslColors.violet,
-          onPressed: _create,
-          child: const Icon(Icons.add, color: Colors.white),
-        ),
+        child: WaslFab(onPressed: _create, icon: Icons.add),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -163,30 +172,49 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                     child: TextField(
                       onChanged: (v) {
                         _q = v.trim();
-                        _load();
+                        _debounce.run(_load);
                       },
                       decoration: const InputDecoration(
                           hintText: 'ابحث عن قناة', prefixIcon: Icon(Icons.search)),
                     ),
                   ),
                   if (_discover.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Center(
-                          child: Text('لا توجد قنوات جديدة. أنشئ قناتك بزر +',
-                              style: TextStyle(color: context.textTertiary))),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: GlassEmptyState(
+                        icon: Icons.campaign_outlined,
+                        title: 'لا توجد قنوات مطابقة',
+                        subtitle: 'أنشئ قناتك الأولى بزر + وابدأ النشر لكل متابعيك',
+                      ),
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _icon(),
-                        title: Text(c['title'] as String),
-                        subtitle: Text(
-                          (c['description'] as String?) ?? '${c['subscribers']} متابع',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        title: Text(c['title'] as String,
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              Icon(Icons.people_outline,
+                                  size: 14, color: context.textFaint),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  (c['description'] as String?)?.isNotEmpty == true
+                                      ? '${c['description']} · ${c['subscribers']} متابع'
+                                      : '${c['subscribers']} متابع',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: context.textTertiary, fontSize: 12.5),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        trailing: FilledButton.tonal(
+                        trailing: FilledButton.tonalIcon(
                           onPressed: () => _follow(c),
-                          child: const Text('متابعة'),
+                          icon: const Icon(Icons.person_add_alt_1, size: 16),
+                          label: const Text('متابعة'),
                         ),
                       )),
                 ],

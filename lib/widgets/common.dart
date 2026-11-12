@@ -1,6 +1,115 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+
+/// إجمالي الرسائل غير المقروءة عبر المحادثات — يشغّل شارة تبويب
+/// «المحادثات» في الشريط السفلي (تتحدث مع كل تحميل للقائمة).
+class UnreadHub {
+  static final ValueNotifier<int> total = ValueNotifier<int>(0);
+}
+
+/// مؤقّت تهدئة لحقول البحث: لا نضرب الخادم بكل حرف،
+/// بل ننفّذ البحث بعد توقّف الكتابة عن الحركة.
+class Debouncer {
+  Debouncer([this.delay = const Duration(milliseconds: 400)]);
+  final Duration delay;
+  Timer? _timer;
+
+  void run(VoidCallback action) {
+    _timer?.cancel();
+    _timer = Timer(delay, action);
+  }
+
+  void dispose() => _timer?.cancel();
+}
+
+/// الزر العائم الموحّد للتطبيق: تدرج العلامة (نيلة -> تركواز) بزوايا ناعمة
+/// وظل هادئ — يستخدم في المحادثات والقنوات والمجتمعات بدل الألوان المتضاربة.
+class WaslFab extends StatelessWidget {
+  const WaslFab({super.key, required this.onPressed, required this.icon});
+  final VoidCallback onPressed;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 58,
+      height: 58,
+      decoration: BoxDecoration(
+        gradient: WaslColors.gradient,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: WaslColors.indigo.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          onTap: onPressed,
+          child: Icon(icon, color: Colors.white, size: 26),
+        ),
+      ),
+    );
+  }
+}
+
+/// حالة فراغ موحّدة: أيقونة داخل حلقة زجاجية + عنوان + شرح —
+/// تستخدم في المحادثات والقنوات والمجتمعات بدل النصوص العارية.
+class GlassEmptyState extends StatelessWidget {
+  const GlassEmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+  });
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                color: context.glass,
+                shape: BoxShape.circle,
+                border: Border.all(color: context.hairline),
+              ),
+              child: Icon(icon, size: 40, color: context.iconStd),
+            ),
+            const SizedBox(height: 18),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800)),
+            if (subtitle != null) ...[
+              const SizedBox(height: 8),
+              Text(subtitle!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      height: 1.7,
+                      color: context.textTertiary,
+                      fontSize: 13.5)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 String previewText(Map<String, dynamic> row, {String empty = 'لا توجد رسائل بعد'}) {
   switch (row['last_type']) {
