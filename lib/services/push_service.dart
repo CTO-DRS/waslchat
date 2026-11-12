@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../app_keys.dart';
@@ -29,9 +30,6 @@ class PushService {
   /// مفتاح الإشعارات العام (الإعدادات <- الإشعارات)، الافتراضي: مفعّل
   static final ValueNotifier<bool> enabled = ValueNotifier<bool>(true);
 
-  /// معرف قناة الإشعارات على أندرويد — يرسله الخادم في رسالة FCM
-  static const _channelId = 'messages';
-
   static Future<void> _loadPref() async {
     if (_prefLoaded) return;
     _prefLoaded = true;
@@ -55,19 +53,16 @@ class PushService {
     }
   }
 
-  /// قنوات الإشعارات على أندرويد: تظهر بإعداداتها في إعدادات النظام
-  /// حتى لو لم يُصدر الخادم channel_id بعد (القناة الافتراضية للرسائل).
+  /// قنوات الإشعارات على أندرويد: تنشأ أصلياً عبر MethodChannel (wasl/notify)
+  /// لأن firebase_messaging 15.2+ أزال واجهة إنشاء القنوات — القناة تظهر
+  /// بإعداداتها في إعدادات النظام، والخادم يوجه إليها بـ channel_id.
+  static const _notify = MethodChannel('wasl/notify');
+
   static Future<void> _setupChannels() async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     try {
-      final fm = FirebaseMessaging.instance;
-      await fm.createNotificationChannel(const AndroidNotificationChannel(
-        _channelId,
-        'الرسائل',
-        description: 'تنبيهات الرسائل الجديدة في محادثاتك',
-        importance: Importance.high,
-      ));
-      await fm.setForegroundNotificationPresentationOptions(
+      await _notify.invokeMethod('createMessageChannel');
+      await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
           alert: true, badge: true, sound: true);
     } catch (e) {
       debugPrint('Push channels failed: $e');
