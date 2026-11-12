@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- الأيقونة المتكيفة: خلفية دوائر كهربائية داكنة + مقدمة الفقاعة الزرقاء والقوس الفضي
+     داخل منطقة الأمان، تتبع شكل مشغّل النظام (دائرة/مربّع/سكويركل)،
+     وطبقة أحادية لأندرويد 13+ (Themed Icons) تتلوّن مع خلفية الجهاز -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
+</adaptive-icon>
