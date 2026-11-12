@@ -55,7 +55,7 @@ class StatusStrip extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: (isMe || !seen) ? WaslColors.gradient : null,
-                        color: seen && !isMe ? Colors.white24 : null,
+                        color: seen && !isMe ? context.hairline : null,
                       ),
                       child: Container(
                         padding: const EdgeInsets.all(2),
@@ -99,12 +99,12 @@ class StatusStrip extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: isMe || !seen ? FontWeight.w700 : FontWeight.w400,
-                        color: isMe || !seen ? null : Colors.white54,
+                        color: isMe || !seen ? null : context.textFaint,
                       ),
                     ),
                     if (!isMe && count > 1)
                       Text('$count حالات',
-                          style: const TextStyle(fontSize: 9, color: Colors.white38)),
+                          style: TextStyle(fontSize: 9, color: context.textFaint)),
                   ],
                 ),
               ),
@@ -121,7 +121,7 @@ Future<void> showStatusComposer(BuildContext context) async {
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    backgroundColor: WaslColors.darkSurface,
+    backgroundColor: context.surfaceAlt,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (ctx) => const _StatusComposer(),
@@ -202,7 +202,7 @@ class _StatusComposerState extends State<_StatusComposer> {
               if (_image != null)
                 IconButton(
                   tooltip: 'إزالة الصورة',
-                  icon: const Icon(Icons.close, color: Colors.white54),
+                  icon: Icon(Icons.close, color: context.textFaint),
                   onPressed: _busy ? null : () => setState(() => _image = null),
                 ),
             ]),
@@ -244,9 +244,9 @@ class _StatusComposerState extends State<_StatusComposer> {
               label: const Text('نشر الحالة'),
             ),
             const SizedBox(height: 6),
-            const Text('مشفّرة بين الطرفين — تظهر لشركاء محادثاتك الفردية 24 ساعة',
+            Text('مشفّرة بين الطرفين — تظهر لشركاء محادثاتك الفردية 24 ساعة',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: Colors.white38)),
+                style: TextStyle(fontSize: 11, color: context.textFaint)),
           ],
         ),
       ),
@@ -344,7 +344,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: WaslColors.darkSurface,
+        backgroundColor: context.surfaceAlt,
         title: const Text('حذف الحالة؟'),
         content: const Text('ستُحذف من جميع من يشاهدها.'),
         actions: [
@@ -410,7 +410,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
     final sid = _status['status_id'] as String;
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => FutureBuilder<List<Map<String, dynamic>>>(
@@ -430,10 +430,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
               ),
               if (rows.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Text('لا مشاهدات بعد',
-                      style: TextStyle(color: Colors.white54)),
+                      style: TextStyle(color: context.textFaint)),
                 )
               else
                 Flexible(
@@ -452,7 +452,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                             color: WaslColors.indigo),
                         title: Text(name),
                         trailing: Text(StatusService.ageText(rows[i]['viewed_at'] as String),
-                            style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                            style: TextStyle(color: context.textFaint, fontSize: 12)),
                       );
                     },
                   ),

@@ -88,9 +88,9 @@ class _HomeScreenState extends State<HomeScreen> {
               filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
               child: Container(
                 decoration: BoxDecoration(
-                  color: WaslColors.glass,
+                  color: context.glass,
                   borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: const Color(0x22FFFFFF)),
+                  border: Border.all(color: context.hairline),
                 ),
                 child: NavigationBar(
                   height: 68,
@@ -146,7 +146,7 @@ class _ComingSoon extends StatelessWidget {
           children: [
             Icon(icon, size: 64, color: WaslColors.teal),
             const SizedBox(height: 12),
-            const Text('قريباً في المرحلة القادمة', style: TextStyle(color: Colors.white60)),
+            Text('قريباً في المرحلة القادمة', style: TextStyle(color: context.textTertiary)),
           ],
         ),
       ),
