@@ -6,6 +6,7 @@ import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 import 'channels_screen.dart';
 import 'chats_screen.dart';
 import 'communities_screen.dart';
@@ -70,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ChatsScreen(),
     CommunitiesScreen(),
     ChannelsScreen(),
-    _ComingSoon(title: 'المكالمات', icon: Icons.call_outlined),
+    _CallsScreen(),
     SettingsScreen(),
   ];
 
@@ -100,8 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   onDestinationSelected: (i) => setState(() => _index = i),
                   destinations: const [
                     NavigationDestination(
-                        icon: Icon(Icons.chat_bubble_outline),
-                        selectedIcon: Icon(Icons.chat_bubble),
+                        icon: _NavBadge(icon: Icons.chat_bubble_outline),
+                        selectedIcon: _NavBadge(icon: Icons.chat_bubble, selected: true),
                         label: 'المحادثات'),
                     NavigationDestination(
                         icon: Icon(Icons.groups_2_outlined),
@@ -130,25 +131,190 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _ComingSoon extends StatelessWidget {
-  const _ComingSoon({required this.title, required this.icon});
-  final String title;
+/// شارة عدد غير المقروء فوق أيقونة تبويب «المحادثات» في الشريط السفلي
+/// — تقرأ من UnreadHub وتختفي تلقائياً عند تصفير كل المحادثات.
+class _NavBadge extends StatelessWidget {
+  const _NavBadge({required this.icon, this.selected = false});
   final IconData icon;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Icon(icon, size: 24);
+    return ValueListenableBuilder<int>(
+      valueListenable: UnreadHub.total,
+      builder: (context, total, _) {
+        if (total <= 0) return base;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            base,
+            PositionedDirectional(
+              top: -5,
+              end: -9,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: WaslColors.teal,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: Theme.of(context).scaffoldBackgroundColor, width: 1.5),
+                ),
+                child: Text(total > 99 ? '99+' : '$total',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// شاشة المكالمات: الميزة قادمة في المرحلة القادمة — عرض ترويجي
+/// يشرح ما ينتظر المستخدم (اتصال صوتي، مكالمة مرئية، تشفير طرف-لطرف)
+/// بدل شاشة فراغ جامدة.
+class _CallsScreen extends StatelessWidget {
+  const _CallsScreen();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(title, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800))),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 64, color: WaslColors.teal),
-            const SizedBox(height: 12),
-            Text('قريباً في المرحلة القادمة', style: TextStyle(color: context.textTertiary)),
-          ],
-        ),
+          title: const Text('المكالمات',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800))),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(24, 10, 24, 150),
+        children: [
+          const SizedBox(height: 14),
+          Center(
+            child: Container(
+              width: 128,
+              height: 128,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: WaslColors.gradient,
+                boxShadow: [
+                  BoxShadow(
+                    color: WaslColors.indigo.withValues(alpha: 0.35),
+                    blurRadius: 42,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.call_outlined, size: 54, color: Colors.white),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Center(
+            child: Text('المكالمات الصوتية والمرئية',
+                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              'بشفرتك نفسها: مكالمات مشفّرة طرف-لطرف\nداخل وصل شات، بلا وسيط يسمعكم',
+              textAlign: TextAlign.center,
+              style: TextStyle(height: 1.7, color: context.textTertiary, fontSize: 13.5),
+            ),
+          ),
+          const SizedBox(height: 28),
+          _CallFeature(
+            icon: Icons.mic_none_rounded,
+            color: WaslColors.indigo,
+            title: 'اتصال صوتي نقي',
+            desc: 'أحاديث صوتية واضحة تتكيف مع سرعة شبكتك تلقائياً',
+          ),
+          _CallFeature(
+            icon: Icons.videocam_outlined,
+            color: WaslColors.teal,
+            title: 'مكالمة مرئية',
+            desc: 'شاهد من تحادثك وجهاً لوجه بجودة تناسب اتصالك',
+          ),
+          _CallFeature(
+            icon: Icons.lock_outline_rounded,
+            color: WaslColors.violet,
+            title: 'تشفير طرف-لطرف',
+            desc: 'مفاتيح المكالمة على جهازيكما وحدكما، لا حتى الخادم',
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: context.glass,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: context.hairline),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.notifications_active_outlined,
+                      size: 16, color: WaslColors.teal),
+                  const SizedBox(width: 8),
+                  Text('سنوافيك فور جاهزيتها في تحديث قادم',
+                      style: TextStyle(color: context.textSecondary, fontSize: 12.5)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// بطاقة ميزة قادمة في شاشة المكالمات: أيقونة ملونة + عنوان + سطر شرح
+class _CallFeature extends StatelessWidget {
+  const _CallFeature({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.desc,
+  });
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String desc;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.glass,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: context.hairline),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+                const SizedBox(height: 3),
+                Text(desc,
+                    style: TextStyle(height: 1.5, color: context.textTertiary, fontSize: 12.5)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

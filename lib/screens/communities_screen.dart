@@ -17,11 +17,19 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   List<Map<String, dynamic>> _discover = [];
   bool _loading = true;
   String _q = '';
+  // تهدئة البحث: تنفيذ الطلب بعد توقف الكتابة بدل ضرب الخادم بكل حرف
+  final _debounce = Debouncer();
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _debounce.dispose();
+    super.dispose();
   }
 
   void _snack(String m) =>
@@ -104,11 +112,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
       ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 90),
-        child: FloatingActionButton(
-          backgroundColor: WaslColors.teal,
-          onPressed: _create,
-          child: const Icon(Icons.add, color: Colors.white),
-        ),
+        child: WaslFab(onPressed: _create, icon: Icons.add),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -140,23 +144,42 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                     ),
                   ),
                   if (_discover.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Center(
-                          child: Text('لا توجد مجتمعات جديدة. أنشئ أول مجتمع بزر +',
-                              style: TextStyle(color: context.textTertiary))),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: GlassEmptyState(
+                        icon: Icons.diversity_3_outlined,
+                        title: 'لا توجد مجتمعات مطابقة',
+                        subtitle: 'أنشئ أول مجتمع بزر + واجمع أعضاءك في مكان واحد',
+                      ),
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _avatar(c['name'] as String),
-                        title: Text(c['name'] as String),
-                        subtitle: Text(
-                          (c['description'] as String?) ?? '${c['members']} عضو',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        title: Text(c['name'] as String,
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              Icon(Icons.people_outline,
+                                  size: 14, color: context.textFaint),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  (c['description'] as String?)?.isNotEmpty == true
+                                      ? '${c['description']} · ${c['members']} عضو'
+                                      : '${c['members']} عضو',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: context.textTertiary, fontSize: 12.5),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        trailing: FilledButton.tonal(
+                        trailing: FilledButton.tonalIcon(
                           onPressed: () => _join(c),
-                          child: const Text('انضمام'),
+                          icon: const Icon(Icons.group_add_outlined, size: 16),
+                          label: const Text('انضمام'),
                         ),
                       )),
                 ],

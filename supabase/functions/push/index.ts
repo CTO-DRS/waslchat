@@ -100,8 +100,17 @@ Deno.serve(async (req) => {
             token,
             notification: { title, body },
             data: { conversation_id: m.conversation_id },
-            android: { priority: "high" },
-            apns: { payload: { aps: { sound: "default" } } },
+            android: {
+              priority: "high",
+              // تجميع إشعارات المحادثة الواحدة بدل تراكمها،
+              // والتوجيه إلى قناة «الرسائل» التي يجهزها التطبيق بأهمية عالية
+              collapse_key: m.conversation_id,
+              notification: { channel_id: "messages", tag: m.conversation_id },
+            },
+            apns: {
+              headers: { "apns-collapse-id": m.conversation_id },
+              payload: { aps: { sound: "default", "thread-id": String(m.conversation_id) } },
+            },
           },
         }),
       },

@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'app_keys.dart';
 import 'services/app_lock_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
@@ -46,8 +47,6 @@ void _initCrashlytics() {
     // Firebase غير مهيّأ — تقارير الأعطال اختيارية ولا يمنع تشغيل التطبيق
   }
 }
-
-final navigatorKey = GlobalKey<NavigatorState>();
 
 class WaslApp extends StatelessWidget {
   const WaslApp({super.key});
