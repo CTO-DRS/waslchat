@@ -95,6 +95,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
   bool _uploading = false;
+
+  /// مفتاح «عرض مرة واحدة» في ورقة المرفقات — يسري على الصورة/الفيديو التالي
+  bool _viewOnce = false;
   DateTime? _recStart;
   Timer? _ticker;
 
@@ -614,6 +617,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     required String contentType,
     int? durationMs,
     Map<String, dynamic>? meta,
+    bool viewOnce = false,
   }) async {
     setState(() => _uploading = true);
     try {
@@ -648,9 +652,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         'content': content,
         'media_url': path,
         'duration_ms': durationMs,
+        if (viewOnce) 'view_once': true,
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
-      if (mounted) setState(() => _replyTo = null);
+      if (mounted) setState(() {
+        _replyTo = null;
+        _viewOnce = false;
+      });
     } catch (e) {
       _snack(BlockService.isBlockedError(e)
           ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
@@ -672,6 +680,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       bytes: bytes,
       ext: ext,
       contentType: 'image/$ext',
+      viewOnce: _viewOnce,
     );
   }
 
@@ -694,6 +703,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       ext: ext,
       contentType: ext == 'mov' ? 'video/quicktime' : 'video/mp4',
       meta: {'name': x.name, 'size': size},
+      viewOnce: _viewOnce,
     );
   }
 
@@ -783,9 +793,19 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
         child: Wrap(children: [
+          SwitchListTile(
+            secondary: const Icon(Icons.looks_one_rounded, color: Colors.redAccent),
+            title: const Text('عرض مرة واحدة',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text(
+                'الصورة أو الفيديو التاليان تُحذف من الخادم بعد مشاهدتها'),
+            value: _viewOnce,
+            onChanged: (v) => setState(() => _viewOnce = v),
+          ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
-            title: const Text('صورة من المعرض'),
+            title: Text(
+                _viewOnce ? 'صورة (عرض مرة واحدة)' : 'صورة من المعرض'),
             onTap: () {
               Navigator.pop(ctx);
               _pickImage(ImageSource.gallery);
@@ -892,6 +912,69 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
+  // ---------- عرض مرة واحدة ----------
+
+  Widget _viewOnceBody(Map<String, dynamic> m) {
+    final mine = m['sender_id'] == _me;
+    final viewed = m['viewed_at'] != null;
+    // المرسل يفتح نسخته حتى أول مشاهدة؛ المستلم مرة واحدة فقط
+    final canOpen = !viewed;
+    return ViewOnceCard(
+      mine: mine,
+      viewed: viewed,
+      mediaType: m['type'] as String? ?? 'image',
+      onTap: canOpen ? () => _openViewOnce(m) : null,
+    );
+  }
+
+  /// فتح وسيط «عرض مرة واحدة»: تنزيل وفك أولاً، ثم تسجيل المشاهدة (RPC)،
+  /// ثم عرض بمنع لقطات الشاشة — والوسيط يحذفه الخادم عند اكتمال المشاهدات.
+  Future<void> _openViewOnce(Map<String, dynamic> m) async {
+    setState(() => _uploading = true);
+    final wasSecure = await ScreenshotService.flagOf(widget.conversationId);
+    var secured = false;
+    try {
+      final bytes = await _mediaBytes(m['media_url'] as String);
+      if (bytes == null) {
+        _snack('انتهى هذا الوسيط أو تعذّر فك تشفيره');
+        return;
+      }
+      // سجّل المشاهدة قبل العرض (قد يحذف الخادم الملف فوراً) — بصمت عند فشل مؤقت
+      if (m['sender_id'] != _me) {
+        try {
+          await supabase.rpc('open_view_once', params: {'p_id': m['id']});
+        } catch (_) {}
+      }
+      if (!kIsWeb && !wasSecure) {
+        await ScreenshotService.setSecure(true);
+        secured = true;
+      }
+      if (!mounted) return;
+      if (m['type'] == 'video') {
+        if (kIsWeb) {
+          final url = webBlobUrl(bytes, 'video/mp4');
+          await Navigator.push(context,
+              MaterialPageRoute(builder: (_) => VideoScreen(url: url)));
+        } else {
+          final dir = await getTemporaryDirectory();
+          final f = File(
+              '${dir.path}/view_once_${DateTime.now().millisecondsSinceEpoch}.mp4');
+          await f.writeAsBytes(bytes, flush: true);
+          await Navigator.push(context,
+              MaterialPageRoute(builder: (_) => VideoScreen(file: f)));
+        }
+      } else {
+        await Navigator.push(context,
+            MaterialPageRoute(builder: (_) => ViewOnceImageScreen(bytes: bytes)));
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الوسيط');
+    } finally {
+      if (secured) await ScreenshotService.setSecure(wasSecure);
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   Widget _body(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) {
       final mine = m['sender_id'] == _me;
@@ -902,6 +985,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         Text('حُذفت هذه الرسالة',
             style: TextStyle(color: c, fontStyle: FontStyle.italic)),
       ]);
+    }
+    if (m['view_once'] == true &&
+        (m['type'] == 'image' || m['type'] == 'video')) {
+      return _viewOnceBody(m);
     }
     switch (m['type'] as String? ?? 'text') {
       case 'image':
@@ -1068,13 +1155,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   String _previewOf(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) return 'حُذفت هذه الرسالة';
+    final once = m['view_once'] == true ? ' (عرض مرة واحدة)' : '';
     switch (m['type'] as String? ?? 'text') {
       case 'image':
-        return '📷 صورة';
+        return '📷 صورة$once';
       case 'voice':
         return '🎤 رسالة صوتية';
       case 'video':
-        return '🎬 فيديو';
+        return '🎬 فيديو$once';
       case 'file':
         return '📎 ${(_metaOf(m)?['name'] as String?) ?? 'ملف'}';
       default:
@@ -1286,7 +1374,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 _toggleStar(m);
               },
             ),
-          if (_e2e && !widget.isChannel)
+          if (_e2e && !widget.isChannel && m['view_once'] != true)
             ListTile(
               leading: const Icon(Icons.shortcut_rounded),
               title: const Text('إعادة توجيه'),

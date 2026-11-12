@@ -7,9 +7,126 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/webio/web_files.dart';
+import '../theme.dart';
 
 /// تُحمّل بايتات الوسيط (بعد فك التشفير إن كان مشفّراً)
 typedef MediaLoader = Future<Uint8List?> Function();
+
+/// بطاقة وسيط «تُعرض مرة واحدة»: قبل الفتح (اضغط للعرض) وبعده (انتهى)،
+/// وللمرسل (لم يُعرض بعد / تم العرض).
+class ViewOnceCard extends StatelessWidget {
+  const ViewOnceCard({
+    super.key,
+    required this.mine,
+    required this.viewed,
+    this.mediaType = 'image',
+    this.onTap,
+  });
+
+  final bool mine;
+  final bool viewed;
+
+  /// 'image' أو 'video'
+  final String mediaType;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = !viewed && onTap != null;
+    return GestureDetector(
+      onTap: active ? onTap : null,
+      child: Container(
+        width: 220,
+        height: 150,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: viewed
+                ? [context.hairline, context.hairline.withValues(alpha: 0.4)]
+                : const [Color(0xFF2A2D3A), Color(0xFF15161F)],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: viewed ? context.hairline : Colors.white24,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: viewed
+                    ? Colors.transparent
+                    : Colors.white.withValues(alpha: 0.10),
+                border: viewed ? Border.all(color: context.textFaint) : null,
+              ),
+              child: Icon(
+                viewed
+                    ? Icons.visibility_off_rounded
+                    : (mediaType == 'video'
+                        ? Icons.play_circle_fill_rounded
+                        : Icons.photo_rounded),
+                size: 22,
+                color: viewed ? context.textFaint : Colors.white,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              viewed
+                  ? (mine ? 'انتهى — يُعرض مرة واحدة' : 'انتهى هذا الوسيط')
+                  : (mine ? 'وسيط للعرض مرة واحدة' : 'اضغط للعرض مرة واحدة'),
+              style: TextStyle(
+                color: viewed ? context.textSecondary : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (!viewed) ...[
+              const SizedBox(height: 4),
+              Text(
+                mine ? (active ? 'اضغط لعرض نسختك' : 'لم يُعرض بعد') : 'لا يُحفظ ولا يُلتقط',
+                style: const TextStyle(color: Colors.white60, fontSize: 11),
+              ),
+            ] else if (mine) ...[
+              const SizedBox(height: 4),
+              Text('تم العرض', style: TextStyle(color: context.textFaint, fontSize: 11)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// عارض الصورة «مرة واحدة»: بلا حفظ أو مشاركة، وخلفية سوداء.
+/// منع لقطات الشاشة يُطبَّق من الشاشة المستدعية (FLAG_SECURE) قبل فتحه.
+class ViewOnceImageScreen extends StatelessWidget {
+  const ViewOnceImageScreen({super.key, required this.bytes});
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white54,
+        title: Row(mainAxisSize: MainAxisSize.min, children: const [
+          Icon(Icons.looks_one_rounded, size: 18),
+          SizedBox(width: 6),
+          Text('عرض مرة واحدة', style: TextStyle(fontSize: 14)),
+        ]),
+      ),
+      body: Center(
+          child: InteractiveViewer(
+              maxScale: 4, child: Image.memory(bytes, fit: BoxFit.contain))),
+    );
+  }
+}
 
 /// فقاعة صورة: تُحمّل مرة واحدة، والضغط يفتحها بملء الشاشة
 class ImageBubble extends StatefulWidget {
