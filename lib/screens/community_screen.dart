@@ -4,6 +4,7 @@ import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
+import 'community_moderation_screen.dart';
 
 /// غرف المجتمع: «الإعلانات» (للمشرفين) + غرف النقاش
 class CommunityScreen extends StatefulWidget {
@@ -87,6 +88,22 @@ class _CommunityScreenState extends State<CommunityScreen> {
       appBar: AppBar(
         title: Text(widget.name, style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
+          if (_isAdmin)
+            IconButton(
+                tooltip: 'أدوات الإشراف',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => CommunityModerationScreen(
+                        communityId: widget.communityId,
+                        communityName: widget.name,
+                        myRole: widget.role,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.admin_panel_settings_outlined)),
           if (_isAdmin)
             IconButton(
                 tooltip: 'غرفة جديدة', onPressed: _addRoom, icon: const Icon(Icons.add_comment_outlined)),

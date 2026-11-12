@@ -21,6 +21,7 @@ import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
 import '../services/webio/web_files.dart';
 import '../services/media_service.dart';
+import '../services/moderation_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -102,6 +103,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   // منع لقطات الشاشة لهذه المحادثة (أندرويد: FLAG_SECURE)
   bool _noScreenshots = false;
+
+  // الكتم في غرف المجتمعات (ترحيل 023): نهاية الكتم إن كنت مكتوماً هنا
+  DateTime? _mutedUntil;
+  bool get _isMuted => _mutedUntil != null && _mutedUntil!.isAfter(DateTime.now());
 
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
@@ -227,6 +232,19 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     return '${(b / (1024 * 1024)).toStringAsFixed(1)} م.ب';
   }
 
+  /// هل أنا مكتوم في مجتمع هذه الغرفة؟ (للافتة داخل المحادثة)
+  Future<void> _loadMuteState() async {
+    try {
+      final v = await supabase.rpc('my_mute_in_conversation',
+          params: {'conv': widget.conversationId});
+      if (!mounted || v == null) return;
+      final until = DateTime.tryParse(v as String);
+      if (until != null && until.isAfter(DateTime.now())) {
+        setState(() => _mutedUntil = until.toLocal());
+      }
+    } catch (_) {}
+  }
+
   // يكتب الآن + علامات القراءة
   late final RealtimeChannel _room;
   StreamSubscription<List<Map<String, dynamic>>>? _partsSub;
@@ -249,6 +267,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     _loadMeta();
     _refreshBlockState();
     unawaited(_refreshVerified());
+    unawaited(_loadMuteState());
     ScreenshotService.flagOf(widget.conversationId).then((v) {
       if (!mounted || !v) return;
       setState(() => _noScreenshots = true);
@@ -458,6 +477,31 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     );
   }
 
+  /// لافتة الكتم في غرف المجتمعات: تُحل محل شريط الإدخال كلياً
+  Widget _mutedBanner() {
+    final until = ModerationService.formatUntil(_mutedUntil!, DateTime.now());
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.orangeAccent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(children: [
+          const Icon(Icons.mic_off_outlined, size: 18, color: Colors.orangeAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('أنت مكتوم في هذا المجتمع حتى $until',
+                style: const TextStyle(color: Colors.orangeAccent, fontSize: 13)),
+          ),
+        ]),
+      ),
+    );
+  }
+
   String? _statusLine() {
     if (_typing.isNotEmpty) {
       if (!widget.isGroup) return 'يكتب الآن...';
@@ -639,6 +683,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   Future<void> _sendText() async {
     final content = _text.text.trim();
     if (content.isEmpty) return;
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
     final editing = _editing;
     final replyTo = _replyTo;
     var payload = content;
@@ -692,8 +740,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       try {
         await supabase
             .rpc('edit_message', params: {'p_id': editing['id'], 'p_content': payload});
-      } catch (_) {
-        _snack('تعذّر تعديل الرسالة (التعديل متاح خلال 48 ساعة)');
+      } catch (e) {
+        _snack(ModerationService.sendErrorHint(e) ??
+            'تعذّر تعديل الرسالة (التعديل متاح خلال 48 ساعة)');
       }
       return;
     }
@@ -706,9 +755,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
     } catch (e) {
-      _snack(BlockService.isBlockedError(e)
-          ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
-          : 'تعذّر إرسال الرسالة');
+      _snack(ModerationService.sendErrorHint(e) ??
+          (BlockService.isBlockedError(e)
+              ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
+              : 'تعذّر إرسال الرسالة'));
     }
   }
 
@@ -774,9 +824,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         _viewOnce = false;
       });
     } catch (e) {
-      _snack(BlockService.isBlockedError(e)
-          ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
-          : 'تعذّر رفع الملف');
+      _snack(ModerationService.sendErrorHint(e) ??
+          (BlockService.isBlockedError(e)
+              ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
+              : 'تعذّر رفع الملف'));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -1955,6 +2006,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           if (widget.canPost && _composeBanner() != null) _composeBanner()!,
           if (_iBlockedPeer)
             _blockedBanner()
+          else if (_isMuted)
+            _mutedBanner()
           else if (!widget.canPost)
             SafeArea(
               top: false,
