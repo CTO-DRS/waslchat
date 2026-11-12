@@ -96,6 +96,15 @@
 2. انسخ محتوى `supabase/functions/push/index.ts` من هذا المستودع (الإصدار 0.10.0) والصقه ثم **Deploy**.
 3. تحقق: أرسل رسالة نصية بين حسابين محدّثين — نص الإشعار «🔒 رسالة مشفرة» لا أي نص مشفر خام، وإشعار مجموعة محدّثة يقول «… · مجموعة» لا نصاً مشفراً في العنوان.
 
+## 3.3) نشر دالة `event-reminders` بعد تحديث 0.12.0 (دقيقتان، مرة واحدة)
+
+تحديث 0.12.0 أضاف أحداث المجتمع وتذكيراتها. الترحيل `024_community_events.sql` ينشئ بنفسه وظيفتي cron: `wasl-event-reminders` (كل 10 دقائق — تستدعي الدالة بالسر نفسه المستخرج من `notify_push` كما في 013) و`wasl-events-expiry` (حذف الأحداث المنتهية قبل 30 يوماً يومياً 04:33). يبقى نشر الدالة نفسها حتى تعمل التذكيرات — قبل النشر يعمل كل شيء آخر (الأحداث وردود الحضور) ولا تصل إشعارات التذكير:
+
+1. افتح https://supabase.com/dashboard → مشروع `wasl-chat` → **Edge Functions** → **Create a new function** أو Deploy من المحرر باسم `event-reminders`.
+2. انسخ محتوى `supabase/functions/event-reminders/index.ts` من هذا المستودع (الإصدار 0.12.0) والصقه ثم **Deploy**،
+   أو من جهاز به Supabase CLI: `supabase functions deploy event-reminders --no-verify-jwt`.
+3. تحقق: أنشئ حدثاً تجريبياً يبدأ بعد ~20 دقيقة بتذكير «قبل 15 دقيقة» ثم راقب: `select id, title, starts_at, remind_minutes, reminded_at from community_events order by created_at desc limit 3;` — عمود `reminded_at` يمتلئ بعد دورة cron (حتى 10 دقائق) ويصل الإشعار «📅 عنوان الحدث» لكل أعضاء المجتمع. وإن لم يصل: Edge Functions → event-reminders → Logs.
+
 ## 4) إضافة بصمات مفتاح التوقيع إلى Firebase (مهمة 3ج)
 
 البصمات في `secrets/KEYSTORE_INFO.txt` **تم التحقق منها فعلياً من ملف `wasl-release.jks` نفسه عبر keytool — متطابقة** (المفتاح باسم `wasl`، صالح حتى 2054).
@@ -140,7 +149,7 @@
 
 ---
 
-## 6) ترحيلات قاعدة البيانات من 0.6.0 حتى 0.11.0 (مطلوبة قبل تثبيت آخر APK)
+## 6) ترحيلات قاعدة البيانات من 0.6.0 حتى 0.12.0 (مطلوبة قبل تثبيت آخر APK)
 
 شغّل بالترتيب في Supabase > SQL Editor (كل ملف وحده ثم Run):
 
@@ -162,8 +171,10 @@
    تحقق بعدها: `select column_name from information_schema.columns where table_name='conversations' and column_name='avatar_url';` يعيد صفاً، و`select char_length('x')::text; select proname from pg_proc where proname='group_set_avatar';` يعيد صفاً، وبعد تفعيل تفاعل من التطبيق: `select emoji from message_reactions order by created_at desc limit 1;` يبدأ بـ`v1.`، وبعد تغيير اسم مجموعة: `select title from conversations where is_group and title is not null limit 3;` الأحدث يبدأ بـ`v1.`.
 9. `supabase/023_community_moderation.sql` — أدوات الإشراف في المجتمعات (0.11.0): جداول `community_mutes` و`community_bans` و`community_word_filters` و`community_mod_log` بـRLS (القراءة فقط — الكتابة عبر الدوال حصراً) + دالة `is_community_admin` + دالة `wasl_norm_ar` لتطبيع العربية (بلا تشكيل وهمزات موحدة) + مُحفّز `trg_community_rules` على الرسائل (يرفض رسالة مكتوم أو كلمة محجوبة ويمنع تعديل مكتوم) + تحديث `can_post` (المكتوم لا ينشر) و`join_community` (المطرود المحظور لا يعود) و`edit_message` (الكتم والفلتر على التعديل) + دوال: `community_mute/unmute/kick/unban/add_filter/remove_filter` بتراتب (المالك فوق المشرف فوق العضو) + قوائم `community_members_list/mutes_list/bans_list/mod_log_list` + `my_mute_in_conversation` للافتة الكتم.
    تحقق بعدها: `select proname from pg_proc where proname in ('community_mute','community_kick','community_add_filter','community_members_list','my_mute_in_conversation');` يعيد 5 صفوف، و`select tgname from pg_trigger where tgname='trg_community_rules';` يعيد صفاً، و`select indexname from pg_indexes where tablename='community_word_filters';` يعرض `community_word_filters_word`، و`select public.wasl_norm_ar('أَحْمَد');` يعيد `احمد`.
+10. `supabase/024_community_events.sql` — أحداث المجتمع وتذكيراتها (0.12.0): جدولا `community_events` و`community_event_rsvps` بـRLS (قراءة لأعضاء المجتمع فقط — الكتابة عبر الدوال حصراً) + دوال: `community_event_create/update/delete` (للمشرفين أو منشئ الحدث — التعديل قبل البدء فقط ويعيد تسليح التذكير) و`community_event_respond` (سأحضر/ربما/لن أحضر/إلغاء لأي عضو على حدث لم ينتهِ) وقائمتا `community_events_list` (بالعدّادات وردّي وشارة انتهاء) و`community_event_rsvps_list` (بالأسماء) + وظيفتا cron: `wasl-event-reminders` كل 10 دقائق (تستدعي دالة event-reminders بالسر نفسه المستخرج من notify_push) و`wasl-events-expiry` يومياً 04:33 (حذف المنتهي قبل 30 يوماً).
+   تحقق بعدها: `select proname from pg_proc where proname in ('community_event_create','community_event_update','community_event_delete','community_event_respond','community_events_list','community_event_rsvps_list');` يعيد 6 صفوف، و`select jobname, schedule from cron.job where jobname in ('wasl-event-reminders','wasl-events-expiry');` يعيد سطرين، و`select tablename, rowsecurity from pg_tables where tablename in ('community_events','community_event_rsvps');` يعيد صفاً بقيمة `t`، وبعد إنشاء حدث من التطبيق: `select * from community_events_list('<cid>');` يعيد صفه بلا خطأ.
 
-> مهم: حتى لا يُشغَّل 015/016/017/018/019/020/021/022/023، تعمل بقية الميزات (القفل، المظهر، الروابط) لكن الحظر والتحديث والدعوات والحالات والعرض-مرة-واحدة والسرية الأمامية وتعدد الأجهزة وتشفير الاسم/التفاعلات/صورة المجموعة وأدوات الإشراف لن تعمل
+> مهم: حتى لا يُشغَّل 015/016/017/018/019/020/021/022/023/024، تعمل بقية الميزات (القفل، المظهر، الروابط) لكن الحظر والتحديث والدعوات والحالات والعرض-مرة-واحدة والسرية الأمامية وتعدد الأجهزة وتشفير الاسم/التفاعلات/صورة المجموعة وأدوات الإشراف والأحداث لن تعمل
 > (التطبيق يتعامل بهدوء مع غيابها: المحادثات الخاصة تبقى على تشفير v1 الثابت حتى تطبيق 020/021، واسم مجموعة جديدة يبقى «مجموعة» إن فشل تثبيت الاسم المشفر، وأدوات الإشراف تظهر بلا خطأ لكن الخادم يرفض إجراءاتها).
 
 ### اختبار سريع لميزات 0.6.0 على الجهازين
@@ -273,6 +284,21 @@
 | 76 | سجل الإشراف | كل إجراء (كتم/رفع/طرد/حظر/فلتر) يظهر في تبويب السجل بالنص والمنفّذ والوقت، والعضو العادي لا يملك الدالة أصلاً بـRLS |
 
 > ملاحظة إشرافية: الكتم يمنع الرسائل النصية والوسائط والتعديل في كل غرف المجتمع (لا يمنع التفاعلات ولا القراءة)، والفلتر يسري على الأعضاء فقط، والمطرود المحظور تُحذف عضويته وغرفه وكتمه تلقائياً. المحادثات الخاصة والمجموعات الخاصة والقنوات المستقلة لا تتأثر إطلاقاً.
+
+### اختبار ميزات 0.12.0 (أحداث المجتمع وتذكيراتها — بعد تشغيل 024 ونشر event-reminders §3.3)
+
+| # | الاختبار | التوقع |
+|---|---|---|
+| 77 | فتح الأحداث | شاشة المجتمع ← أيقونة التقويم في الشريط العلوي (للجميع لا للمشرفين فقط) ← قائمة فارغة بحالة «لا أحداث بعد» |
+| 78 | إنشاء حدث (مشرف) | زر «حدث جديد» ← عنوان ووصف ومكان + تاريخ ووقت بالمنتقين + مدة (رقائق) + تذكير (رقائق) ← يظهر الحدث بالوقت والمتبقي «بعد…»، وتحقق SQL: `select title, starts_at, remind_minutes from community_events order by created_at desc limit 1;` |
+| 79 | ردود الحضور | من حساب عضو: «سأحضر» ← العدّاد يزيد ورقاقتك تلون بنيلة، و«ربما» ينقل الرد، والضغط على ردّك نفسه يلغيه وينقص العدّاد |
+| 80 | أسماء المجيبين | التفاصيل ← مجموعات «سأحضر (ن)» و«ربما (ن)» بأسماء وصور المجيبين، وتحقق SQL: `select * from community_event_rsvps;` |
+| 81 | تذكير قبل البدء | حدث يبدأ بعد ~20 دقيقة بتذكير «قبل 15 دقيقة» ← بعد دورة cron (حتى 10 دقائق) يصل إشعار «📅 العنوان — يبدأ بعد …» لكل الأعضاء حتى والتطبيق مغلق، و`reminded_at` يمتلئ ولا يتكرر الإشعار بدورة أخرى |
+| 82 | حدث جارٍ وانتهى | وقت البدء: شارة «جارٍ الآن»، وبعد انتهاء المدة: «انتهى» وتتعطل رقائق الردود ويتوقف العدّ التنازلي |
+| 83 | تعديل وحذف | مشرف أو منشئ الحدث: قائمة ⋮ على البطاقة ← تعديل (يحفظ ويحدّث الوقت والتذكير) وحذف (بتأكيد يختفي الحدث وردوده بالتتالي) |
+| 84 | فرض الصلاحيات من الخادم | حساب عضو: لا زر «حدث جديد» ولا قائمة ⋮، ومحاولة نداء `community_event_create` من عضو تعطي `not allowed`، والرد على حدث منتهٍ يعطي `event ended` |
+
+> ملاحظة أحداث: التذكير إشعار واحد لكل حدث لأعضاء المجتمع كلهم (المكتومون مؤقتاً تصلهم التذكيرات — الكتم يخص الرسائل فقط)، وحدوث فشل نشر دالة event-reminders لا يعطل الأحداث وردود الحضور، والأحداث المنتهية قبل 30 يوماً تُحذف تلقائياً يومياً 04:33.
 
 ---
 

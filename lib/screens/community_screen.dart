@@ -4,6 +4,7 @@ import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
+import 'community_events_screen.dart';
 import 'community_moderation_screen.dart';
 
 /// غرف المجتمع: «الإعلانات» (للمشرفين) + غرف النقاش
@@ -88,6 +89,21 @@ class _CommunityScreenState extends State<CommunityScreen> {
       appBar: AppBar(
         title: Text(widget.name, style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
+          IconButton(
+              tooltip: 'الأحداث',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CommunityEventsScreen(
+                      communityId: widget.communityId,
+                      communityName: widget.name,
+                      myRole: widget.role,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.event_note_outlined)),
           if (_isAdmin)
             IconButton(
                 tooltip: 'أدوات الإشراف',
