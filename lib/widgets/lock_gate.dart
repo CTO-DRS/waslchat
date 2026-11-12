@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/app_lock_service.dart';
+import '../theme.dart';
 
 /// بوابة قفل التطبيق: إذا كان القفل مفعّلاً تُحجب الواجهة وتُطلب البصمة
 /// عند فتح التطبيق وعند العودة إليه من الخلفية.
