@@ -15,7 +15,7 @@ import 'security_screens.dart';
 
 String _modeLabel(ThemeMode m) => switch (m) {
       ThemeMode.dark => 'داكن',
-      ThemeMode.light => 'فاتح (تجريبي)',
+      ThemeMode.light => 'فاتح',
       ThemeMode.system => 'حسب النظام',
     };
 
@@ -75,9 +75,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () async {
               final m = await showModalBottomSheet<ThemeMode>(
                 context: context,
-                backgroundColor: Theme.of(context).brightness == Brightness.dark
-                    ? WaslColors.darkSurface
-                    : null,
+                backgroundColor: context.surfaceAlt,
                 shape: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
                 builder: (ctx) => SafeArea(
@@ -85,7 +83,6 @@ class SettingsScreen extends StatelessWidget {
                     const ListTile(
                       title: Text('المظهر',
                           style: TextStyle(fontWeight: FontWeight.w800)),
-                      subtitle: Text('الفاتح تجريبي: بعض الشاشات محسّنة للداكن حتى الآن'),
                     ),
                     for (final m in ThemeMode.values)
                       ListTile(
@@ -103,6 +100,8 @@ class SettingsScreen extends StatelessWidget {
               if (m != null) ThemeService.set(m);
             },
           ),
+          const _FontSizeTile(),
+          const _WallpaperTile(),
           const _AppLockTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
@@ -173,7 +172,7 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 8),
           Center(
               child: Text('وصل شات · الإصدار ${AppConfig.appVersion}+${AppConfig.appBuild}',
-                  style: const TextStyle(color: Colors.white38))),
+                  style: TextStyle(color: context.textFaint))),
         ],
       ),
     );
@@ -215,7 +214,7 @@ class _ProfileCardState extends State<_ProfileCard> {
     final name = (_p?['display_name'] ?? _p?['username'] ?? 'مستخدم') as String;
     final bio = _p?['bio'] as String?;
     return Material(
-      color: WaslColors.glass,
+      color: context.glass,
       borderRadius: BorderRadius.circular(22),
       child: InkWell(
         borderRadius: BorderRadius.circular(22),
@@ -238,13 +237,179 @@ class _ProfileCardState extends State<_ProfileCard> {
                         : (supabase.auth.currentUser?.email ?? ''),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white60)),
+                    style: TextStyle(color: context.textTertiary)),
               ]),
             ),
-            const Icon(Icons.edit_outlined, color: Colors.white54),
+            Icon(Icons.edit_outlined, color: context.textFaint),
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// بلاطة حجم الخط: صغير/عادي/كبير/أكبر — تطبق فوراً على كل التطبيق
+class _FontSizeTile extends StatelessWidget {
+  const _FontSizeTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.text_fields_rounded, color: WaslColors.indigo),
+      title: const Text('حجم الخط'),
+      subtitle: ValueListenableBuilder<double>(
+        valueListenable: FontScaleService.scale,
+        builder: (_, s, __) => Text(
+            'حالياً: ${(FontScaleService.options.firstWhere((o) => o.$1 == s, orElse: () => (1.0, 'عادي')).$2)}'),
+      ),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: () async {
+        await showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: context.surfaceAlt,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+          builder: (ctx) => SafeArea(
+            child: ValueListenableBuilder<double>(
+              valueListenable: FontScaleService.scale,
+              builder: (ctx, s, __) => Wrap(children: [
+                const ListTile(
+                  title: Text('حجم الخط',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                // عيّنة مباشرة بحجم المعاينة
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text('هكذا ستبدو رسائلك بمقاس هذا الخيار',
+                      style: TextStyle(
+                          fontSize: 15 * s, color: ctx.textSecondary)),
+                ),
+                for (final (v, label) in FontScaleService.options)
+                  ListTile(
+                    leading: Icon(
+                        s == v ? Icons.radio_button_checked : Icons.radio_button_off,
+                        color: WaslColors.teal),
+                    title: Text(label),
+                    onTap: () {
+                      FontScaleService.set(v);
+                      Navigator.pop(ctx);
+                    },
+                  ),
+              ]),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// بلاطة خلفية المحادثة: خلفيات مضمنة (تدرج + نقاط) تُرسم خلف رسائل كل محادثة
+class _WallpaperTile extends StatelessWidget {
+  const _WallpaperTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.wallpaper_rounded, color: WaslColors.teal),
+      title: const Text('خلفية المحادثة'),
+      subtitle: ValueListenableBuilder<int>(
+        valueListenable: WallpaperService.index,
+        builder: (_, i, __) => Text(WallpaperService.wallpapers[i].name),
+      ),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: () async {
+        await showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: context.surfaceAlt,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+          builder: (ctx) => SafeArea(
+            child: ValueListenableBuilder<int>(
+              valueListenable: WallpaperService.index,
+              builder: (ctx, sel, __) => Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('خلفية المحادثة',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 6),
+                  Text('تُرسم خلف رسائل كل المحادثات — مضمنة داخل التطبيق',
+                      style: TextStyle(fontSize: 12, color: ctx.textTertiary)),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 14,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (var i = 0; i < WallpaperService.wallpapers.length; i++)
+                        _WallpaperPreview(
+                          wp: WallpaperService.wallpapers[i],
+                          dark: Theme.of(ctx).brightness == Brightness.dark,
+                          selected: sel == i,
+                          onTap: () {
+                            WallpaperService.set(i);
+                            Navigator.pop(ctx);
+                          },
+                        ),
+                    ],
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WallpaperPreview extends StatelessWidget {
+  const _WallpaperPreview(
+      {required this.wp,
+      required this.dark,
+      required this.selected,
+      required this.onTap});
+  final WaslWallpaper wp;
+  final bool dark;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Column(children: [
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+                color: selected ? WaslColors.teal : context.hairline,
+                width: selected ? 2.5 : 1),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: CustomPaint(
+              painter: WallpaperPainter(wp, dark: dark),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: 72,
+          child: Text(wp.name,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  color: selected ? WaslColors.teal : context.textSecondary)),
+        ),
+      ]),
     );
   }
 }

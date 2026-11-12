@@ -140,7 +140,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   void _showInviteSheet(String code) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => _InviteSheet(
@@ -244,7 +244,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final picked = await showModalBottomSheet<List<String>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (_) => _AddMembersSheet(exclude: existing),
@@ -329,7 +329,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ]),
                   Text('${_members.length} أعضاء',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white60)),
+                      style: TextStyle(color: context.textTertiary)),
                   const SizedBox(height: 12),
                   ListTile(
                     leading: const Icon(Icons.lock_outline, color: WaslColors.teal),
@@ -361,7 +361,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   for (final m in _members)
                     ListTile(
                       leading: CircleAvatar(
-                        backgroundColor: WaslColors.darkSurface,
+                        backgroundColor: context.surfaceAlt,
                         child: Text(_nameOf(m).isNotEmpty ? _nameOf(m).characters.first : '?'),
                       ),
                       title: Text(m['user_id'] == _me ? '${_nameOf(m)} (أنت)' : _nameOf(m)),
@@ -524,7 +524,7 @@ class _InviteSheet extends StatelessWidget {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           Text('أي شخص يملك هذا الرابط ينضم إلى المجموعة فوراً.',
-              textAlign: TextAlign.center, style: const TextStyle(color: Colors.white60)),
+              textAlign: TextAlign.center, style: TextStyle(color: context.textTertiary)),
           const SizedBox(height: 16),
           Center(
             child: Container(
@@ -593,10 +593,10 @@ class _InviteSheet extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'تجديد الرمز يعطّل الرابط القديم فوراً. تعطيل الرابط يمنع أي انضمام جديد حتى تُنشئ رابطاً جديداً.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.5),
+            style: TextStyle(color: context.textFaint, fontSize: 12, height: 1.5),
           ),
         ]),
       ),
