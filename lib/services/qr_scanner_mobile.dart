@@ -31,7 +31,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
               return;
             }
           },
-          errorBuilder: (context, error) => Center(
+          errorBuilder: (context, error, child) => Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
