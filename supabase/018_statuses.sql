@@ -156,6 +156,29 @@ create policy "status media upload by author" on storage.objects
 -- حالتي + حالات شركاء المحادثات الفردية النشطة، مع ظرفي المفتاح وعلامة المشاهدة
 -- وعدّاد المشاهدات لحالاتي.
 
+create or replace function public.my_status_audience()
+returns table (
+  id uuid,
+  display_name text,
+  username text,
+  avatar_url text,
+  identity_public_key text
+) language sql security definer stable set search_path = public as $$
+  select distinct p.id, p.display_name, p.username, p.avatar_url, p.identity_public_key
+  from conversation_participants me
+  join conversations c on c.id = me.conversation_id and c.is_group = false
+  join conversation_participants o
+    on o.conversation_id = me.conversation_id and o.user_id <> me.user_id
+  join profiles p on p.id = o.user_id
+  where me.user_id = auth.uid()
+    and not exists (select 1 from blocks b
+        where (b.blocker = auth.uid() and b.blocked = o.user_id)
+           or (b.blocker = o.user_id and b.blocked = auth.uid()))
+$$;
+
+revoke execute on function public.my_status_audience() from public, anon;
+grant execute on function public.my_status_audience() to authenticated;
+
 create or replace function public.my_status_feed()
 returns table (
   status_id uuid,

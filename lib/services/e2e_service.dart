@@ -467,6 +467,17 @@ class E2eService {
     }
   }
 
+  // ---------- الحالات/القصص ----------
+
+  /// المفتاح العام لأي مستخدم (لتغليف مفاتيح الحالات وفكّ أظرفها)
+  static Future<SimplePublicKey?> publicKeyOf(String userId) => _publicKeyOf(userId);
+
+  /// زوج هوية هذا الجهاز (لتغليف مفتاح حالة كصاحبها)
+  static Future<SimpleKeyPair> identityPair() => _loadMyPair();
+
+  /// مفتاح محتوى عشوائي 32B لحالة جديدة (AES-256)
+  static Future<SecretKey> newContentKey() => _aes.newSecretKey();
+
   /// ظرفي في محادثة لإصدار مفتاح معيّن: (المغلَّف، مُغلِّفي)
   static Future<(String, String)?> _fetchMyEnvelope(String convId, String me, int version) async {
     final row = await supabase
