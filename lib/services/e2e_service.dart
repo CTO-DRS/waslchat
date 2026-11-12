@@ -89,6 +89,9 @@ class E2eService {
   static final Map<String, SecretKey> _dmKeyCache = {};
   static final Map<String, SecretKey> _groupKeyCache = {};
   static final Map<String, String> _previewCache = {};
+
+  /// أسماء المجموعات المفكوكة: النص المشفر ← الاسم الصريح
+  static final Map<String, String> _titleCache = {};
   static SimpleKeyPair? _myPair;
 
   // ---------- الحالة ----------
@@ -149,6 +152,7 @@ class E2eService {
     _dmKeyCache.clear();
     _groupKeyCache.clear();
     _previewCache.clear();
+    _titleCache.clear();
     _verCache.clear();
     _allLoaded.clear();
     _v3Cache.clear();
@@ -556,6 +560,25 @@ class E2eService {
     final out = plain ?? '🔒 رسالة مشفرة';
     if (_previewCache.length > 300) _previewCache.clear();
     _previewCache[raw] = out;
+    return out;
+  }
+
+  /// اسم مجموعة: يفك الاسم المشفر (v1.) بكل إصدارات مفتاح المجموعة مع ذاكرة مؤقتة.
+  /// الاسم القديم الصريح يُعاد كما هو، والفشل يعيد نصاً عاماً (عضو لم يصله الظرف بعد).
+  static Future<String> groupTitle(String conversationId, String? raw) async {
+    final raw0 = raw ?? '';
+    if (!isEncrypted(raw0)) return raw0.isEmpty ? 'مجموعة' : raw0;
+    final hit = _titleCache[raw0];
+    if (hit != null) return hit;
+    var plain = await decryptGroupText(conversationId, raw0);
+    if (plain == null) {
+      // ربما دُوِّر المفتاح أو وصل ظرف جديد: إعادة جلب المفاتيح مرة واحدة
+      invalidateGroupKey(conversationId);
+      plain = await decryptGroupText(conversationId, raw0);
+    }
+    final out = plain ?? '🔒 مجموعة مشفرة';
+    if (_titleCache.length > 300) _titleCache.clear();
+    _titleCache[raw0] = out;
     return out;
   }
 

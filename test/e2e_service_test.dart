@@ -213,4 +213,73 @@ void main() {
     // العضو المُزال يملك v1 فقط: لا يفك الجديد
     expect(await tryAll([v1], newMsg), isNull);
   });
+
+  // ---------- 0.10.0: تشفير بيانات الوصف (التفاعلات وأسماء المجموعات) ----------
+
+  test('التفاعل: دورة تشفير/فك الإيموجي بمفتاح المحادثة', () async {
+    final key = await newKey();
+    const emoji = '👍🏽';
+    final enc = await E2eService.encryptText(key, convId, emoji);
+    expect(E2eService.isEncrypted(enc), isTrue);
+    final out = await E2eService.decryptText(key, convId, enc);
+    expect(out, emoji);
+    // مفتاح خاطئ (طرف آخر) → null
+    final stranger = await newKey();
+    expect(await E2eService.decryptText(stranger, convId, enc), isNull);
+  });
+
+  test('التفاعل: الإيموجي الأصعب (16 نقطة كود بمعدِّلات) يبقى داخل حد القاعدة 160 حرفاً', () async {
+    final key = await newKey();
+    // أسوأ إيموجي مسموح (حد القاعدة القديم 16 نقطة كود): علم + بشرة + ZWJ متسلسلة
+    const worst = '🏳️‍🌈👍🏽👨‍👩‍👧‍🧑🏽‍🦱🤝🏽✋🏽🙌🏽👏🏽';
+
+    // نقصّها إلى 16 نقطة كود بالضبط كما يفعل حد الإدخال
+    final cps = worst.runes.toList();
+    final emoji16 = String.fromCharCodes(cps.take(16));
+    expect(emoji16.runes.length, 16);
+
+    final enc = await E2eService.encryptText(key, convId, emoji16);
+    // صيغة v1: 12B nonce + 64B نص + 16B mac = 92B → base64 124 + «v1.» ونقطتان
+    expect(enc.length, lessThanOrEqualTo(160));
+    expect(await E2eService.decryptText(key, convId, enc), emoji16);
+  });
+
+  test('التفاعل: القديم الصريح يمر كما هو (توافق رجعي)', () async {
+    final key = await newKey();
+    const legacy = '👍';
+    expect(await E2eService.decryptText(key, convId, legacy), legacy);
+  });
+
+  test('اسم المجموعة: أسوأ اسم (80 حرفاً بإيموجي) مشفراً يبقى داخل حد الـRPC 500 حرفاً', () async {
+    final key = await newKey();
+    // 80 حرفاً (نقاط كود) بإيموجي رباعي البايتات: 320 بايت UTF-8
+    final name80 = '🚀' * 80;
+    expect(name80.runes.length, 80);
+    final enc = await E2eService.encryptText(key, convId, name80);
+    // 320B + 28B غلاف = 348B → base64 464 + 5 = 469 ≤ 500
+    expect(enc.length, lessThanOrEqualTo(500));
+    expect(await E2eService.decryptText(key, convId, enc), name80);
+  });
+
+  test('اسم المجموعة: فك عبر إصدارات المفاتيح بعد التدوير (حلقة decryptGroupText)', () async {
+    const conv = 'group-title-rotate';
+    final v1 = await AesGcm.with256bits().newSecretKey();
+    final v2 = await AesGcm.with256bits().newSecretKey();
+    // الاسم ثُبّت بأول مفتاح، ثم دُوّر المفتاح وغُيّر الاسم بالجديد
+    final oldTitle = await E2eService.encryptText(v1, conv, 'فريق التصميم');
+    final newTitle = await E2eService.encryptText(v2, conv, 'فريق التصميم والمنتج');
+    Future<String?> tryAll(List<SecretKey> keys, String c) async {
+      for (final k in keys) {
+        final p = await E2eService.decryptText(k, conv, c);
+        if (p != null) return p;
+      }
+      return null;
+    }
+    // عضو يملك الإصدارين يفك الاسمين
+    expect(await tryAll([v2, v1], oldTitle), 'فريق التصميم');
+    expect(await tryAll([v2, v1], newTitle), 'فريق التصميم والمنتج');
+    // عضو انضم بعد التدوير (يملك v2 فقط) يفك الاسم الجديد ولا يفك القديم
+    expect(await tryAll([v2], newTitle), 'فريق التصميم والمنتج');
+    expect(await tryAll([v2], oldTitle), isNull);
+  });
 }

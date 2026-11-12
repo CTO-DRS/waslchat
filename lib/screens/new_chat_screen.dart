@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../services/block_service.dart';
+import '../services/e2e_service.dart';
 import '../services/invite_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -109,19 +110,21 @@ class _NewChatScreenState extends State<NewChatScreen> {
     _snack('جارٍ الانضمام…');
     try {
       final convId = await InviteService.join(input);
-      // جلب اسم المجموعة لعرضه في الشريط
+      // جلب اسم المجموعة لعرضه في الشريط (يُفك إن كان مشفراً — الظرف يصل بعد الانضمام)
       final conv = await supabase
           .from('conversations')
           .select('title')
           .eq('id', convId)
           .maybeSingle();
+      final rawTitle = ((conv?['title'] as String?) ?? '').trim();
+      final title = await E2eService.groupTitle(convId, rawTitle);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => ChatScreen(
             conversationId: convId,
-            title: ((conv?['title'] as String?) ?? 'مجموعة'),
+            title: title,
             isGroup: true,
             encrypted: true,
           ),

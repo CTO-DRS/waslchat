@@ -24,6 +24,7 @@ import '../services/media_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/group_avatar.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/report_dialog.dart';
 import 'contact_screen.dart';
@@ -76,11 +77,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   Map<String, Map<String, dynamic>> _byId = {};
   StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
   Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
+
+  /// الإيموجي المفكوك: النص المشفر ← الإيموجي الصريح (القديم الصريح يمر فوراً)
+  final Map<String, String> _emojiPlain = {};
   // الرسائل المختفية والنجوم وصورة الطرف الآخر
   int? _disappear;
   Set<String> _stars = {};
   late bool _starredOnly = widget.starredOnly;
   String? _otherAvatar;
+
+  /// مسار صورة المجموعة المشفرة (conversations.avatar_url)
+  String? _groupAvatarPath;
 
   // البحث داخل المحادثة
   bool _searching = false;
@@ -146,6 +153,42 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       setState(() => _plain[content] = plain ?? '🔒 تعذّر فك التشفير');
     }
     _decrypting.remove(content);
+  }
+
+  /// فك إيموجي التفاعلات الواردة (المشفرة v1.) في الخلفية — القديم الصريح لا يحتاج
+  void _decryptReactions(Map<String, Map<String, String>> map) {
+    if (!_e2e) return;
+    final raws = <String>{for (final r in map.values) ...r.values};
+    for (final raw in raws) {
+      if (_emojiPlain.containsKey(raw) || !E2eService.isEncrypted(raw)) continue;
+      unawaited(_decryptEmoji(raw));
+    }
+  }
+
+  Future<void> _decryptEmoji(String raw) async {
+    String? p;
+    if (!widget.isGroup) {
+      final other = widget.otherId;
+      if (other != null) p = await E2eService.decryptDmText(widget.conversationId, other, raw);
+    } else {
+      p = await E2eService.decryptGroupText(widget.conversationId, raw);
+      if (p == null) {
+        // ربما دُوِّر المفتاح: إعادة جلب مرة واحدة (كما في فك الرسائل)
+        E2eService.invalidateGroupKey(widget.conversationId);
+        p = await E2eService.decryptGroupText(widget.conversationId, raw);
+      }
+    }
+    if (!mounted || _emojiPlain.containsKey(raw)) return;
+    setState(() => _emojiPlain[raw] = p ?? '❔');
+  }
+
+  /// الإيموجي الصريح لقيمة مخزنة: المفكوك، أو القديم الصريح فوراً،
+  /// أو '' لحين اكتمال الفك (تُحجب الشارة لحظة بدل إظهار نص مشفر)
+  String _emojiOf(String raw) {
+    final hit = _emojiPlain[raw];
+    if (hit != null) return hit;
+    if (!E2eService.isEncrypted(raw)) return raw;
+    return '';
   }
 
   /// النص المعروض لرسالة نصية (null إن كانت ما زالت قيد فك التشفير)
@@ -257,6 +300,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         (map[r['message_id'] as String] ??= {})[r['user_id'] as String] = r['emoji'] as String;
       }
       if (mounted) setState(() => _reactions = map);
+      _decryptReactions(map);
     }, onError: (_) {});
 
     PresenceService.online.addListener(_onPresence);
@@ -291,7 +335,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     try {
       final conv = await supabase
           .from('conversations')
-          .select('disappear_seconds')
+          .select('disappear_seconds, avatar_url')
           .eq('id', widget.conversationId)
           .maybeSingle();
       final stars = await supabase
@@ -312,6 +356,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         _disappear = conv?['disappear_seconds'] as int?;
         _stars = {for (final r in stars) r['message_id'] as String};
         _otherAvatar = avatar;
+        _groupAvatarPath = conv?['avatar_url'] as String?;
       });
     } catch (_) {}
   }
@@ -1253,10 +1298,25 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   Future<void> _react(Map<String, dynamic> m, String emoji) async {
-    final mine = _reactions[m['id']]?[_me];
+    final raw = _reactions[m['id']]?[_me];
+    final mine = raw == null ? null : _emojiOf(raw);
     try {
-      await supabase.rpc('react_message',
-          params: {'p_id': m['id'], 'p_emoji': mine == emoji ? '' : emoji});
+      // الإزالة: نص فارغ. الإضافة: في المحادثات المشفرة يُشفَّر الإيموجي بمفتاح المحادثة
+      String out = '';
+      if (mine != emoji) {
+        if (_e2e) {
+          final key = await _convKey();
+          if (key == null) {
+            _snack('انتظر جاهزية مفاتيح التشفير ثم أعد المحاولة');
+            return;
+          }
+          out = await E2eService.encryptText(key, widget.conversationId, emoji);
+          _emojiPlain[out] = emoji; // عرض فوري وتبديل صحيح قبل وصول البث
+        } else {
+          out = emoji;
+        }
+      }
+      await supabase.rpc('react_message', params: {'p_id': m['id'], 'p_emoji': out});
     } catch (_) {
       _snack('تعذّر إرسال التفاعل');
     }
@@ -1378,7 +1438,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
     final arabic = text != null && RegExp(r'[\u0600-\u06FF]').hasMatch(text);
     final mine = m['sender_id'] == _me;
-    final myReaction = _reactions[m['id']]?[_me];
+    final myReaction = _emojiOf(_reactions[m['id']]?[_me] ?? '');
     showModalBottomSheet(
       context: context,
       backgroundColor: context.surfaceAlt,
@@ -1527,10 +1587,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final r = _reactions[m['id']];
     if (r == null || r.isEmpty) return null;
     final counts = <String, int>{};
-    for (final e in r.values) {
+    for (final raw in r.values) {
+      final e = _emojiOf(raw);
+      if (e.isEmpty) continue; // لم يُفك بعد
       counts[e] = (counts[e] ?? 0) + 1;
     }
-    final mineEmoji = r[_me];
+    final mineEmoji = _emojiOf(r[_me] ?? '');
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 2),
       child: Wrap(spacing: 4, children: [
@@ -1607,6 +1669,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       return;
     }
     if (r.title != null && r.title != _title) setState(() => _title = r.title!);
+    _loadMeta(); // اسم/صورة المجموعة قد تكون تغيّرت
     _loadMembers();
   }
 
@@ -1639,13 +1702,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
              : (!widget.isGroup && widget.otherId != null ? _openContact : null),
          behavior: HitTestBehavior.opaque,
          child: Row(children: [
-          UserAvatar(
-            name: _title,
-            url: _otherAvatar,
-            radius: 20,
-            color: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
-            icon: widget.isGroup ? (widget.isChannel ? Icons.campaign : Icons.groups_2) : null,
-          ),
+          if (widget.isGroup && !widget.isChannel && (_groupAvatarPath ?? '').isNotEmpty)
+            GroupAvatar(
+              conversationId: widget.conversationId,
+              path: _groupAvatarPath,
+              name: _title,
+              radius: 20,
+            )
+          else
+            UserAvatar(
+              name: _title,
+              url: _otherAvatar,
+              radius: 20,
+              color: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
+              icon: widget.isGroup ? (widget.isChannel ? Icons.campaign : Icons.groups_2) : null,
+            ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
