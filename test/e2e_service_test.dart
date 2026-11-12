@@ -77,7 +77,8 @@ void main() {
   });
 
   test('حد طول النص قبل التشفير', () {
-    expect(E2eService.withinPlainLimit('a' * 2900), isTrue);
+    // الحد 2600 بايت يبقي أسوأ رسالة v2 (بأثقل ترويستها) داخل قيد 4000 حرف
+    expect(E2eService.withinPlainLimit('a' * 2600), isTrue);
     expect(E2eService.withinPlainLimit('أ' * 1500), isFalse); // 3000 بايت UTF-8
   });
 

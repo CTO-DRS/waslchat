@@ -38,7 +38,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
                 'تعذّر تشغيل الكاميرا. تأكد من منح صلاحية الكاميرا للتطبيق ثم أعد المحاولة.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.85), height: 1.6),
+                    color: Colors.white.withValues(alpha: 0.85), height: 1.6),
               ),
             ),
           ),
@@ -61,7 +61,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
             child: Text(
                 'وجّه الكاميرا نحو رمز QR الظاهر في شاشة «رمز الأمان» عند الطرف الآخر',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white.withOpacity(0.85))),
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.85))),
           ),
         ),
       ]),

@@ -8,10 +8,12 @@ import 'media_service.dart';
 
 /// إعادة توجيه رسالة إلى محادثة أخرى من قائمة «المحادثات».
 /// المحتوى يُفك على الجهاز ثم يُشفَّر من جديد بمفتاح المحادثة الهدف — الخادم لا يرى شيئاً.
+/// في المحادثات الخاصة: النص يُشفَّر عبر الجلسة المتدرجة v2 (سرية أمامية) إن أمكن،
+/// وتبقى بايتات الوسيط على مفتاح المحادثة الثابت (حدود هذا الإصدار موثقة في E2EE_PLAN).
 class ForwardService {
   ForwardService._();
 
-  /// مفتاح محادثة هدف (صف من my_chats)
+  /// مفتاح محادثة هدف (صف من my_chats) — للوسائط والمجموعات
   static Future<SecretKey?> _keyFor(Map<String, dynamic> chat) {
     final conv = chat['conversation_id'] as String;
     if (chat['is_group'] == true) return E2eService.groupKey(conv);
@@ -19,6 +21,9 @@ class ForwardService {
     if (other == null) return Future.value(null);
     return E2eService.dmKey(conv, other);
   }
+
+  static bool _isDm(Map<String, dynamic> chat) =>
+      chat['is_group'] != true && (chat['other_id'] as String?) != null;
 
   /// يرسل نصاً أو وسيطاً (بايتات صريحة) إلى المحادثة الهدف. يعيد false عند الفشل.
   static Future<bool> send({
@@ -31,11 +36,20 @@ class ForwardService {
     try {
       final conv = target['conversation_id'] as String;
       final me = supabase.auth.currentUser!.id;
+      final dm = _isDm(target);
       final key = await _keyFor(target);
       if (key == null) return false;
       if (type == 'text') {
         if (text == null || !E2eService.withinPlainLimit(text)) return false;
-        final payload = await E2eService.encryptText(key, conv, text);
+        final String payload;
+        if (dm) {
+          final p = await E2eService.encryptDmText(
+              conv, target['other_id'] as String, text);
+          if (p == null) return false;
+          payload = p;
+        } else {
+          payload = await E2eService.encryptText(key, conv, text);
+        }
         await supabase.from('messages').insert({
           'conversation_id': conv,
           'sender_id': me,
@@ -46,9 +60,14 @@ class ForwardService {
       }
       if (bytes == null) return false;
       final enc = await E2eService.encryptBytes(key, conv, bytes);
-      final meta = (text != null && text.isNotEmpty)
-          ? await E2eService.encryptText(key, conv, text)
-          : '';
+      String meta = '';
+      if (text != null && text.isNotEmpty) {
+        meta = dm
+            ? (await E2eService.encryptDmText(
+                    conv, target['other_id'] as String, text)) ??
+                ''
+            : await E2eService.encryptText(key, conv, text);
+      }
       final path = await MediaService.upload(
         conversationId: conv,
         bytes: enc,
