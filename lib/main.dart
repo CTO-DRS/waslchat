@@ -18,6 +18,8 @@ import 'widgets/lock_gate.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ThemeService.load();
+  await FontScaleService.load();
+  await WallpaperService.load();
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.supabaseAnonKey,
@@ -54,7 +56,9 @@ class WaslApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeService.mode,
-      builder: (context, mode, _) => MaterialApp(
+      builder: (context, mode, _) => ValueListenableBuilder<double>(
+        valueListenable: FontScaleService.scale,
+        builder: (context, fontScale, _) => MaterialApp(
         title: 'وصل شات',
         debugShowCheckedModeBanner: false,
         theme: WaslTheme.light,
@@ -70,6 +74,14 @@ class WaslApp extends StatelessWidget {
         navigatorKey: navigatorKey,
         navigatorObservers: [ScreenshotService.routeObserver],
         home: const LockGate(child: AuthGate()),
+        // تطبيق حجم الخط المختار على كل النصوص (المظهر ← حجم الخط)
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(fontScale),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
       ),
     );
   }
