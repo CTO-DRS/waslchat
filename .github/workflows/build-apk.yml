@@ -1,12 +1,14 @@
 name: Build release APK
 on:
   push:
-    branches: [main]
+    branches: [app]
   workflow_dispatch:
-# توفير دقائق Actions المجانية: أي دفع جديد يلغي البناء السابق المعلّق لنفس الفرع
+# أي دفع جديد يلغي البناء السابق المعلّق لنفس الفرع
 concurrency:
-  group: build-apk-main
+  group: build-apk-app
   cancel-in-progress: true
+permissions:
+  contents: write # لنشر الإصدار (Release) بالـAPK
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,8 +30,24 @@ jobs:
       - run: flutter build apk --release --target-platform android-arm64
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      - run: cp build/app/outputs/flutter-apk/app-release.apk wasl_chat_release.apk
+      - run: cp build/app/outputs/flutter-apk/app-release.apk wasl_chat.apk
       - uses: actions/upload-artifact@v4
         with:
           name: wasl_chat_release
-          path: wasl_chat_release.apk
+          path: wasl_chat.apk
+      # نشر الإصدار ليصل رابط التحديث داخل التطبيق:
+      # https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk
+      - name: Publish release
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          TAG="v$VERSION"
+          NOTES="APK موقّع بإصدار $VERSION — يُحمّل تلقائياً من شاشة «تحديث متوفر» داخل التطبيق."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" wasl_chat.apk --clobber
+            echo "updated $TAG"
+          else
+            gh release create "$TAG" wasl_chat.apk --title "وصل شات $VERSION" --notes "$NOTES"
+            echo "created $TAG"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
