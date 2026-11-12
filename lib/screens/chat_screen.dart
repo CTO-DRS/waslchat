@@ -391,9 +391,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 style: TextStyle(fontWeight: FontWeight.w700)),
           ]),
           const SizedBox(height: 4),
-          const Text('لن تصل رسائله الجديدة إليك، ولا يمكن الإرسال إليه.',
+          Text('لن تصل رسائله الجديدة إليك، ولا يمكن الإرسال إليه.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white60, fontSize: 12)),
+              style: TextStyle(color: context.textTertiary, fontSize: 12)),
           TextButton(
             onPressed: _unblockPeer,
             child: const Text('إلغاء الحظر'),
@@ -778,7 +778,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   void _showAttachSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -894,11 +894,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   Widget _body(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) {
-      return const Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.block, size: 16, color: Colors.white60),
-        SizedBox(width: 6),
+      final mine = m['sender_id'] == _me;
+      final c = mine ? Colors.white60 : context.textTertiary;
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.block, size: 16, color: c),
+        const SizedBox(width: 6),
         Text('حُذفت هذه الرسالة',
-            style: TextStyle(color: Colors.white60, fontStyle: FontStyle.italic)),
+            style: TextStyle(color: c, fontStyle: FontStyle.italic)),
       ]);
     }
     switch (m['type'] as String? ?? 'text') {
@@ -913,31 +915,38 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         final isVideo = m['type'] == 'video';
         final meta = _metaOf(m);
         final name = (meta?['name'] as String?) ?? (isVideo ? 'فيديو' : 'ملف');
+        final mine = m['sender_id'] == _me;
         return InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () => _openMedia(m),
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.18),
+              color: mine
+                  ? Colors.black.withValues(alpha: 0.18)
+                  : context.glass,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(isVideo ? Icons.play_circle_fill : Icons.insert_drive_file_rounded,
-                  size: 36, color: Colors.white),
+                  size: 36, color: mine ? Colors.white : context.iconStd),
               const SizedBox(width: 10),
               Flexible(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      style: TextStyle(
+                          color: mine ? Colors.white : context.textPrimary,
+                          fontWeight: FontWeight.w600)),
                   Text(
                       [
                         isVideo ? 'فيديو' : 'ملف',
                         _sizeLabel((meta?['size'] as num?)?.toInt()),
                       ].where((e) => e.isNotEmpty).join(' · '),
-                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      style: TextStyle(
+                          color: mine ? Colors.white70 : context.textSecondary,
+                          fontSize: 12)),
                 ]),
               ),
             ]),
@@ -945,8 +954,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         );
       default:
         final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
+        final mine = m['sender_id'] == _me;
         return Text(text,
-            style: const TextStyle(color: Colors.white, fontSize: 16));
+            style: TextStyle(
+                color: mine ? Colors.white : context.textPrimary, fontSize: 16));
     }
   }
 
@@ -997,7 +1008,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1133,7 +1144,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final target = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1213,7 +1224,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final myReaction = _reactions[m['id']]?[_me];
     showModalBottomSheet(
       context: context,
-      backgroundColor: WaslColors.darkSurface,
+      backgroundColor: context.surfaceAlt,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
@@ -1234,7 +1245,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: myReaction == e ? WaslColors.glass : null,
+                        color: myReaction == e ? context.glass : null,
                       ),
                       child: Text(e, style: const TextStyle(fontSize: 26)),
                     ),
@@ -1336,7 +1347,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
+        color: mine ? Colors.black.withValues(alpha: 0.18) : context.glass,
         borderRadius: BorderRadius.circular(12),
         border: const BorderDirectional(start: BorderSide(color: WaslColors.teal, width: 3)),
       ),
@@ -1348,7 +1359,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         Text(r == null ? 'رسالة غير متاحة' : _previewOf(r),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            style: TextStyle(
+                color: mine ? Colors.white70 : context.textSecondary, fontSize: 13)),
       ]),
     );
   }
@@ -1371,9 +1383,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: mineEmoji == e.key ? WaslColors.teal.withValues(alpha: 0.35) : WaslColors.darkSurface,
+                color: mineEmoji == e.key
+                    ? WaslColors.teal.withValues(alpha: 0.35)
+                    : context.surfaceAlt,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
+                border: Border.all(color: context.hairline),
               ),
               child: Text(e.value > 1 ? '${e.key} ${e.value}' : e.key,
                   style: const TextStyle(fontSize: 13)),
@@ -1392,7 +1406,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
       padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
       decoration: BoxDecoration(
-        color: WaslColors.glass,
+        color: context.glass,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(children: [
@@ -1406,7 +1420,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             Text(_previewOf(m),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                style: TextStyle(color: context.textSecondary, fontSize: 13)),
           ]),
         ),
         IconButton(
@@ -1485,7 +1499,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 Text(_statusLine()!,
                     style: TextStyle(
                         fontSize: 12,
-                        color: _typing.isNotEmpty ? WaslColors.teal : Colors.white60)),
+                        color: _typing.isNotEmpty ? WaslColors.teal : context.textTertiary)),
             ]),
           ),
          ]),
@@ -1544,7 +1558,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         children: [
           if (_disappear != null || _starredOnly)
             Material(
-              color: WaslColors.glass,
+              color: context.glass,
               child: InkWell(
                 onTap: _starredOnly
                     ? () => setState(() => _starredOnly = false)
@@ -1584,7 +1598,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               ),
             ),
           Expanded(
-            child: StreamBuilder<List<Map<String, dynamic>>>(
+            // خلفية المحادثة المختارة (الإعدادات ← المظهر ← خلفية المحادثة)
+            child: ValueListenableBuilder<int>(
+              valueListenable: WallpaperService.index,
+              builder: (context, _wp, _) => CustomPaint(
+                painter: WallpaperPainter(WallpaperService.current,
+                    dark: Theme.of(context).brightness == Brightness.dark),
+                child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _stream,
               builder: (context, snap) {
                 if (!snap.hasData) {
@@ -1602,9 +1622,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                     : all;
                 if (_starredOnly && base.isEmpty) {
                   _scheduleDecrypt(all);
-                  return const Center(
+                  return Center(
                       child: Text('لا رسائل مميزة بنجمة هنا',
-                          style: TextStyle(color: Colors.white60)));
+                          style: TextStyle(color: context.textTertiary)));
                 }
                 final msgs = q.isEmpty
                     ? base
@@ -1616,8 +1636,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       }).toList();
                 if (q.isNotEmpty && msgs.isEmpty) {
                   _scheduleDecrypt(all);
-                  return const Center(
-                      child: Text('لا نتائج', style: TextStyle(color: Colors.white60)));
+                  return Center(
+                      child: Text('لا نتائج', style: TextStyle(color: context.textTertiary)));
                 }
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
                 _scheduleDecrypt(all);
@@ -1644,7 +1664,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                             maxWidth: MediaQuery.of(context).size.width * 0.75),
                         decoration: BoxDecoration(
                           gradient: mine ? WaslColors.gradient : null,
-                          color: mine ? null : WaslColors.darkSurface,
+                          color: mine ? null : context.bubbleOther,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Column(
@@ -1671,16 +1691,22 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                                 const SizedBox(width: 3),
                               ],
                               if (m['expires_at'] != null) ...[
-                                const Icon(Icons.timer_outlined, size: 12, color: Colors.white60),
+                                Icon(Icons.timer_outlined,
+                                    size: 12,
+                                    color: mine ? Colors.white60 : context.textTertiary),
                                 const SizedBox(width: 3),
                               ],
                               if (m['edited_at'] != null && m['deleted_at'] == null) ...[
-                                const Text('معدّلة',
-                                    style: TextStyle(color: Colors.white60, fontSize: 11)),
+                                Text('معدّلة',
+                                    style: TextStyle(
+                                        color: mine ? Colors.white60 : context.textTertiary,
+                                        fontSize: 11)),
                                 const SizedBox(width: 4),
                               ],
                               Text(_time(m['created_at'] as String),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                                  style: TextStyle(
+                                      color: mine ? Colors.white70 : context.textSecondary,
+                                      fontSize: 11)),
                               if (mine) ...[const SizedBox(width: 4), _ticks(m)],
                             ]),
                           ],
@@ -1691,6 +1717,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                   },
                 );
               },
+            ),
+              ),
             ),
           ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
@@ -1705,11 +1733,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 margin: const EdgeInsets.fromLTRB(12, 6, 12, 12),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: WaslColors.glass,
+                  color: context.glass,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Text('النشر هنا للمشرفين فقط',
-                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+                child: Text('النشر هنا للمشرفين فقط',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.textTertiary)),
               ),
             )
           else
@@ -1729,7 +1758,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                           height: 48,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: WaslColors.glass,
+                            color: context.glass,
                             borderRadius: BorderRadius.circular(18),
                           ),
                           child: Row(children: [
@@ -1737,7 +1766,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                             const SizedBox(width: 8),
                             Text('جارٍ التسجيل ${_recLabel()}'),
                             const Spacer(),
-                            const Text('اترك للإرسال', style: TextStyle(color: Colors.white54)),
+                            Text('اترك للإرسال', style: TextStyle(color: context.textFaint)),
                           ]),
                         )
                       : TextField(
