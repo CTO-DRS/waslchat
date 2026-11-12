@@ -29,6 +29,7 @@ import '../widgets/report_dialog.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
+import 'verify_qr_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -88,6 +89,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   // الحظر: أنا حظرتُ الطرف الآخر في محادثة فردية؟
   bool _iBlockedPeer = false;
+
+  // هل الطرف الآخر موثّق بمسح QR على هذا الجهاز؟ (للمحادثات الفردية المشفّرة)
+  bool _verified = false;
 
   // منع لقطات الشاشة لهذه المحادثة (أندرويد: FLAG_SECURE)
   bool _noScreenshots = false;
@@ -199,6 +203,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     if (widget.isGroup) _loadMembers();
     _loadMeta();
     _refreshBlockState();
+    unawaited(_refreshVerified());
     ScreenshotService.flagOf(widget.conversationId).then((v) {
       if (!mounted || !v) return;
       setState(() => _noScreenshots = true);
@@ -499,6 +504,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   // ---------- رمز الأمان ----------
   bool get _showSafety => _e2e && !widget.isGroup && widget.otherId != null;
 
+  Future<void> _refreshVerified() async {
+    if (!_showSafety) return;
+    final v = await E2eService.isVerified(widget.otherId!);
+    if (mounted) setState(() => _verified = v);
+  }
+
+  Future<void> _openVerifyQr() async {
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => VerifyQrScreen(otherUserId: widget.otherId!)));
+    if (mounted) {
+      setState(() {});
+      unawaited(_refreshVerified());
+    }
+  }
+
   Future<void> _showSafetyNumber() async {
     final other = widget.otherId!;
     final number = await E2eService.safetyNumber(other);
@@ -521,6 +541,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           ),
         ]),
         actions: [
+          if (number != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(c);
+                _openVerifyQr();
+              },
+              child: const Text('تحقق بمسح رمز QR'),
+            ),
           if (number != null && E2eService.peerKeyChanged(other))
             TextButton(
               onPressed: () {
@@ -533,7 +561,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         ],
       ),
     );
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      unawaited(_refreshVerified());
+    }
   }
 
   /// موافقة صريحة قبل إرسال نص محادثة مشفّرة إلى الذكاء الاصطناعي
@@ -1606,12 +1637,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             ),
           if (_showSafety)
             IconButton(
-              tooltip: 'رمز الأمان',
+              tooltip: _verified ? 'رمز الأمان — موثّق' : 'رمز الأمان',
               onPressed: _showSafetyNumber,
               icon: Icon(Icons.verified_user_outlined,
                   color: E2eService.peerKeyChanged(widget.otherId!)
                       ? Colors.amber
-                      : WaslColors.teal),
+                      : _verified
+                          ? const Color(0xFF2FBE63)
+                          : WaslColors.teal),
             ),
           IconButton(
             tooltip: 'لخّص المحادثة',

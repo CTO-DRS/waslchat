@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.7.4+36
+version: 0.7.5+37
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -20,6 +20,8 @@ dependencies:
   firebase_messaging: ^15.1.3
   firebase_crashlytics: ^4.3.3
   qr_flutter: ^4.1.0
+  # ماسح QR بالكاميرا — إصدار مثبّت يعتمد camera القديمة بلا كود C أصلي (تسهيلاً للبناء)
+  mobile_scanner: 3.2.2
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.2
   file_picker: 8.3.7

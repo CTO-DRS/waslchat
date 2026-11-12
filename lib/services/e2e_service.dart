@@ -7,6 +7,21 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config.dart';
 
+/// نتائج مسح رمز تحقق QR
+enum VerifyScanResult {
+  /// تطابق — تم توثيق الطرف على هذا الجهاز
+  verified,
+
+  /// الحساب مطابق لكن المفتاح في الرمز مختلف عن المنشور — تحذير احتيال
+  mismatch,
+
+  /// الرمز يعود لحساب آخر غير محادثتك
+  foreign,
+
+  /// ليس رمز تحقق من وصل شات
+  invalid,
+}
+
 /// التشفير بين الطرفين — المرحلتان 1 و2: المحادثات الخاصة والمجموعات الخاصة
 ///
 /// - زوج هوية X25519 لكل جهاز؛ الخاص لا يخرج من الجهاز (flutter_secure_storage).
@@ -270,6 +285,70 @@ class E2eService {
 
   /// يعتمد المفتاح الحالي للطرف الآخر بعد أن تحقق المستخدم منه
   static void acknowledgePeerKey(String userId) => _changedPeers.remove(userId);
+
+  // ---------- التحقق من رمز الأمان بمسح QR ----------
+
+  static const _verifyPrefix = 'e2e_verified_';
+
+  /// حمولة رمز QR للتحقق — تربط هوية الحساب بمفتاحه العام:
+  /// wasl-verify:v1|<userId>|<identity_public_key base64>
+  static Future<String?> myVerifyPayload() async {
+    if (!_ready) return null;
+    final uid = supabase.auth.currentUser?.id;
+    if (uid == null) return null;
+    final pair = await _loadMyPair();
+    final pub = await pair.extractPublicKey();
+    return verifyPayloadFor(uid, base64Encode(pub.bytes));
+  }
+
+  static String verifyPayloadFor(String userId, String pubB64) =>
+      'wasl-verify:v1|$userId|$pubB64';
+
+  /// تحليل حمولة ممسوحة — null إن كان الشكل غير صالح (دالة نقية للاختبار)
+  static (String, String)? parseVerifyPayload(String raw) {
+    final parts = raw.trim().split('|');
+    if (parts.length != 3 || parts[0] != 'wasl-verify:v1') return null;
+    final uid = parts[1];
+    final pub = parts[2];
+    if (uid.length < 20 || pub.isEmpty) return null;
+    try {
+      final b = base64Decode(pub);
+      if (b.length != 32) return null; // مفتاح X25519 = 32 بايت
+    } catch (_) {
+      return null;
+    }
+    return (uid, pub);
+  }
+
+  /// معالجة حمولة ممسوحة في سياق محادثة مع [expectedUserId]:
+  /// يطابق مفتاح الرمز مع المفتاح المنشور للطرف ثم يوثّقه محلياً عند التطابق.
+  static Future<VerifyScanResult> applyScannedVerify(
+      String raw, String expectedUserId) async {
+    final p = parseVerifyPayload(raw);
+    if (p == null) return VerifyScanResult.invalid;
+    final (uid, pubB64) = p;
+    if (uid != expectedUserId) return VerifyScanResult.foreign;
+    final published = await _publicKeyOf(expectedUserId);
+    if (published == null) return VerifyScanResult.invalid;
+    if (base64Encode(published.bytes) != pubB64) return VerifyScanResult.mismatch;
+    await _storage.write(key: '$_verifyPrefix$expectedUserId', value: pubB64);
+    return VerifyScanResult.verified;
+  }
+
+  /// هل الطرف موثّق وما زال مفتاحه المنشور هو ذاته الذي تم توثيقه؟
+  /// (إذا غيّر الطرف مفتاحه يتلغى التوثيق تلقائياً بدون أي إجراء)
+  static Future<bool> isVerified(String userId) async {
+    if (!_ready) return false;
+    final v = await _storage.read(key: '$_verifyPrefix$userId');
+    if (v == null) return false;
+    final pub = await _publicKeyOf(userId);
+    if (pub == null) return false;
+    return base64Encode(pub.bytes) == v;
+  }
+
+  /// إلغاء التوثيق يدوياً
+  static Future<void> unverify(String userId) =>
+      _storage.delete(key: '$_verifyPrefix$userId');
 
   // ---------- مفاتيح المحادثة ----------
 
