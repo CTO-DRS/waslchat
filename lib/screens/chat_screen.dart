@@ -598,11 +598,19 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final replyTo = _replyTo;
     var payload = content;
     if (_e2e) {
-      if (!E2eService.withinPlainLimit(content)) {
+      final isDm = !widget.isGroup && widget.otherId != null;
+      if (isDm) {
+        // حد المحادثة الخاصة يتقلص بزيادة الأجهزة المرتبطة (v3)
+        final lim = await E2eService.dmPlainLimit(widget.otherId!);
+        if (utf8.encode(content).length > lim) {
+          _snack('الرسالة طويلة جداً');
+          return;
+        }
+      } else if (!E2eService.withinPlainLimit(content)) {
         _snack('الرسالة طويلة جداً');
         return;
       }
-      if (!widget.isGroup && widget.otherId != null) {
+      if (isDm) {
         // المحادثات الخاصة: جلسة متدرجة v2 (سرية أمامية) أو رجوع v1
         try {
           final p = await E2eService.encryptDmText(

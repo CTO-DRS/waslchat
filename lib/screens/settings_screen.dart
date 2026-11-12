@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
+import 'linked_devices_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
 import 'security_screens.dart';
@@ -58,6 +59,14 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('النسخة الاحتياطية واستعادتها على جوال جديد'),
             trailing: const Icon(Icons.chevron_left),
             onTap: () => checkE2eKeys(context, fromSettings: true),
+          ),
+          ListTile(
+            leading: const Icon(Icons.devices_other_rounded, color: WaslColors.teal),
+            title: const Text('الأجهزة المرتبطة'),
+            subtitle: const Text('هواتف ومتصفحات تستخدم حسابك — لكل جهاز مفاتيحه'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const LinkedDevicesScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.password, color: WaslColors.teal),
