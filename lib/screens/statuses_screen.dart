@@ -30,9 +30,8 @@ class StatusStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final meGroup = groups.indexWhere((g) => g['is_me'] == true);
     return SizedBox(
-      height: 108,
+      height: 118,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         scrollDirection: Axis.horizontal,
@@ -557,9 +556,17 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                     final w = context.size?.width ?? MediaQuery.of(context).size.width;
                     final leftHalf = d.localPosition.dx < w / 2;
                     if (isRtl) {
-                      leftHalf ? _next() : _prev();
+                      if (leftHalf) {
+                        _next();
+                      } else {
+                        _prev();
+                      }
                     } else {
-                      leftHalf ? _prev() : _next();
+                      if (leftHalf) {
+                        _prev();
+                      } else {
+                        _next();
+                      }
                     }
                   },
                   child: Center(child: _body(s)),

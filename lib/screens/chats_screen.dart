@@ -312,9 +312,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       padding: const EdgeInsets.only(bottom: 120),
                       itemCount: visible.length +
                           (!_showArchived && archivedCount > 0 ? 1 : 0) +
-                          (!_showArchived ? 1 : 0),
+                          (!_showArchived && _statusGroups.isNotEmpty ? 1 : 0),
                       itemBuilder: (context, i) {
-                        if (!_showArchived) {
+                        if (!_showArchived && _statusGroups.isNotEmpty) {
                           if (i == 0) {
                             return StatusStrip(
                               groups: _statusGroups,
