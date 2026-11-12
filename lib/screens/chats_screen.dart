@@ -5,11 +5,13 @@ import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../theme.dart';
+import '../services/status_service.dart';
 import '../widgets/common.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
 import 'new_chat_screen.dart';
+import 'statuses_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -25,11 +27,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
   // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
   final Map<String, String> _previews = {};
   bool _showArchived = false;
+  // الحالات/القصص: مجمّعة حسب صاحبها (حالتي أولاً)
+  List<Map<String, dynamic>> _statusGroups = [];
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadStatuses();
     // تحديث القائمة فور وصول أي رسالة جديدة
     _channel = supabase
         .channel('chat-list')
@@ -61,6 +66,18 @@ class _ChatsScreenState extends State<ChatsScreen> {
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// جلب الحالات النشطة وتجميعها (صامت عند الفشل — الشريط اختياري)
+  Future<void> _loadStatuses() async {
+    try {
+      final rows = await StatusService.feed();
+      if (!mounted) return;
+      setState(() {
+        _statusGroups = StatusService.groupByAuthor(
+            rows, supabase.auth.currentUser!.id);
+      });
+    } catch (_) {}
   }
 
   /// يفك تشفير المعاينات المشفّرة في الخلفية (المحادثات الخاصة والمجموعات الخاصة)
@@ -113,6 +130,24 @@ class _ChatsScreenState extends State<ChatsScreen> {
   Future<void> _open(Widget screen) async {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     _load();
+  }
+
+  /// حالتي: فتح العارض إن وُجدت حالات، وإلا ورقة النشر
+  Future<void> _openMine() async {
+    final me = _statusGroups.indexWhere((g) => g['is_me'] == true);
+    if (me >= 0) {
+      final changed = await openStatusViewer(context, _statusGroups, me);
+      if (changed) _loadStatuses();
+    } else {
+      await showStatusComposer(context);
+      _loadStatuses();
+    }
+  }
+
+  /// فتح حالات صاحب معين من الشريط
+  Future<void> _openAuthor(int groupIndex) async {
+    final changed = await openStatusViewer(context, _statusGroups, groupIndex);
+    if (changed) _loadStatuses();
   }
 
   void _showNewSheet() {
@@ -262,7 +297,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: () async {
+                await Future.wait([_load(), _loadStatuses()]);
+              },
               child: visible.isEmpty && archivedCount == 0
                   ? ListView(children: const [
                       SizedBox(height: 160),
@@ -273,8 +310,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),
-                      itemCount: visible.length + (!_showArchived && archivedCount > 0 ? 1 : 0),
+                      itemCount: visible.length +
+                          (!_showArchived && archivedCount > 0 ? 1 : 0) +
+                          (!_showArchived ? 1 : 0),
                       itemBuilder: (context, i) {
+                        if (!_showArchived) {
+                          if (i == 0) {
+                            return StatusStrip(
+                              groups: _statusGroups,
+                              onTapMe: _openMine,
+                              onTapAuthor: _openAuthor,
+                            );
+                          }
+                          i -= 1;
+                        }
                         if (!_showArchived && archivedCount > 0) {
                           if (i == 0) {
                             return ListTile(
