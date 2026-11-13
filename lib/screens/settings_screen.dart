@@ -10,6 +10,7 @@ import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
 import 'bots_screen.dart';
+import 'feedback_screen.dart';
 import 'linked_devices_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
@@ -76,6 +77,14 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const BotsScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.rate_review_outlined, color: WaslColors.teal),
+            title: const Text('إرسال ملاحظات'),
+            subtitle: const Text('خلل أو فكرة أو ملاحظة خصوصية — تصل لفريق وصل مباشرة'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const FeedbackScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.password, color: WaslColors.teal),
