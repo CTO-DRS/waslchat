@@ -18,6 +18,8 @@ import '../config.dart';
 import '../services/ai_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/block_service.dart';
+import '../services/call_logic.dart';
+import '../services/call_service.dart';
 import '../services/channel_stats_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
@@ -34,6 +36,7 @@ import '../widgets/group_avatar.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/motion.dart';
 import '../widgets/report_dialog.dart';
+import 'call_screen.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
@@ -691,6 +694,24 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       setState(() {});
       unawaited(_refreshVerified());
     }
+  }
+
+  /// بدء مكالمة من المحادثة (0.17.0): طابور واحد — مكالمة واحدة في كل مرة
+  Future<void> _startCall(CallKind kind) async {
+    final s = await CallService.start(
+      conversationId: widget.conversationId,
+      peerId: widget.otherId!,
+      peerName: _title,
+      peerAvatar: _otherAvatar,
+      kind: kind,
+    );
+    if (!mounted) return;
+    if (s == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('لا يمكن بدء المكالمة الآن — مكالمة جارية أو المحادثة لا تدعمها')));
+      return;
+    }
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(session: s)));
   }
 
   Future<void> _showSafetyNumber() async {
@@ -2283,6 +2304,20 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
          ]),
         ),
         actions: [
+          // أزرار المكالمة (0.17.0): المحادثات الخاصة الحقيقية فقط —
+          // لا قنوات ولا مجموعات ولا بوتات (لا ترد المكالمة) ولا المحفوظة
+          if (!widget.isGroup && widget.otherId != null && !widget.isBot) ...[
+            IconButton(
+              tooltip: 'مكالمة صوتية',
+              onPressed: () => _startCall(CallKind.voice),
+              icon: const Icon(Icons.call_outlined),
+            ),
+            IconButton(
+              tooltip: 'مكالمة مرئية',
+              onPressed: () => _startCall(CallKind.video),
+              icon: const Icon(Icons.videocam_outlined),
+            ),
+          ],
           if (widget.isChannel && widget.canPost)
             IconButton(
               tooltip: 'إحصاءات القناة',

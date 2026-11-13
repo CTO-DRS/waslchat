@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/call_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
@@ -13,6 +14,8 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
 import 'ai_screen.dart';
+import 'call_screen.dart';
+import 'calls_history_screen.dart';
 import 'channels_screen.dart';
 import 'chats_screen.dart';
 import 'communities_screen.dart';
@@ -35,11 +38,20 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
+    // المكالمات (0.17.0): الاستماع للواردات وفتح شاشة المكالمة فوراً
+    CallService.onIncoming = _openIncomingCall;
+    CallService.watchIncoming();
     // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkE2eKeys(context);
       _checkUpdates();
     });
+  }
+
+  /// مكالمة واردة — شاشة ملء فوق كل شيء
+  void _openIncomingCall(CallSession session) {
+    if (!mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(session: session)));
   }
 
   /// فحص «تحديث متوفر» بعد فتح التطبيق بثوانٍ (حتى لا يزاحم حوار المفاتيح)
@@ -111,6 +123,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     PresenceService.stop();
+    CallService.onIncoming = null;
+    CallService.stopWatching();
     super.dispose();
   }
 
@@ -118,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ChatsScreen(),
     CommunitiesScreen(),
     ChannelsScreen(),
-    _CallsScreen(),
+    CallsHistoryScreen(),
     SettingsScreen(),
   ];
 
@@ -240,148 +254,3 @@ class _NavBadge extends StatelessWidget {
   }
 }
 
-/// شاشة المكالمات: الميزة قادمة في المرحلة القادمة — عرض ترويجي
-/// يشرح ما ينتظر المستخدم (اتصال صوتي، مكالمة مرئية، تشفير طرف-لطرف)
-/// بدل شاشة فراغ جامدة.
-class _CallsScreen extends StatelessWidget {
-  const _CallsScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-          title: const Text('المكالمات',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 10, 24, 150),
-        children: [
-          const SizedBox(height: 14),
-          Center(
-            child: Container(
-              width: 128,
-              height: 128,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: WaslColors.gradient,
-                boxShadow: [
-                  BoxShadow(
-                    color: WaslColors.indigo.withValues(alpha: 0.35),
-                    blurRadius: 42,
-                    offset: const Offset(0, 16),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.call_outlined, size: 54, color: Colors.white),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Center(
-            child: Text('المكالمات الصوتية والمرئية',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              'بشفرتك نفسها: مكالمات مشفّرة طرف-لطرف\nداخل وصل شات، بلا وسيط يسمعكم',
-              textAlign: TextAlign.center,
-              style: TextStyle(height: 1.7, color: context.textTertiary, fontSize: 13.5),
-            ),
-          ),
-          const SizedBox(height: 28),
-          _CallFeature(
-            icon: Icons.mic_none_rounded,
-            color: WaslColors.indigo,
-            title: 'اتصال صوتي نقي',
-            desc: 'أحاديث صوتية واضحة تتكيف مع سرعة شبكتك تلقائياً',
-          ),
-          _CallFeature(
-            icon: Icons.videocam_outlined,
-            color: WaslColors.teal,
-            title: 'مكالمة مرئية',
-            desc: 'شاهد من تحادثك وجهاً لوجه بجودة تناسب اتصالك',
-          ),
-          _CallFeature(
-            icon: Icons.lock_outline_rounded,
-            color: WaslColors.violet,
-            title: 'تشفير طرف-لطرف',
-            desc: 'مفاتيح المكالمة على جهازيكما وحدكما، لا حتى الخادم',
-          ),
-          const SizedBox(height: 24),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: context.glass,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: context.hairline),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.notifications_active_outlined,
-                      size: 16, color: WaslColors.teal),
-                  const SizedBox(width: 8),
-                  Text('سنوافيك فور جاهزيتها في تحديث قادم',
-                      style: TextStyle(color: context.textSecondary, fontSize: 12.5)),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// بطاقة ميزة قادمة في شاشة المكالمات: أيقونة ملونة + عنوان + سطر شرح
-class _CallFeature extends StatelessWidget {
-  const _CallFeature({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.desc,
-  });
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String desc;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: context.glass,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: context.hairline),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: color, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
-                const SizedBox(height: 3),
-                Text(desc,
-                    style: TextStyle(height: 1.5, color: context.textTertiary, fontSize: 12.5)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

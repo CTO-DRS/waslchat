@@ -1,6 +1,6 @@
 # البنية التحتية والحسابات — وصل شات
 
-> مستودع خاص. لا كلمات مرور هنا (إلا ما في `secrets/`). آخر تحديث: 2026-11-13.
+> مستودع خاص. لا كلمات مرور هنا (إلا ما في `secrets/`). آخر تحديث: 2026-11-14.
 >
 > **حالة CI (2026-11-13):** تشغيلات Actions متوقفة مؤقتاً — نفاد رصيد الدقائق المجانية على مستوى الحساب (استهلاك مستودعات أخرى)، فتفشل كل البناءات في ثوانٍ قبل أي خطوة. الخيارات: إعادة الضبط الشهرية 1 ديسمبر، أو ترقية الخطة/إضافة وسيلة دفع، أو جعل المستودعات المستهلِكة عامة (Actions مجاني غير محدود للعام). البناء المحلي والاختبارات سليمة (0.16.1: تحليل نظيف و138/138 اختباراً).
 
@@ -49,12 +49,13 @@
 ## Supabase (الخادم)
 - مشروع `wasl-chat`، ref `hplzbillnbdjtufazrlp`، منطقة Frankfurt، خطة Free.
 - URL: https://hplzbillnbdjtufazrlp.supabase.co — حساب Supabase: cto.drs@gmail.com.
-- الترحيلات 001–014 مطبّقة (`supabase/`). **الباقي بالترتيب حتى 025_phase4.sql (المرحلة 4 — 0.13.0) ثم نشر دالة bots-api (RUNBOOK §6 بند 11 و§3.4).** المرحلة 5 (0.14.0) بلا ترحيل — تكفي إعادة نشر دالة `ai` (RUNBOOK §3.5).
+- الترحيلات 001–014 مطبّقة (`supabase/`). **الباقي بالترتيب حتى 028_calls.sql (المكالمات — 0.17.0) ثم نشر دالة bots-api وmoderation-ai وإعادة نشر push وai (RUNBOOK §6 بند 11–14 و§3.4–§3.7).**
+- 028_calls.sql (0.17.0): جدول `calls` بـRLS للطرفين ودالة `call_update` security definer وبثّ Realtime ومُحفّز `calls_push` (إشعار «مكالمة واردة» إلى push بالسر نفسه المستخرج من notify_push) وcron `wasl-calls-expiry` يومياً 04:44 (حذف السجل الأقدم من 90 يوماً).
 - 014_site_admin.sql: `contact_messages` (إدراج عام، قراءة للمشرف)، `site_downloads` + `track_download()`/`download_count()`، `app_admins` + `is_app_admin()`، و`admin_stats()`/`admin_users()`/`admin_downloads_daily()`.
 - المشرفون: cto.drs@gmail.com وinfo@cto-drs.com (إضافة مشرف: insert into app_admins(user_id) ...).
 - Auth redirect allow-list يتضمن `https://waslchat.app/**`.
-- Edge Functions: `ai` (محادثة وتلخيص وترجمة وتفريغ صوتي `transcribe` — المرحلة 5)، `push`، `media-cleanup`، `event-reminders`، `bots-api` (واجهة البوتات — تُنشر بـ`--no-verify-jwt` لأنها تحمي نفسها برمز البوت المُجزّأ).
-- pg_cron: `wasl-purge-expired` (كل 15 دقيقة)، `wasl-media-cleanup` (كل ساعة).
+- Edge Functions: `ai` (محادثة وتلخيص وترجمة وتفريغ صوتي `transcribe` — المرحلة 5)، `push` (رسائل + «مكالمة واردة» من 0.17.0 — إعادة نشر RUNBOOK §3.7)، `media-cleanup`، `event-reminders`، `bots-api` (واجهة البوتات — تُنشر بـ`--no-verify-jwt` لأنها تحمي نفسها برمز البوت المُجزّأ).
+- pg_cron: `wasl-purge-expired` (كل 15 دقيقة)، `wasl-media-cleanup` (كل ساعة)، `wasl-calls-expiry` (يومياً 04:44 — سجل المكالمات الأقدم من 90 يوماً).
 - Auth: بريد + Google + TOTP. `mailer_autoconfirm` مفعّل مؤقتاً حتى ربط SMTP (Brevo).
 - تنبيه: الخطة المجانية توقف المشروع بعد أسبوع خمول.
 
@@ -65,11 +66,12 @@
 
 ## خدمات أخرى
 - Gemini API (طبقة مجانية) لميزات وصل AI، الموديل في سرّ `GEMINI_MODEL`.
+- **TURN للمكالمات (اختياري — قرار مالك)**: STUN العام من Google مفعّل افتراضياً ويكفي معظم الشبكات؛ لإتاحة المكالمات خلف NAT متماثل أضف بيانات مزوّد TURN مجاني (مثل Metered/Open Relay — سقف مجاني شهري) أو coturn ذاتي الاستضافة إلى `AppConfig.iceServers` في `lib/config.dart` — سطر واحد معلق جاهز للملء، والملاحظة الحرجية: أثقل استهلاك TURN هو نقل الوسائط نفسه فلا طبقة مجانية تكفي نمواً.
 - Brevo (SMTP مجاني): حساب cto.drs@gmail.com، الإعداد لم يكتمل.
 - PayPal للدعم: الرابط في README و`.github/FUNDING.yml`.
 
 ## التطبيق
-- معرّف الحزمة: `app.waslchat.wasl_chat`. الإصدار الحالي 0.13.0+43.
+- معرّف الحزمة: `app.waslchat.wasl_chat`. الإصدار الحالي 0.17.0+48.
 - مفتاح التوقيع: `secrets/wasl-release.jks` (alias `wasl`). **لا تفقده.**
 - رابط الدخول العميق: `app.waslchat://login-callback`.
 - سطح المكتب: `.github/workflows/build-desktop.yml` يبني ويندوز/لينكس/ماك عند كل وسم `v*` (مثل `git tag v0.13.0 && git push --tags`) ويرفع النسخ Artifacts — مجلدات المنصة تُولَّد داخل الـCI ولا تثقل المستودع.
