@@ -17,8 +17,10 @@ import '../config.dart';
 import '../services/ai_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/block_service.dart';
+import '../services/channel_stats_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
+import '../services/saved_service.dart';
 import '../services/webio/web_files.dart';
 import '../services/media_service.dart';
 import '../services/moderation_service.dart';
@@ -44,6 +46,8 @@ class ChatScreen extends StatefulWidget {
     this.canPost = true,
     this.encrypted = false,
     this.starredOnly = false,
+    this.isSaved = false,
+    this.isBot = false,
   });
   final String conversationId;
   final String title;
@@ -52,11 +56,18 @@ class ChatScreen extends StatefulWidget {
   final bool isChannel;
   final bool canPost;
 
-  /// تشفير بين الطرفين (خاص + مجموعات خاصة فقط؛ القنوات وغرف المجتمعات لا)
+  /// تشفير بين الطرفين (خاص + مجموعات خاصة + المحفوظة فقط؛ القنوات وغرف
+  /// المجتمعات ومحادثات البوتات لا)
   final bool encrypted;
 
   /// يفتح المحادثة على الرسائل المميزة بنجمة فقط
   final bool starredOnly;
+
+  /// «رسائلي المحفوظة»: سحابة شخصية — لا معلومات مجموعة ولا مشاركون
+  final bool isSaved;
+
+  /// الطرف الآخر بوت (محادثة مباشرة غير مشفرة بالتصميم — البوت يقرأها)
+  final bool isBot;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -230,6 +241,46 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     if (b == null) return '';
     if (b < 1024 * 1024) return '${(b / 1024).ceil()} ك.ب';
     return '${(b / (1024 * 1024)).toStringAsFixed(1)} م.ب';
+  }
+
+  // مشاهدات القنوات الكبيرة (المرحلة 4): معرّف الرسالة ← عدد المشاهدات
+  final Map<String, int> _views = {};
+  final Set<String> _viewTracked = {};
+  bool _viewsBusy = false;
+
+  /// مشاهدات القنوات (المرحلة 4): نسجّل مشاهدتي للمنشورات الجديدة
+  /// ونحدّث العدّادات المعروضة تحت كل منشور
+  void _trackChannelViews(List<Map<String, dynamic>> msgs) {
+    if (!widget.isChannel || _viewsBusy) return;
+    final fresh = [
+      for (final m in msgs)
+        if (m['deleted_at'] == null && !_viewTracked.contains(m['id'])) m['id'] as String
+    ];
+    if (fresh.isEmpty && _views.isNotEmpty) return;
+    final allIds = [
+      for (final m in msgs)
+        if (m['deleted_at'] == null) m['id'] as String
+    ];
+    _viewsBusy = true;
+    () async {
+      try {
+        if (fresh.isNotEmpty) {
+          _viewTracked.addAll(fresh);
+          await ChannelStatsService.trackViews(fresh);
+        }
+        final counts = await ChannelStatsService.counts(allIds);
+        if (!mounted) return;
+        setState(() {
+          _views
+            ..clear()
+            ..addAll(counts);
+        });
+      } catch (_) {
+        // بلا ترحيل 025 أو خطأ شبكة: العدّادات تختفي ولا يتعطل شيء
+      } finally {
+        _viewsBusy = false;
+      }
+    }();
   }
 
   /// هل أنا مكتوم في مجتمع هذه الغرفة؟ (للافتة داخل المحادثة)
@@ -593,7 +644,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   // ---------- رمز الأمان ----------
-  bool get _showSafety => _e2e && !widget.isGroup && widget.otherId != null;
+  bool get _showSafety =>
+      _e2e && !widget.isGroup && widget.otherId != null && !widget.isBot;
 
   Future<void> _refreshVerified() async {
     if (!_showSafety) return;
@@ -1398,12 +1450,129 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
+  /// ورقة إحصاءات القناة (المشرفون): المتابعون والإجمالي والمتوسط
+  /// وآخر 30 منشوراً بعدّادات مشاهدتها
+  Future<void> _showChannelStats() async {
+    List<Map<String, dynamic>> rows;
+    try {
+      rows = await ChannelStatsService.stats(widget.conversationId);
+    } catch (e) {
+      _snack(e.toString().contains('admins only')
+          ? 'إحصاءات القناة لمشرفيها فقط'
+          : 'تعذّر تحميل الإحصاءات (تأكد من تشغيل ترحيل 025)');
+      return;
+    }
+    if (!mounted || rows.isEmpty) return;
+    final subs = (rows.first['subscribers'] as num?)?.toInt() ?? 0;
+    final total = (rows.first['total_views'] as num?)?.toInt() ?? 0;
+    final avg = (rows.first['avg_views'] as num?) ?? 0;
+    final posts = rows.where((r) => r['post_id'] != null).toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.72,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(children: [
+                Text('إحصاءات ${widget.title}',
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 12),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                  _statTile(ctx, Icons.people_outline,
+                      ChannelStatsService.formatCount(subs), 'متابع'),
+                  _statTile(ctx, Icons.remove_red_eye_outlined,
+                      ChannelStatsService.formatCount(total), 'إجمالي المشاهدات'),
+                  _statTile(ctx, Icons.insights_outlined,
+                      ChannelStatsService.formatCount(avg), 'متوسط المنشور'),
+                ]),
+              ]),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: posts.isEmpty
+                  ? Center(
+                      child: Text('لا منشورات بعد',
+                          style: TextStyle(color: ctx.textTertiary)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      itemCount: posts.length,
+                      itemBuilder: (_, i) {
+                        final p = posts[i];
+                        final v = (p['views'] as num?)?.toInt() ?? 0;
+                        final type = p['post_type'] as String? ?? 'text';
+                        var text = switch (type) {
+                          'image' => '📷 صورة',
+                          'voice' => '🎤 رسالة صوتية',
+                          'video' => '🎬 فيديو',
+                          'file' => '📎 ملف',
+                          _ => (p['post_content'] as String?) ?? '',
+                        };
+                        if (text.length > 90) text = '${text.substring(0, 90)}…';
+                        return ListTile(
+                          dense: true,
+                          title: Text(text,
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
+                          subtitle: Text(shortTime(p['post_created_at'] as String?),
+                              style: TextStyle(
+                                  color: ctx.textFaint, fontSize: 11)),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.remove_red_eye_outlined,
+                                size: 15, color: ctx.textTertiary),
+                            const SizedBox(width: 4),
+                            Text(ChannelStatsService.formatCount(v),
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ]),
+                        );
+                      },
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _statTile(BuildContext ctx, IconData icon, String value, String label) =>
+      Column(children: [
+        Icon(icon, size: 20, color: WaslColors.teal),
+        const SizedBox(height: 4),
+        Text(value,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        Text(label, style: TextStyle(fontSize: 11.5, color: ctx.textTertiary)),
+      ]);
+
   Future<void> _forward(Map<String, dynamic> m) async {
     List<Map<String, dynamic>> chats;
     try {
       chats = List<Map<String, dynamic>>.from(await supabase.rpc('my_chats') as List)
           .where((c) => c['conversation_id'] != widget.conversationId)
           .toList();
+      // هدف «رسائلي المحفوظة» أعلى القائمة دائماً (المرحلة 4)
+      try {
+        final savedId = await SavedService.id();
+        if (savedId != widget.conversationId) {
+          final last = await SavedService.lastMessage();
+          chats = [
+            {
+              'conversation_id': savedId,
+              'is_group': true,
+              'title': SavedService.title,
+              'avatar_url': null,
+              'last_type': last?['type'],
+            },
+            ...chats,
+          ];
+        }
+      } catch (_) {
+        // بلا ترحيل 025: التوجيه للمحفوظة غير متاح والبقية تعمل
+      }
     } catch (_) {
       _snack('تعذّر تحميل المحادثات');
       return;
@@ -1706,7 +1875,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   // ---------- معلومات المجموعة ----------
-  bool get _isPrivateGroup => widget.isGroup && !widget.isChannel && widget.encrypted;
+  bool get _isPrivateGroup =>
+      widget.isGroup && !widget.isChannel && widget.encrypted && !widget.isSaved;
 
   Future<void> _openGroupInfo() async {
     final r = await Navigator.push<GroupInfoResult>(
@@ -1784,6 +1954,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
          ]),
         ),
         actions: [
+          if (widget.isChannel && widget.canPost)
+            IconButton(
+              tooltip: 'إحصاءات القناة',
+              onPressed: _showChannelStats,
+              icon: const Icon(Icons.query_stats_rounded),
+            ),
           IconButton(
             tooltip: 'بحث',
             onPressed: () => setState(() => _searching = true),
@@ -1837,6 +2013,23 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       ),
       body: Column(
         children: [
+          if (widget.isBot)
+            Material(
+              color: context.glass,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(children: [
+                  const Icon(Icons.smart_toy_outlined, size: 16, color: WaslColors.violet),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                        'محادثة مع بوت — غير مشفرة طرف-لطرف، والبوت يقرأها عبر واجهته',
+                        style:
+                            TextStyle(fontSize: 12, color: context.textTertiary)),
+                  ),
+                ]),
+              ),
+            ),
           if (_disappear != null || _starredOnly)
             Material(
               color: context.glass,
@@ -1921,6 +2114,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       child: Text('لا نتائج', style: TextStyle(color: context.textTertiary)));
                 }
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
+                _trackChannelViews(all);
                 _scheduleDecrypt(all);
                 return ListView.builder(
                   reverse: true,
@@ -1970,6 +2164,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                               if (_stars.contains(m['id'])) ...[
                                 const Icon(Icons.star_rounded, size: 13, color: Colors.amber),
                                 const SizedBox(width: 3),
+                              ],
+                              if (widget.isChannel) ...[
+                                Icon(Icons.remove_red_eye_outlined,
+                                    size: 12,
+                                    color: mine ? Colors.white60 : context.textTertiary),
+                                const SizedBox(width: 3),
+                                Text(ChannelStatsService.formatCount(_views[m['id']] ?? 0),
+                                    style: TextStyle(
+                                        color: mine ? Colors.white70 : context.textSecondary,
+                                        fontSize: 11)),
+                                const SizedBox(width: 4),
                               ],
                               if (m['expires_at'] != null) ...[
                                 Icon(Icons.timer_outlined,

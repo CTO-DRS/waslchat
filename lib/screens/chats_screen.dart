@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
+import '../services/saved_service.dart';
 import '../theme.dart';
 import '../services/status_service.dart';
 import '../widgets/common.dart';
@@ -34,11 +35,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
   // الحالات/القصص: مجمّعة حسب صاحبها (حالتي أولاً)
   List<Map<String, dynamic>> _statusGroups = [];
 
+  // «رسائلي المحفوظة»: صف مثبّت أعلى القائمة (المرحلة 4)
+  String? _savedId;
+  String _savedPreview = '';
+
   @override
   void initState() {
     super.initState();
     _load();
     _loadStatuses();
+    _loadSaved();
     // تحديث القائمة فور وصول أي رسالة جديدة
     _channel = supabase
         .channel('chat-list')
@@ -156,9 +162,49 @@ class _ChatsScreenState extends State<ChatsScreen> {
     }
   }
 
+  /// جلب صف المحفوظة (يُنشأ عند أول استخدام) وسطر معاينتها المفكوك
+  Future<void> _loadSaved() async {
+    try {
+      final id = await SavedService.id();
+      final last = await SavedService.lastMessage();
+      final line = await SavedService.previewLine(last);
+      if (!mounted) return;
+      setState(() {
+        _savedId = id;
+        _savedPreview = line;
+      });
+    } catch (_) {
+      // بلا ترحيل 025: لا صف محفوظة وبقية القائمة تعمل
+    }
+  }
+
+  Widget _savedRow() {
+    return ListTile(
+      leading: CircleAvatar(
+        radius: 26,
+        backgroundColor: context.glass,
+        child: const Icon(Icons.bookmark_rounded, color: WaslColors.teal),
+      ),
+      title: const Text(SavedService.title,
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(
+          _savedPreview.isEmpty ? 'احفظ رسائلك وملفاتك هنا' : _savedPreview,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      onTap: () => _open(ChatScreen(
+        conversationId: _savedId!,
+        title: SavedService.title,
+        isGroup: true,
+        encrypted: true,
+        isSaved: true,
+      )),
+    );
+  }
+
   Future<void> _open(Widget screen) async {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     _load();
+    _loadSaved();
   }
 
   /// حالتي: فتح العارض إن وُجدت حالات، وإلا ورقة النشر
@@ -322,9 +368,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: () async {
-                await Future.wait([_load(), _loadStatuses()]);
+                await Future.wait([_load(), _loadStatuses(), _loadSaved()]);
               },
-              child: visible.isEmpty && archivedCount == 0
+              child: visible.isEmpty && archivedCount == 0 && _savedId == null
                   ? ListView(children: const [
                       SizedBox(height: 60),
                       GlassEmptyState(
@@ -336,6 +382,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 120),
                       itemCount: visible.length +
+                          (!_showArchived && _savedId != null ? 1 : 0) +
                           (!_showArchived && archivedCount > 0 ? 1 : 0) +
                           (!_showArchived && _statusGroups.isNotEmpty ? 1 : 0),
                       itemBuilder: (context, i) {
@@ -347,6 +394,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               onTapAuthor: _openAuthor,
                             );
                           }
+                          i -= 1;
+                        }
+                        if (!_showArchived && _savedId != null) {
+                          if (i == 0) return _savedRow();
                           i -= 1;
                         }
                         if (!_showArchived && archivedCount > 0) {
@@ -371,6 +422,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         final muted = c['muted'] == true;
                         final name = _nameOf(c);
                         final isGroup = c['is_group'] == true;
+                        final isBot = !isGroup && c['is_bot'] == true;
                         final unread = (c['unread'] as num?)?.toInt() ?? 0;
                         final otherId = c['other_id'] as String?;
                         final groupAvatar = c['avatar_url'] as String?;
@@ -417,6 +469,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontWeight: FontWeight.w700)),
                             ),
+                            if (isBot) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.smart_toy_outlined,
+                                  size: 15, color: WaslColors.violet),
+                            ],
                             if (muted) ...[
                               const SizedBox(width: 4),
                               Icon(Icons.notifications_off_outlined,
@@ -463,7 +520,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             title: name,
                             isGroup: isGroup,
                             otherId: otherId,
-                            encrypted: true,
+                            isBot: isBot,
+                            encrypted: isGroup || !isBot,
                           )),
                         );
                       },

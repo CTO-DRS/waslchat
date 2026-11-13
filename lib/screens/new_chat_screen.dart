@@ -4,6 +4,7 @@ import '../config.dart';
 import '../services/block_service.dart';
 import '../services/e2e_service.dart';
 import '../services/invite_service.dart';
+import '../services/username_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
@@ -40,23 +41,33 @@ class _NewChatScreenState extends State<NewChatScreen> {
     }
     setState(() => _searching = true);
     try {
+      final exact = UsernameService.parseFromInput(q);
       final data = await supabase
           .from('profiles')
-          .select('id, username, display_name, avatar_url, bio')
-          .ilike('username', '%$q%')
+          .select('id, username, display_name, avatar_url, bio, is_bot')
+          .ilike('username', '%${UsernameService.normalize(q)}%')
           .neq('id', supabase.auth.currentUser!.id)
           .limit(20);
-      if (mounted) {
-        setState(() => _results = List<Map<String, dynamic>>.from(data)
-            .where((u) => !BlockService.isBlocked(u['id'] as String))
-            .toList());
+      var found = List<Map<String, dynamic>>.from(data)
+          .where((u) => !BlockService.isBlocked(u['id'] as String))
+          .toList();
+      // مطابقة تامة أولاً: كتب @user أو رابط waslchat.app/@user → أعلى النتائج
+      if (exact != null) {
+        final row = await UsernameService.lookup(exact);
+        if (row != null &&
+            row['id'] != supabase.auth.currentUser!.id &&
+            !BlockService.isBlocked(row['id'] as String)) {
+          found = [row, ...found.where((u) => u['id'] != row['id'])];
+        }
       }
+      if (mounted) setState(() => _results = found);
     } finally {
       if (mounted) setState(() => _searching = false);
     }
   }
 
   Future<void> _open(Map<String, dynamic> user) async {
+    final isBot = user['is_bot'] == true;
     try {
       final convId = await supabase.rpc('create_direct_chat', params: {'other_id': user['id']});
       if (!mounted) return;
@@ -67,7 +78,9 @@ class _NewChatScreenState extends State<NewChatScreen> {
             conversationId: convId as String,
             title: (user['display_name'] ?? user['username']) as String,
             otherId: user['id'] as String,
-            encrypted: true,
+            // محادثات البوتات غير مشفرة — البوت يقرأها عبر واجهته (بصدق)
+            isBot: isBot,
+            encrypted: !isBot,
           ),
         ),
       );

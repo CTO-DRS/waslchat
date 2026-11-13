@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import '../services/username_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -125,6 +127,93 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// تغيير اسم المستخدم: فحص توفر حي + حفظ عبر الخادم (مرة كل 24 ساعة)
+  Future<void> _editUsername() async {
+    final ctrl = TextEditingController(text: _username);
+    final formKey = GlobalKey<FormState>();
+    bool? available;
+    bool checking = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => AlertDialog(
+          backgroundColor: context.surfaceAlt,
+          title: const Text('اسم المستخدم'),
+          content: Form(
+            key: formKey,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextFormField(
+                controller: ctrl,
+                prefixText: '@',
+                autovalidateMode: AutovalidateMode.disabled,
+                validator: (v) => UsernameService.validationError(v ?? ''),
+                onChanged: (v) {
+                  setSheet(() {
+                    available = null;
+                    checking = false;
+                  });
+                },
+              ),
+              const SizedBox(height: 8),
+              Text('رابطك العام: ${UsernameService.profileLink(ctrl.text.trim().isEmpty ? _username : UsernameService.normalize(ctrl.text))}',
+                  style: TextStyle(fontSize: 12, color: context.textTertiary)),
+              if (checking)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                final err = UsernameService.validationError(ctrl.text);
+                if (err != null) {
+                  formKey.currentState?.validate();
+                  return;
+                }
+                setSheet(() => checking = true);
+                final okAv = await UsernameService.available(ctrl.text);
+                setSheet(() {
+                  checking = false;
+                  available = okAv;
+                });
+              },
+              child: const Text('فحص التوفر'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            FilledButton(
+              onPressed: available == true
+                  ? () => Navigator.pop(ctx, true)
+                  : null,
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final newName = UsernameService.normalize(ctrl.text);
+    ctrl.dispose();
+    if (ok != true) return;
+    setState(() => _saving = true);
+    try {
+      final u = await UsernameService.set(newName);
+      if (!mounted) return;
+      setState(() => _username = u);
+      _snack('صار اسمك @$u');
+    } catch (e) {
+      _snack(UsernameService.errorLabel(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _copyProfileLink() async {
+    final link = UsernameService.profileLink(_username);
+    await Clipboard.setData(ClipboardData(text: link));
+    _snack('نُسخ رابط ملفك: $link');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -163,7 +252,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 const SizedBox(height: 8),
                 Center(
-                    child: Text('@$_username', style: TextStyle(color: context.textTertiary))),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: _editUsername,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text('@$_username',
+                            style: TextStyle(color: context.textTertiary)),
+                        const SizedBox(width: 4),
+                        Icon(Icons.edit_outlined,
+                            size: 14, color: context.textFaint),
+                      ]),
+                    ),
+                  ),
+                ),
+                if (_username.isNotEmpty)
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: _copyProfileLink,
+                      icon: const Icon(Icons.link_rounded, size: 16),
+                      label: Text('نسخ رابط waslchat.app/@$_username',
+                          style: const TextStyle(fontSize: 12.5)),
+                    ),
+                  ),
                 const SizedBox(height: 24),
                 TextField(
                   controller: _name,
