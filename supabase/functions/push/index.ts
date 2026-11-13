@@ -1,6 +1,8 @@
-// وصل شات: إرسال إشعار لكل عضو عند وصول رسالة جديدة
-// يُستدعى من Database Webhook على جدول messages (Insert)
+// وصل شات: إرسال إشعار لكل عضو عند وصول رسالة جديدة + إشعار «مكالمة واردة» (0.17.0)
+// يُستدعى من Database Webhook على جدول messages وجدول calls (Insert)
 // الأسرار المطلوبة: FCM_SERVICE_ACCOUNT (ملف JSON من Firebase) و WEBHOOK_SECRET
+// صيغة الطلب: { type:'INSERT', table:'messages'|'calls', record:{id,...} }
+// — جدول messages يتوافق مع الصيغة القديمة (بلا table أو table='messages').
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { importPKCS8, SignJWT } from "npm:jose@5";
@@ -51,6 +53,12 @@ Deno.serve(async (req) => {
   const id = payload?.record?.id;
   if (payload?.type !== "INSERT" || !id) return new Response("ignored");
 
+  if (payload?.table === "calls") return notifyCall(id);
+  return notifyMessage(id);
+});
+
+// ---------- إشعار رسالة جديدة (المنطق الأصلي كما هو) ----------
+async function notifyMessage(id: string): Promise<Response> {
   // نقرأ الرسالة من قاعدة البيانات بدل الثقة بمحتوى الطلب
   const { data: m } = await db.from("messages").select("*").eq("id", id).single();
   if (!m) return new Response("not found", { status: 404 });
@@ -123,4 +131,62 @@ Deno.serve(async (req) => {
   }));
 
   return new Response("ok");
-});
+}
+
+// ---------- إشعار «مكالمة واردة» (0.17.0) ----------
+// نقرأ المكالمة من قاعدة البيانات بدل الثقة بمحتوى الطلب، ولا ننبّه إلا
+// لمكالمة تُرن فعلاً (تكرار متأخر أو مكالمة انتهت قبل الإرسال = صمت).
+async function notifyCall(id: string): Promise<Response> {
+  const { data: c } = await db.from("calls").select("*").eq("id", id).single();
+  if (!c) return new Response("not found", { status: 404 });
+  if (c.status !== "ringing") return new Response("ignored");
+
+  const [{ data: caller }, { data: tokens }] = await Promise.all([
+    db.from("profiles").select("username, display_name").eq("id", c.caller_id).single(),
+    db.from("device_tokens").select("token").eq("user_id", c.callee_id),
+  ]);
+  if (!tokens?.length) return new Response("no devices");
+
+  const name = caller?.display_name ?? caller?.username ?? "وصل شات";
+  const title = "مكالمة واردة";
+  const body = c.kind === "video"
+    ? `🎬 ${name} يتصل بك مرئياً`
+    : `📞 ${name} يتصل بك صوتياً`;
+
+  const access = await googleAccessToken();
+  await Promise.all(tokens.map(async ({ token }) => {
+    const r = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: {
+            token,
+            notification: { title, body },
+            data: {
+              type: "call",
+              call_id: c.id,
+              conversation_id: c.conversation_id,
+              kind: c.kind,
+            },
+            android: {
+              priority: "high",
+              // مكالمات الطرف الواحد تُجمَّع بدل التراكم، وتُوجَّه إلى قناة
+              // «المكالمات» التي يجهزها التطبيق بأهمية عالية
+              collapse_key: c.conversation_id,
+              notification: { channel_id: "calls", tag: `call-${c.conversation_id}` },
+            },
+            apns: {
+              headers: { "apns-collapse-id": `call-${c.conversation_id}` },
+              payload: { aps: { sound: "default", "thread-id": String(c.conversation_id) } },
+            },
+          },
+        }),
+      },
+    );
+    if (r.status === 404) await db.from("device_tokens").delete().eq("token", token);
+  }));
+
+  return new Response("ok");
+}

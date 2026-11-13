@@ -48,6 +48,15 @@ class MainActivity : FlutterFragmentActivity() {
                             )
                             channel.description = "تنبيهات الرسائل الجديدة في محادثاتك"
                             nm.createNotificationChannel(channel)
+                            // قناة «المكالمات» (0.17.0): إشعارات المكالمة الواردة
+                            // بأهمية عالية تظهر فوراً — صوت الرنين داخل التطبيق
+                            val calls = NotificationChannel(
+                                "calls",
+                                "المكالمات",
+                                NotificationManager.IMPORTANCE_HIGH
+                            )
+                            calls.description = "تنبيهات المكالمات الصوتية والمرئية الواردة"
+                            nm.createNotificationChannel(calls)
                             result.success(true)
                         } else {
                             result.success(false)
