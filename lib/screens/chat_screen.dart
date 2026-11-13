@@ -48,6 +48,7 @@ class ChatScreen extends StatefulWidget {
     this.starredOnly = false,
     this.isSaved = false,
     this.isBot = false,
+    this.officialVerified = false,
   });
   final String conversationId;
   final String title;
@@ -62,6 +63,10 @@ class ChatScreen extends StatefulWidget {
 
   /// يفتح المحادثة على الرسائل المميزة بنجمة فقط
   final bool starredOnly;
+
+  /// شارة التوثيق الرسمية (0.14.0): تُمرَّر للقنوات المستقلة الموثّقة وغرف
+  /// المجتمعات الموثّقة — تظهر بجانب العنوان في رأس الشاشة فقط.
+  final bool officialVerified;
 
   /// «رسائلي المحفوظة»: سحابة شخصية — لا معلومات مجموعة ولا مشاركون
   final bool isSaved;
@@ -1941,9 +1946,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_title,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: Text(_title,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+                ),
+                if (widget.isGroup && widget.officialVerified) ...[
+                  const SizedBox(width: 4),
+                  const VerifiedBadge(size: 15),
+                ],
+              ]),
               if (_statusLine() != null)
                 Text(_statusLine()!,
                     style: TextStyle(

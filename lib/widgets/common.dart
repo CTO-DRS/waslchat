@@ -239,3 +239,25 @@ class UserAvatar extends StatelessWidget {
     );
   }
 }
+
+/// شارة التوثيق الرسمية (v0.13.0): علامة تحقق زرقاء بجانب اسم مجتمع أو قناة رسمية.
+/// المنح والسحب من الخادم لمسؤولي التطبيق حصراً عبر دوال ترحيل 025 (verify_community /
+/// verify_channel) — هنا العرض فقط بلا أي منطق كتابة.
+class VerifiedBadge extends StatelessWidget {
+  const VerifiedBadge({
+    super.key,
+    this.size = 16,
+    this.tooltip = 'حساب رسمي موثّق من وصل شات',
+  });
+  final double size;
+  final String tooltip;
+
+  /// أزرق التوثيق القياسي — ثابت في الوضعين الفاتح والداكن على كل الخلفيات.
+  static const color = Color(0xFF1D9BF0);
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: Icon(Icons.verified, size: size, color: color),
+      );
+}

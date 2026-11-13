@@ -578,7 +578,8 @@ class _BotDetailsSheetState extends State<_BotDetailsSheet> {
             ),
             Switch(
               value: _active,
-              activeColor: WaslColors.teal,
+              // توافق 3.47.9+: activeColor مهجورة بعد 3.31 والبديل activeThumbColor متاح في الإصدارين
+              activeThumbColor: WaslColors.teal,
               onChanged: _busy
                   ? null
                   : (v) async {

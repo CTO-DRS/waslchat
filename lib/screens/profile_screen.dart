@@ -144,7 +144,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextFormField(
                 controller: ctrl,
-                prefixText: '@',
+                // توافق 3.47.9: TextFormField لم يُعرِّف prefixText بعد — عبر InputDecoration المتاحة في الإصدارين
+                decoration: const InputDecoration(prefixText: '@'),
                 autovalidateMode: AutovalidateMode.disabled,
                 validator: (v) => UsernameService.validationError(v ?? ''),
                 onChanged: (v) {

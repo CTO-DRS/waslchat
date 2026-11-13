@@ -156,7 +156,7 @@ npx supabase functions deploy bots-api --no-verify-jwt
 
 ---
 
-## 6) ترحيلات قاعدة البيانات من 0.6.0 حتى 0.13.0 (مطلوبة قبل تثبيت آخر APK)
+## 6) ترحيلات قاعدة البيانات من 0.6.0 حتى 0.14.0 (مطلوبة قبل تثبيت آخر APK)
 
 شغّل بالترتيب في Supabase > SQL Editor (كل ملف وحده ثم Run):
 
@@ -181,7 +181,7 @@ npx supabase functions deploy bots-api --no-verify-jwt
 10. `supabase/024_community_events.sql` — أحداث المجتمع وتذكيراتها (0.12.0): جدولا `community_events` و`community_event_rsvps` بـRLS (قراءة لأعضاء المجتمع فقط — الكتابة عبر الدوال حصراً) + دوال: `community_event_create/update/delete` (للمشرفين أو منشئ الحدث — التعديل قبل البدء فقط ويعيد تسليح التذكير) و`community_event_respond` (سأحضر/ربما/لن أحضر/إلغاء لأي عضو على حدث لم ينتهِ) وقائمتا `community_events_list` (بالعدّادات وردّي وشارة انتهاء) و`community_event_rsvps_list` (بالأسماء) + وظيفتا cron: `wasl-event-reminders` كل 10 دقائق (تستدعي دالة event-reminders بالسر نفسه المستخرج من notify_push) و`wasl-events-expiry` يومياً 04:33 (حذف المنتهي قبل 30 يوماً).
    تحقق بعدها: `select proname from pg_proc where proname in ('community_event_create','community_event_update','community_event_delete','community_event_respond','community_events_list','community_event_rsvps_list');` يعيد 6 صفوف، و`select jobname, schedule from cron.job where jobname in ('wasl-event-reminders','wasl-events-expiry');` يعيد سطرين، و`select tablename, rowsecurity from pg_tables where tablename in ('community_events','community_event_rsvps');` يعيد صفاً بقيمة `t`، وبعد إنشاء حدث من التطبيق: `select * from community_events_list('<cid>');` يعيد صفه بلا خطأ.
 
-> مهم: حتى لا يُشغَّل 015/016/017/018/019/020/021/022/023/024/025، تعمل بقية الميزات (القفل، المظهر، الروابط) لكن الحظر والتحديث والدعوات والحالات والعرض-مرة-واحدة والسرية الأمامية وتعدد الأجهزة وتشفير الاسم/التفاعلات/صورة المجموعة وأدوات الإشراف والأحداث والمحفوظة وأسماء المستخدمين والبوتات والمشاهدات لن تعمل
+> مهم: حتى لا يُشغَّل 015/016/017/018/019/020/021/022/023/024/025/026، تعمل بقية الميزات (القفل، المظهر، الروابط) لكن الحظر والتحديث والدعوات والحالات والعرض-مرة-واحدة والسرية الأمامية وتعدد الأجهزة وتشفير الاسم/التفاعلات/صورة المجموعة وأدوات الإشراف والأحداث والمحفوظة وأسماء المستخدمين والبوتات والمشاهدات وشارة التوثيق لن تعمل
 > (التطبيق يتعامل بهدوء مع غيابها: المحادثات الخاصة تبقى على تشفير v1 الثابت حتى تطبيق 020/021، واسم مجموعة جديدة يبقى «مجموعة» إن فشل تثبيت الاسم المشفر، وأدوات الإشراف تظهر بلا خطأ لكن الخادم يرفض إجراءاتها).
 
 ### اختبار سريع لميزات 0.6.0 على الجهازين
@@ -299,6 +299,8 @@ npx supabase functions deploy bots-api --no-verify-jwt
    - **د) مشاهدات القنوات**: جدول `message_views` (مشاهدة واحدة لكل مستخدم لكل منشور بـRLS) + دوال `channel_track_views` و`channel_view_counts` و`channel_stats` (للمشرفين فقط).
    ثم انشر دالة الواجهة (§3.4): `npx supabase functions deploy bots-api --no-verify-jwt` (تحمي نفسها برمز البوت لا JWT، والتوثيق الكامل `docs/BOTS_API.md`).
    تحقق بعدها: `select proname from pg_proc where proname in ('saved_chat_get','username_set','profile_by_username','bot_create','bot_start_chat','bot_send_message','channel_track_views','channel_stats');` يعيد 8 صفوف، و`select count(*) from pg_tables where tablename in ('bots','message_views');` = 2، و`select saved_chat_get();` يعيد uuid ويعيد المعرف نفسه عند الإعادة، و`select username_available('ahmed_1');` = true و`select username_available('admin');` = false (محجوز)، و`select tgname from pg_trigger where tgname='bot_webhook_dispatch';` يعيد صفاً، ومحاولة `select public.bot_send_message(gen_random_uuid(), gen_random_uuid(), 'x');` من حساب مستخدم عادي ترفض (دالة الخدمة فقط)، وبعد إنشاء بوت من التطبيق: `select username, char_length(token_hash) from bots;` يعيد 64 (مُجزّأً لا خاماً).
+12. `supabase/026_verification.sql` — شارة التوثيق (0.14.0): عمودا `verified` على `communities` و`conversations` (للقنوات المستقلة — قنوات المجتمع ترث شارة مجتمعها) بلا جداول جديدة ولا سياسات كتابة إضافية (العمود يُقرأ عبر سياسات القراءة القائمة) + دالتا `verify_community` و`verify_channel` security definer لمسؤولي التطبيق حصراً (عبر `is_app_admin` من ترحيل 014 — الدوال ترفض غيرهم حتى لو استُدعيت خارج التطبيق) + إعادة تعريف قوائم القراءة الأربع `my_communities` و`discover_communities` و`my_channels` و`discover_channels` بنفس استعلاماتها مع عمود `verified` زائد.
+   تحقق بعدها: `select table_name from information_schema.columns where column_name='verified' and table_name in ('communities','conversations');` يعيد صفيْن، و`select proname from pg_proc where proname in ('verify_community','verify_channel');` يعيد صفيْن، وبعد منح مجتمع من حساب مسؤول التطبيق: `select verified from communities where id='<cid>';` = `t`، والنداء نفسه من حساب غير مسؤول يعطي خطأ `not allowed`، و`verify_channel('<conv>', true)` على قناة داخل مجتمع لا يغيّر شيئاً (الشرط: قناة مستقلة حصراً).
 
 ### اختبار ميزات 0.12.0 (أحداث المجتمع وتذكيراتها — بعد تشغيل 024 ونشر event-reminders §3.3)
 
@@ -339,6 +341,17 @@ npx supabase functions deploy bots-api --no-verify-jwt
 | 100 | بلا ترحيل 025 | قبل تشغيله: لا صف محفوظة، شاشة البوتات فارغة بلا إنشاء، لا عدّادات 👁 ولا تغيير اسم ولا مطابقة تامة — ولا يتعطل شيء آخر من التطبيق |
 
 > ملخص أمني للمرحلة 4: المحفوظة مشفرة كأي مجموعة خاصة (عضو وحيد)، ورمز البوت لا يُخزَّن خاماً أبداً (SHA-256) ويُوقَّع الويب هوك بتوقيع HMAC بسرّ مستقل، ومحادثات البوتات المباشرة غير مشفرة **معلَناً** بلافتة داخل الشاشة، والبوت في المجموعات الخاصة المشفرة يصل نصاً مشفراً لا يفكه (لا مفاتيح له)، ودوال الواجهة البرمجية بصلاحية service_role فقط لا يستدعيها مستخدم عادي.
+
+### اختبار ميزات 0.14.0 (شارة التوثيق — بعد تشغيل 026؛ لا تغيير على أي دالة Edge)
+
+| # | الاختبار | التوقع |
+|---|---|---|
+| 101 | شارة القوائم | مجتمع موثّق يظهر بعلامة التحقق الزرقاء في «مجتمعاتي» و«اكتشف مجتمعات»، وقناة مستقلة موثّقة في «قنواتي» والاكتشاف — والضغط المطوّل على الشارة يعرض تلميح «حساب رسمي موثّق من وصل شات» |
+| 102 | رأس المجتمع وغرفه | فتح مجتمع موثّق: الشارة بجانب الاسم في العنوان العلوي، وأي غرفة تُفتح منه تحمل الشارة بجانب العنوان في رأس المحادثة |
+| 103 | القناة الموثّقة وغيرها | فتح قناة مستقلة موثّقة: الشارة في رأس المحادثة؛ قناة غير موثّقة أو مجموعة عادية أو محادثة خاصة أو محادثة بوت: بلا شارة إطلاقاً |
+| 104 | المنح والسحب (المالك) | من حساب مسؤول التطبيق: `select public.verify_community('<cid>', true);` ثم `select verified from communities where id='<cid>';` = `t` — و`verify_channel('<conv>', true)` للقناة المستقلة — والسحب بـ`false` يخفي الشارة من كل الواجهات بعد التحديث |
+| 105 | الفرض من الخادم | مالك مجتمع عادي (غير مسؤول) يستدعي `verify_community` → خطأ `not allowed`؛ و`verify_channel` على قناة داخل مجتمع → لا يغيّر شيئاً (ترث شارة مجتمعها فقط) |
+| 106 | التوافق قبل 026 | قبل تشغيل الترحيل (قاعدة قديمة): القوائم والشاشات تعمل بلا خطأ ولا تظهر شارة (العمود المفقود يعود فارغاً والشرط `== true` يفشل بأمان) |
 
 ## 7) تفعيل النسخة الاحتياطية الليلية لقاعدة البيانات (مرة واحدة — 5 دقائق)
 
