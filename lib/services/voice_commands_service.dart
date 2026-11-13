@@ -75,13 +75,13 @@ class VoiceCommandsService {
     try {
       await _speech.listen(
         onResult: (r) => onHeard?.call(r.recognizedWords),
-        localeId: 'ar_SA',
         listenOptions: stt.SpeechListenOptions(
           partialResults: true,
           cancelOnError: true,
+          localeId: 'ar_SA',
+          listenFor: const Duration(seconds: 4),
+          pauseFor: const Duration(seconds: 2),
         ),
-        listenFor: const Duration(seconds: 4),
-        pauseFor: const Duration(seconds: 2),
       );
       // نمنح التعرف مدته القصوى ثم نقرأ آخر نص معروف
       await Future.delayed(const Duration(milliseconds: 4600));
