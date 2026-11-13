@@ -23,7 +23,8 @@ void main() {
     test('التطبيع يصلح الأحرف الكبيرة والمسافات والرموز كما يفعل الخادم', () {
       expect(UsernameService.normalize('  Ahmed.Doe@X  '), 'ahmed_doe_x');
       expect(UsernameService.normalize('@user'), 'user');
-      expect(UsernameService.normalize('أحمد'), '___');
+      // «أحمد» = 4 أحرف، والخادم يستبدل كل حرف غير مسموح بشرطة سفلية واحدة (regexp_replace)
+      expect(UsernameService.normalize('أحمد'), '____');
       // الصيغة الخام نفسها صارمة — التطبيع هو ما يجعلها مقبولة
       expect(UsernameService.format.hasMatch('Ahmed_1'), isFalse);
       expect(UsernameService.format.hasMatch('ahmed_1'), isTrue);
@@ -66,7 +67,8 @@ void main() {
       expect(BotService.usernameError('helper'), contains('_bot'));
       expect(BotService.usernameError('_bot'), isNotNull);
       expect(BotService.usernameError('helper_bot_extra_toolong_name'), isNotNull);
-      expect(BotService.usernameError('Helper_Bot'), isNotNull);
+      // الخادم (bot_create) يطبّع الحالة قبل الفحص فتُقبل — والمسافات تبقى فتُرفض
+      expect(BotService.usernameError('Helper_Bot'), isNull);
       expect(BotService.usernameError('has space_bot'), isNotNull);
     });
 
@@ -139,18 +141,20 @@ void main() {
   });
 
   group('SavedService — سحابة «رسائلي المحفوظة»', () {
-    test('معاينة أنواع الوسائط برموزها والفراغ بسطر الدعوة', () {
-      expect(SavedService.previewLine(null), contains('احفظ'));
-      expect(SavedService.previewLine({'type': 'image', 'message': 'x'}),
+    test('معاينة أنواع الوسائط برموزها والفراغ بسطر الدعوة', () async {
+      // previewLine غير متزامنة بطبيعتها (تفكّ نص المعاينة المشفر) —
+      // مسارات null والوسائط تعيد فوراً بلا شبكة
+      expect(await SavedService.previewLine(null), contains('احفظ'));
+      expect(await SavedService.previewLine({'type': 'image', 'message': 'x'}),
           '📷 صورة');
-      expect(SavedService.previewLine({'type': 'voice', 'message': 'x'}),
+      expect(await SavedService.previewLine({'type': 'voice', 'message': 'x'}),
           '🎤 رسالة صوتية');
-      expect(SavedService.previewLine({'type': 'video', 'message': 'x'}),
+      expect(await SavedService.previewLine({'type': 'video', 'message': 'x'}),
           '🎬 فيديو');
-      expect(SavedService.previewLine({'type': 'file', 'message': 'x'}),
+      expect(await SavedService.previewLine({'type': 'file', 'message': 'x'}),
           '📎 ملف');
-      expect(SavedService.previewLine({'type': 'text', 'message': 'مرحبا'}),
-          'مرحبا'); // النص الصريح يمر كما هو
+      expect(await SavedService.previewLine({'type': 'text', 'message': 'مرحبا'}),
+          'مرحبا'); // النص الصريح يمر كما هو بلا فك
     });
 
     test('عنوان السحابة ثابت', () {

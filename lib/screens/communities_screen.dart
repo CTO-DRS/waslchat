@@ -87,6 +87,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
           communityId: c['id'] as String,
           name: c['name'] as String,
           role: (c['role'] as String?) ?? 'member',
+          verified: c['verified'] == true,
         ),
       ),
     );
@@ -125,8 +126,13 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                   if (_mine.isNotEmpty) const SectionTitle('مجتمعاتي'),
                   ..._mine.map((c) => ListTile(
                         leading: _avatar(c['name'] as String),
-                        title: Text(c['name'] as String,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        title: Row(children: [
+                          Expanded(
+                            child: Text(c['name'] as String,
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                          if (c['verified'] == true) const VerifiedBadge(),
+                        ]),
                         subtitle: Text('${c['members']} عضو'
                             '${c['role'] == 'owner' ? ' · أنت المالك' : ''}'),
                         trailing: const Icon(Icons.chevron_left),
@@ -155,8 +161,13 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _avatar(c['name'] as String),
-                        title: Text(c['name'] as String,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        title: Row(children: [
+                          Expanded(
+                            child: Text(c['name'] as String,
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                          if (c['verified'] == true) const VerifiedBadge(),
+                        ]),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Row(

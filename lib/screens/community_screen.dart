@@ -14,10 +14,14 @@ class CommunityScreen extends StatefulWidget {
     required this.communityId,
     required this.name,
     required this.role,
+    this.verified = false,
   });
   final String communityId;
   final String name;
   final String role;
+
+  /// شارة التوثيق الرسمية (0.13.0) — من قائمة المجتمعات، وتُورّث لغرفه عند الفتح.
+  final bool verified;
 
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
@@ -77,6 +81,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
           isChannel: isChannel,
           canPost: !isChannel || role == 'owner' || role == 'admin',
           encrypted: false, // غرف المجتمعات غير مشفّرة في هذه المرحلة (خطة E2EE §6)
+          officialVerified: widget.verified,
         ),
       ),
     );
@@ -87,7 +92,17 @@ class _CommunityScreenState extends State<CommunityScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(
+            child: Text(widget.name,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          if (widget.verified) ...[
+            const SizedBox(width: 5),
+            const VerifiedBadge(size: 19),
+          ],
+        ]),
         actions: [
           IconButton(
               tooltip: 'الأحداث',

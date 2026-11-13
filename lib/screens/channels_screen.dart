@@ -93,6 +93,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           isChannel: true,
           canPost: role == 'owner' || role == 'admin',
           encrypted: false,
+          officialVerified: c['verified'] == true,
         ),
       ),
     );
@@ -133,8 +134,13 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                     final owner = c['role'] == 'owner';
                     return ListTile(
                       leading: _icon(),
-                      title: Text(c['title'] as String,
-                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      title: Row(children: [
+                        Expanded(
+                          child: Text(c['title'] as String,
+                              style: const TextStyle(fontWeight: FontWeight.w700)),
+                        ),
+                        if (c['verified'] == true) const VerifiedBadge(),
+                      ]),
                       subtitle: Text(previewText(c, empty: '${c['subscribers']} متابع'),
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       trailing: Column(
@@ -189,8 +195,13 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                     ),
                   ..._discover.map((c) => ListTile(
                         leading: _icon(),
-                        title: Text(c['title'] as String,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        title: Row(children: [
+                          Expanded(
+                            child: Text(c['title'] as String,
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                          if (c['verified'] == true) const VerifiedBadge(),
+                        ]),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Row(

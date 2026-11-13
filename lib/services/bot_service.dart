@@ -34,9 +34,19 @@ class BotService {
     return u.replaceAll(RegExp('[^a-z0-9_]'), '_');
   }
 
+  /// الصيغة كما يقبلها الخادم حرفياً في bot_create (ترحيل 025):
+  /// lower + trim + إسقاط @ من البداية — بلا استبدال للأحرف (المسافة تُرفض)
+  static String serverForm(String raw) {
+    var u = raw.trim().toLowerCase();
+    if (u.startsWith('@')) u = u.substring(1);
+    return u;
+  }
+
   /// رسالة خطأ عربية لاسم البوت، أو null إن سليم
+  /// (تُطابق قرار الخادم في bot_create: يطبّع الحالة ثم يفحص الصيغة —
+  /// فالمسافات والرموز تُرفض وليست تُستبدل، والحروف الكبيرة تُطبَّع وتُقبل)
   static String? usernameError(String raw) {
-    final u = normalizeUsername(raw);
+    final u = serverForm(raw);
     if (!u.endsWith('_bot')) return 'اسم البوت يجب أن ينتهي بـ_bot';
     if (!usernameFormat.hasMatch(u)) {
       return '4–20 حرفاً إنجليزياً صغيراً ورقماً وشرطة سفلية، وينتهي بـ_bot';
