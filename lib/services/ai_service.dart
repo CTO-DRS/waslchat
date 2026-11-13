@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../config.dart';
 
 /// الاتصال بدالة «وصل AI» على Supabase
@@ -24,4 +27,18 @@ class AiService {
   /// target: 'ar' أو 'en'
   static Future<String> translate(String text, String target) =>
       _call({'mode': 'translate', 'text': text, 'target': target});
+
+  /// تفريغ رسالة صوتية نصاً (المرحلة 5): يُرسل الصوت بترميز base64 بعد موافقة
+  /// المستخدم الصريحة — يمر عبر خادم وصل إلى Gemini ولا يُخزَّن في أي منهما.
+  /// [mime]: 'audio/mp4' (جوال/سطح مكتب) أو 'audio/webm' (ويب).
+  static Future<String> transcribe(Uint8List bytes, {required String mime}) async {
+    if (bytes.length > 10 * 1024 * 1024) {
+      throw Exception('الصوت أطول من الحد المسموح');
+    }
+    return _call({
+      'mode': 'transcribe',
+      'audio_b64': base64Encode(bytes),
+      'mime': mime,
+    });
+  }
 }

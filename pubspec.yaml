@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.15.0+45
+version: 0.16.0+46
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -30,6 +30,7 @@ dependencies:
   url_launcher: ^6.3.0
   local_auth: ^2.3.0
   web: ^1.1.0
+  speech_to_text: ^7.5.0
 
 dev_dependencies:
   flutter_test:

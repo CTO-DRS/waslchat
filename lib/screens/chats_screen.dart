@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../services/status_service.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
+import '../widgets/motion.dart';
 import 'ai_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
@@ -386,38 +387,50 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           (!_showArchived && archivedCount > 0 ? 1 : 0) +
                           (!_showArchived && _statusGroups.isNotEmpty ? 1 : 0),
                       itemBuilder: (context, i) {
-                        if (!_showArchived && _statusGroups.isNotEmpty) {
-                          if (i == 0) {
-                            return StatusStrip(
-                              groups: _statusGroups,
-                              onTapMe: _openMine,
-                              onTapAuthor: _openAuthor,
-                            );
-                          }
-                          i -= 1;
-                        }
-                        if (!_showArchived && _savedId != null) {
-                          if (i == 0) return _savedRow();
-                          i -= 1;
-                        }
-                        if (!_showArchived && archivedCount > 0) {
-                          if (i == 0) {
-                            return ListTile(
-                              leading: CircleAvatar(
-                                radius: 26,
-                                backgroundColor: context.glass,
-                                child: const Icon(Icons.archive_outlined, color: WaslColors.violet),
-                              ),
-                              title: const Text('المؤرشفة',
-                                  style: TextStyle(fontWeight: FontWeight.w700)),
-                              trailing: Text('$archivedCount',
-                                  style: TextStyle(color: context.textTertiary)),
-                              onTap: () => setState(() => _showArchived = true),
-                            );
-                          }
-                          i -= 1;
-                        }
-                        final c = visible[i];
+                        // حركة دخول متدرجة للعناصر الأولى (المرحلة 5)
+                        final item = _chatListItem(i, visible, archivedCount);
+                        return i <= 8 ? MotionStagger(index: i, child: item) : item;
+                      },
+                    ),
+            ),
+    ),
+    );
+  }
+
+  /// عنصر قائمة المحادثات رقم i (شريط الحالات أو المحفوظة أو المؤرشفة أو محادثة)
+  Widget _chatListItem(int i, List<Map<String, dynamic>> visible, int archivedCount) {
+    if (!_showArchived && _statusGroups.isNotEmpty) {
+      if (i == 0) {
+        return StatusStrip(
+          groups: _statusGroups,
+          onTapMe: _openMine,
+          onTapAuthor: _openAuthor,
+        );
+      }
+      i -= 1;
+    }
+    if (!_showArchived && _savedId != null) {
+      if (i == 0) return _savedRow();
+      i -= 1;
+    }
+    if (!_showArchived && archivedCount > 0) {
+      if (i == 0) {
+        return ListTile(
+          leading: CircleAvatar(
+            radius: 26,
+            backgroundColor: context.glass,
+            child: const Icon(Icons.archive_outlined, color: WaslColors.violet),
+          ),
+          title: const Text('المؤرشفة',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          trailing: Text('$archivedCount',
+              style: TextStyle(color: context.textTertiary)),
+          onTap: () => setState(() => _showArchived = true),
+        );
+      }
+      i -= 1;
+    }
+    final c = visible[i];
                         final pinned = c['pinned'] == true;
                         final muted = c['muted'] == true;
                         final name = _nameOf(c);
@@ -524,10 +537,5 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             encrypted: isGroup || !isBot,
                           )),
                         );
-                      },
-                    ),
-            ),
-    ),
-    );
   }
 }

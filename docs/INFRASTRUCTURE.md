@@ -47,11 +47,11 @@
 ## Supabase (الخادم)
 - مشروع `wasl-chat`، ref `hplzbillnbdjtufazrlp`، منطقة Frankfurt، خطة Free.
 - URL: https://hplzbillnbdjtufazrlp.supabase.co — حساب Supabase: cto.drs@gmail.com.
-- الترحيلات 001–014 مطبّقة (`supabase/`). **الباقي بالترتيب حتى 025_phase4.sql (المرحلة 4 — 0.13.0) ثم نشر دالة bots-api (RUNBOOK §6 بند 11 و§3.4).**
+- الترحيلات 001–014 مطبّقة (`supabase/`). **الباقي بالترتيب حتى 025_phase4.sql (المرحلة 4 — 0.13.0) ثم نشر دالة bots-api (RUNBOOK §6 بند 11 و§3.4).** المرحلة 5 (0.14.0) بلا ترحيل — تكفي إعادة نشر دالة `ai` (RUNBOOK §3.5).
 - 014_site_admin.sql: `contact_messages` (إدراج عام، قراءة للمشرف)، `site_downloads` + `track_download()`/`download_count()`، `app_admins` + `is_app_admin()`، و`admin_stats()`/`admin_users()`/`admin_downloads_daily()`.
 - المشرفون: cto.drs@gmail.com وinfo@cto-drs.com (إضافة مشرف: insert into app_admins(user_id) ...).
 - Auth redirect allow-list يتضمن `https://waslchat.app/**`.
-- Edge Functions: `ai`، `push`، `media-cleanup`، `event-reminders`، `bots-api` (واجهة البوتات — تُنشر بـ`--no-verify-jwt` لأنها تحمي نفسها برمز البوت المُجزّأ).
+- Edge Functions: `ai` (محادثة وتلخيص وترجمة وتفريغ صوتي `transcribe` — المرحلة 5)، `push`، `media-cleanup`، `event-reminders`، `bots-api` (واجهة البوتات — تُنشر بـ`--no-verify-jwt` لأنها تحمي نفسها برمز البوت المُجزّأ).
 - pg_cron: `wasl-purge-expired` (كل 15 دقيقة)، `wasl-media-cleanup` (كل ساعة).
 - Auth: بريد + Google + TOTP. `mailer_autoconfirm` مفعّل مؤقتاً حتى ربط SMTP (Brevo).
 - تنبيه: الخطة المجانية توقف المشروع بعد أسبوع خمول.

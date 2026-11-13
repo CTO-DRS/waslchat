@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -20,7 +21,9 @@ import '../services/block_service.dart';
 import '../services/channel_stats_service.dart';
 import '../services/e2e_service.dart';
 import '../services/forward_service.dart';
+import '../services/local_ai_service.dart';
 import '../services/saved_service.dart';
+import '../services/smart_search_service.dart';
 import '../services/webio/web_files.dart';
 import '../services/media_service.dart';
 import '../services/moderation_service.dart';
@@ -29,6 +32,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/media_bubbles.dart';
+import '../widgets/motion.dart';
 import '../widgets/report_dialog.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
@@ -132,6 +136,27 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   bool _viewOnce = false;
   DateTime? _recStart;
   Timer? _ticker;
+
+  // ---------- المرحلة 5: وصل AI المحلي والبحث الذكي والترجمة الفورية ----------
+  /// ذاكرة «فُتح عنصر مسبقاً» حتى لا تُعاد حركة الدخول عند كل إعادة بناء
+  final Set<String> _motionSeen = {};
+
+  /// الترجمة الفورية لهذه المحادثة (مفتاح لكل محادثة — تراه أنت وحدك)
+  bool _autoTranslate = false;
+  static const _autoTranslateKeyPrefix = 'autotranslate_';
+  bool _translateConfirming = false; // حوار موافقة مفتوح لا يُستدعى مرتين
+
+  /// الترجمات المفكوك ذاكرةً: معرف الرسالة ← الترجمة (جلسة واحدة)
+  final Map<String, String> _translations = {};
+  final Set<String> _translating = {};
+
+  /// تفريغ الصوتيات ذاكرةً: معرف الرسالة ← التفريغ (جلسة واحدة)
+  final Map<String, String> _transcripts = {};
+  final Set<String> _transcribing = {};
+
+  /// الردود الذكية المحلية (محسوبة من آخر رسالة وردت)
+  List<String> _smartReplies = const [];
+  String? _repliesFor;
 
   // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
   // نص فك التشفير لكل نص مشفّر: ciphertext -> النص الصريح (يتغيّر النص المشفّر عند التعديل)
@@ -324,6 +349,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     _refreshBlockState();
     unawaited(_refreshVerified());
     unawaited(_loadMuteState());
+    unawaited(_loadAutoTranslatePref());
     ScreenshotService.flagOf(widget.conversationId).then((v) {
       if (!mounted || !v) return;
       setState(() => _noScreenshots = true);
@@ -1270,6 +1296,272 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
+  /// سطر الترجمة الفورية تحت رسالة واردة — أو مؤشر «جارٍ الترجمة»
+  Widget _translationLine(Map<String, dynamic> m) {
+    final id = m['id'] as String;
+    final t = _translations[id];
+    if (t == null) {
+      if (_translating.contains(id)) {
+        return Padding(
+          padding: const EdgeInsets.only(top: 3),
+          child: Text('جارٍ الترجمة…',
+              style: TextStyle(
+                  color: mineColor(m), fontSize: 12, fontStyle: FontStyle.italic)),
+        );
+      }
+      return const SizedBox.shrink(); // لم تصل ترجمتها بعد — تظهر عند جهوزها
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(t,
+            style: TextStyle(
+                color: mineColor(m),
+                fontSize: 13.5,
+                height: 1.4,
+                fontStyle: FontStyle.italic)),
+      ),
+    );
+  }
+
+  /// لون نص الترجمة حسب صاحب الفقاعة
+  Color mineColor(Map<String, dynamic> m) =>
+      m['sender_id'] == _me ? Colors.white70 : context.textSecondary;
+
+  // ---------- المرحلة 5: الترجمة الفورية والردود الذكية والتفريغ ----------
+  static const _secure = FlutterSecureStorage();
+
+  Future<void> _loadAutoTranslatePref() async {
+    try {
+      final v = await _secure.read(
+          key: '$_autoTranslateKeyPrefix${widget.conversationId}');
+      if (!mounted || v == null) return;
+      setState(() => _autoTranslate = v == '1');
+    } catch (_) {}
+  }
+
+  Future<void> _toggleAutoTranslate() async {
+    if (!_autoTranslate && !_translateConfirming) {
+      // موافقة صريحة مرة واحدة: الترجمة ترسل نص الرسائل إلى Gemini
+      _translateConfirming = true;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('تشغيل الترجمة الفورية'),
+          content: const Text(
+              'ستُترجم الرسائل النصية الواردة تلقائياً ويظهر المترجم تحت الأصل. '
+              'للترجمة، يُرسل نص الرسائل الواردة إلى خادم وصل ثم إلى Google Gemini. '
+              'هذا النص لن يكون مشفّراً بين الطرفين أثناء الترجمة، والترجمة تُحفظ في جهازك لهذه الجلسة فقط. تتابع؟',
+              style: TextStyle(height: 1.6)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('تشغيل')),
+          ],
+        ),
+      );
+      _translateConfirming = false;
+      if (ok != true || !mounted) return;
+    }
+    final next = !_autoTranslate;
+    setState(() => _autoTranslate = next);
+    try {
+      await _secure.write(
+          key: '$_autoTranslateKeyPrefix${widget.conversationId}',
+          value: next ? '1' : '0');
+    } catch (_) {}
+    if (next) _snack('الترجمة الفورية تعمل — ستظهر الترجمة تحت الرسائل الواردة');
+  }
+
+  /// يترجم رسالة واردة في الخلفية (بعد فك تشفيرها محلياً)
+  Future<void> _translateIncoming(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    if (_translating.contains(id) || _translations.containsKey(id)) return;
+    final plain = _textOf(m);
+    if (plain == null || plain.trim().isEmpty) return; // لم يُفك بعد
+    if (E2eService.isEncrypted(plain)) return;
+    _translating.add(id);
+    final target = LocalAiService.isMostlyArabic(plain) ? 'en' : 'ar';
+    try {
+      final t = await AiService.translate(plain, target);
+      if (mounted && t.trim().isNotEmpty) {
+        setState(() => _translations[id] = t);
+      }
+    } catch (_) {
+      // بلا شبكة: تظهر الرسالة الأصلية وحدها
+    } finally {
+      _translating.remove(id);
+    }
+  }
+
+  /// جدولة ترجمة الرسائل الواردة الجديدة (تُستدعى بعد بناء القائمة)
+  void _scheduleTranslate(List<Map<String, dynamic>> msgs) {
+    if (!_autoTranslate) return;
+    for (final m in msgs) {
+      if (m['deleted_at'] != null) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      if (m['sender_id'] == _me) continue;
+      final id = m['id'] as String;
+      if (_translations.containsKey(id) || _translating.contains(id)) continue;
+      unawaited(_translateIncoming(m));
+    }
+  }
+
+  /// تفريغ رسالة صوتية نصاً: موافقة صريحة ثم إرسال الصوت لـGemini عبر خادم وصل
+  Future<void> _transcribeVoice(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    final cached = _transcripts[id];
+    if (cached != null) {
+      _showAiResult('تفريغ الرسالة الصوتية', Future.value(cached));
+      return;
+    }
+    if (_transcribing.contains(id)) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('تفريغ الرسالة الصوتية نصاً'),
+        content: const Text(
+            'سيُرسل الصوت إلى خادم وصل ثم إلى Google Gemini لتفريغه نصياً. '
+            'الصوت لن يُخزَّن ولا يُسجَّل، والتفريغ يظهر لك وحدك. تتابع؟',
+            style: TextStyle(height: 1.6)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('فرّغ')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    _transcribing.add(id);
+    _showAiResult('تفريغ الرسالة الصوتية', () async {
+      try {
+        final bytes = await _mediaBytes(m['media_url'] as String);
+        if (bytes == null) throw Exception('no audio');
+        final t = await AiService.transcribe(
+          bytes,
+          mime: kIsWeb ? 'audio/webm' : 'audio/mp4',
+        );
+        _transcripts[id] = t;
+        return t;
+      } finally {
+        _transcribing.remove(id);
+      }
+    }());
+  }
+
+  /// ورقة «وصل AI» لهذه المحادثة: ملخص محلي فوري أو ملخص سحابي بالموافقة
+  void _showAiMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.surfaceAlt,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.bolt_rounded, color: WaslColors.teal),
+              title: const Text('ملخص محلي فوري'),
+              subtitle: const Text('على جهازك — لا يغادر أي شيء، بلا موافقة ولا شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ملخص محلي (على جهازك)', _localSummary());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome, color: WaslColors.violet),
+              title: const Text('ملخص سحابي أعمق'),
+              subtitle: const Text('بموافقة صريحة — يمر عبر خادم وصل إلى Gemini'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _confirmSummarize();
+              },
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// الملخص المحلي: يجلب آخر 80 رسالة، يفك تشفيرها على الجهاز، ويلخّص محلياً
+  Future<String> _localSummary() async {
+    final rows = await supabase
+        .from('messages')
+        .select('id, content, type, deleted_at, profiles(display_name, username)')
+        .eq('conversation_id', widget.conversationId)
+        .order('created_at', ascending: false)
+        .limit(80);
+    final msgs = rows.reversed.toList();
+    final lines = <String>[];
+    for (final item in msgs) {
+      final m = item;
+      final p = m['profiles'] as Map<String, dynamic>?;
+      final who = (p?['display_name'] ?? p?['username'] ?? '؟') as String;
+      final type = m['type'] ?? 'text';
+      if (m['deleted_at'] != null) continue;
+      String what;
+      if (type == 'image') {
+        what = '[صورة]';
+      } else if (type == 'voice') {
+        what = '[رسالة صوتية]';
+      } else if (type == 'video') {
+        what = '[فيديو]';
+      } else if (type == 'file') {
+        what = '[ملف]';
+      } else {
+        final raw = (m['content'] ?? '') as String;
+        if (E2eService.isEncrypted(raw)) {
+          if (!_e2e) continue;
+          final plain = _plain[raw] ?? await _decrypt(raw);
+          if (plain == null) continue;
+          what = plain;
+        } else {
+          what = raw;
+        }
+      }
+      lines.add('$who: $what');
+    }
+    if (lines.isEmpty) return 'لا توجد رسائل لتلخيصها بعد.';
+    return LocalAiService.summarizeLines(lines);
+  }
+
+  /// تحديث الردود الذكية من آخر رسالة وردت نصاً (تُستدعى بعد بناء القائمة)
+  void _refreshSmartReplies(List<Map<String, dynamic>> newestFirst) {
+    if (!widget.canPost || widget.isSaved || widget.isChannel) {
+      if (_smartReplies.isNotEmpty || _repliesFor != null) {
+        _smartReplies = const [];
+        _repliesFor = null;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    Map<String, dynamic>? last;
+    for (final m in newestFirst) {
+      if (m['deleted_at'] != null) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      last = m;
+      break;
+    }
+    if (last == null || last['sender_id'] == _me) {
+      if (_smartReplies.isNotEmpty || _repliesFor != null) {
+        _smartReplies = const [];
+        _repliesFor = null;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    final id = last['id'] as String;
+    if (_repliesFor == id) return; // محسوبة من الرسالة نفسها
+    final text = _textOf(last);
+    if (text == null || E2eService.isEncrypted(text)) return; // لم يُفك بعد
+    _repliesFor = id;
+    final replies = LocalAiService.smartReplies(text);
+    if (mounted) setState(() => _smartReplies = replies);
+  }
+
   // ---------- وصل AI ----------
   /// التلخيص بعد E2E: التطبيق يجلب آخر 80 رسالة، يفك تشفيرها محلياً، ويرسل الأسطر للدالة
   Future<String> _summarize() async {
@@ -1656,6 +1948,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   void _messageActions(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) return;
     final isText = (m['type'] ?? 'text') == 'text';
+    final isVoice = (m['type'] ?? '') == 'voice';
     final text = isText ? _textOf(m) : null;
     if (isText && text == null) {
       _snack('جارٍ فك التشفير… حاول بعد لحظة');
@@ -1753,6 +2046,29 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               onTap: () {
                 Navigator.pop(ctx);
                 _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
+              },
+            ),
+          if (isVoice)
+            ListTile(
+              leading: const Icon(Icons.graphic_eq_rounded, color: WaslColors.teal),
+              title: Text(_transcripts.containsKey(m['id'])
+                  ? 'عرض التفريغ النصي'
+                  : 'تفريغ نصي (تجريبي)'),
+              subtitle: const Text('يُرسل الصوت بعد موافقتك الصريحة إلى Gemini'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _transcribeVoice(m);
+              },
+            ),
+          if (isVoice && _transcripts[m['id']]?.isNotEmpty == true)
+            ListTile(
+              leading: const Icon(Icons.translate_rounded, color: WaslColors.violet),
+              title: const Text('ترجمة التفريغ'),
+              onTap: () {
+                Navigator.pop(ctx);
+                final t = _transcripts[m['id']]!;
+                final isAr = RegExp(r'[\u0600-\u06FF]').hasMatch(t);
+                _showAiResult('ترجمة التفريغ', AiService.translate(t, isAr ? 'en' : 'ar'));
               },
             ),
           if (mine)
@@ -1996,8 +2312,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                           : WaslColors.teal),
             ),
           IconButton(
-            tooltip: 'لخّص المحادثة',
-            onPressed: _confirmSummarize,
+            tooltip: 'وصل AI للملخص',
+            onPressed: _showAiMenu,
             icon: const Icon(Icons.auto_awesome, color: WaslColors.violet),
           ),
           PopupMenuButton<String>(
@@ -2005,6 +2321,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               if (v == 'disappear') _changeDisappearing();
               if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
               if (v == 'screenshots') _toggleNoScreenshots();
+              if (v == 'autotranslate') _toggleAutoTranslate();
             },
             itemBuilder: (_) => [
               PopupMenuItem(
@@ -2015,6 +2332,24 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 PopupMenuItem(
                   value: 'disappear',
                   child: Text('الرسائل المختفية: ${disappearLabel(_disappear)}'),
+                ),
+              if (!widget.isChannel)
+                PopupMenuItem(
+                  value: 'autotranslate',
+                  child: Row(children: [
+                    Icon(
+                      Icons.translate_rounded,
+                      size: 20,
+                      color: _autoTranslate ? WaslColors.teal : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(_autoTranslate ? 'إيقاف الترجمة الفورية' : 'الترجمة الفورية'),
+                    if (_autoTranslate) ...[
+                      const Spacer(),
+                      const Icon(Icons.check_rounded,
+                          size: 18, color: WaslColors.teal),
+                    ],
+                  ]),
                 ),
               const PopupMenuItem(
                 value: 'screenshots',
@@ -2119,16 +2454,29 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                         if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') {
                           return false;
                         }
-                        return (_textOf(m) ?? '').toLowerCase().contains(q);
+                        // البحث الذكي (المرحلة 5): تطبيع عربي + تسامح أخطاء + مرادفات
+                        return SmartSearchService.matches(_textOf(m) ?? '', q);
                       }).toList();
                 if (q.isNotEmpty && msgs.isEmpty) {
                   _scheduleDecrypt(all);
                   return Center(
-                      child: Text('لا نتائج', style: TextStyle(color: context.textTertiary)));
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Text('لا نتائج', style: TextStyle(color: context.textTertiary)),
+                        const SizedBox(height: 8),
+                        Text(SmartSearchService.capabilityHint,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: context.textFaint, fontSize: 12)),
+                      ]),
+                    ),
+                  );
                 }
                 WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
                 _trackChannelViews(all);
                 _scheduleDecrypt(all);
+                _scheduleTranslate(all);
+                _refreshSmartReplies(all);
                 return ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),
@@ -2139,11 +2487,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                     final sender = _names[m['sender_id']];
                     final replyId = m['reply_to'] as String?;
                     final chips = _reactionChips(m);
-                    return Align(
-                      alignment: mine
-                          ? AlignmentDirectional.centerEnd
-                          : AlignmentDirectional.centerStart,
-                      child: GestureDetector(
+                    // حركة الدخول مرة واحدة لكل رسالة (المرحلة 5)
+                    final firstTime = _motionSeen.add(m['id'] as String);
+                    Widget bubble = GestureDetector(
                        onLongPress: () => _messageActions(m),
                        child: Container(
                         margin: const EdgeInsets.symmetric(vertical: 3),
@@ -2171,6 +2517,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                             if (replyId != null && m['deleted_at'] == null)
                               _quote(replyId, mine),
                             _body(m),
+                            // الترجمة الفورية تحت الرسالة الواردة (المرحلة 5)
+                            if (_autoTranslate &&
+                                !mine &&
+                                m['deleted_at'] == null &&
+                                (m['type'] ?? 'text') == 'text')
+                              _translationLine(m),
                             if (chips != null) chips,
                             const SizedBox(height: 2),
                             Row(mainAxisSize: MainAxisSize.min, children: [
@@ -2211,7 +2563,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                           ],
                         ),
                       ),
-                      ),
+                      );
+                    if (firstTime) {
+                      bubble = MotionBubble(child: bubble, mine: mine);
+                    }
+                    return Align(
+                      alignment: mine
+                          ? AlignmentDirectional.centerEnd
+                          : AlignmentDirectional.centerStart,
+                      child: bubble,
                     );
                   },
                 );
@@ -2245,7 +2605,41 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           else
           SafeArea(
             top: false,
-            child: Padding(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // الردود الذكية المحلية (المرحلة 5): شريحة ردود جاهزة على آخر رسالة وردت
+              if (_smartReplies.isNotEmpty && !_recording)
+                SizedBox(
+                  height: 44,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    children: [
+                      for (final r in _smartReplies)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: MotionScaleIn(
+                            child: ActionChip(
+                              avatar: const Icon(Icons.bolt_rounded,
+                                  size: 15, color: WaslColors.teal),
+                              label: Text(r,
+                                  style: const TextStyle(
+                                      fontSize: 12.5, fontWeight: FontWeight.w600)),
+                              backgroundColor: context.glass,
+                              side: BorderSide(color: context.hairline),
+                              onPressed: () {
+                                setState(() {
+                                  _text.text = r;
+                                  _text.selection = TextSelection.fromPosition(
+                                      TextPosition(offset: r.length));
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              Padding(
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
               child: Row(children: [
                 if (!_recording)
@@ -2307,6 +2701,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       ),
               ]),
             ),
+            ]),
           ),
         ],
       ),
