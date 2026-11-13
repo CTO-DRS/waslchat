@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config.dart';
 import '../services/event_service.dart';
+import '../services/hijri_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/motion.dart';
 
 /// أحداث المجتمع وتذكيراتها (v0.12.0 — ترحيل 024):
 /// قائمة أحداث المجتمع القادمة والجارية، وردود الحضور (سأحضر/ربما/لن أحضر)،
 /// والإنشاء والتعديل لمشرفي المجتمع (أو منشئ الحدث). التذكير يصل إشعاراً من الخادم.
+/// المرحلة 5 (0.14.0): عرض التاريخ الهجري بجانب الميلادي (زر في الشريط) —
+/// تقويم حسابي مدني قد يخالف الرؤية يوماً.
 class CommunityEventsScreen extends StatefulWidget {
   const CommunityEventsScreen({
     super.key,
@@ -27,12 +32,33 @@ class _CommunityEventsScreenState extends State<CommunityEventsScreen> {
   List<Map<String, dynamic>> _events = [];
   bool _loading = true;
 
+  /// عرض التاريخ الهجري مع الميلادي (المرحلة 5) — يُحفظ محلياً
+  bool _hijri = false;
+  static const _hijriKey = 'events_hijri_calendar';
+  static const _secure = FlutterSecureStorage();
+
   bool get _isAdmin => widget.myRole == 'owner' || widget.myRole == 'admin';
 
   @override
   void initState() {
     super.initState();
+    _loadHijriPref();
     _load();
+  }
+
+  Future<void> _loadHijriPref() async {
+    try {
+      final v = await _secure.read(key: _hijriKey);
+      if (!mounted || v == null) return;
+      setState(() => _hijri = v == '1');
+    } catch (_) {}
+  }
+
+  Future<void> _toggleHijri() async {
+    setState(() => _hijri = !_hijri);
+    try {
+      await _secure.write(key: _hijriKey, value: _hijri ? '1' : '0');
+    } catch (_) {}
   }
 
   void _snack(String m) =>
@@ -155,20 +181,14 @@ class _CommunityEventsScreenState extends State<CommunityEventsScreen> {
               Row(children: [
                 Icon(Icons.schedule, size: 14, color: context.textTertiary),
                 const SizedBox(width: 5),
-                Text(
-                  CommunityEventService.formatStartsAt(starts, now),
-                  style: TextStyle(fontSize: 12.5, color: context.textSecondary),
-                ),
-                if (!live && !ended) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    CommunityEventService.startsInLabel(starts.difference(now)),
-                    style: const TextStyle(
-                        fontSize: 12.5,
-                        color: WaslColors.teal,
-                        fontWeight: FontWeight.w700),
+                Expanded(
+                  child: Text(
+                    _hijri
+                        ? '${HijriService.formatBoth(starts)} · ${CommunityEventService.startsInLabel(starts.difference(now))}'
+                        : '${CommunityEventService.formatStartsAt(starts, now)} · ${CommunityEventService.startsInLabel(starts.difference(now))}',
+                    style: TextStyle(fontSize: 12.5, color: context.textSecondary),
                   ),
-                ],
+                ),
               ]),
             ],
             if ((ev['location'] as String?)?.isNotEmpty == true) ...[
@@ -259,9 +279,20 @@ class _CommunityEventsScreenState extends State<CommunityEventsScreen> {
                 Row(children: [
                   const Icon(Icons.schedule, size: 17, color: WaslColors.teal),
                   const SizedBox(width: 7),
-                  Text(
-                    '${CommunityEventService.formatStartsAt(starts, DateTime.now())} · ${CommunityEventService.startsInLabel(starts.difference(DateTime.now()))}',
-                    style: TextStyle(fontSize: 13.5, color: ctx.textSecondary),
+                  Expanded(
+                    child: Text(
+                      '${CommunityEventService.formatStartsAt(starts, DateTime.now())} · ${CommunityEventService.startsInLabel(starts.difference(DateTime.now()))}',
+                      style: TextStyle(fontSize: 13.5, color: ctx.textSecondary),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.event_repeat_outlined, size: 17, color: WaslColors.violet),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text('الهجري: ${HijriService.hijriShort(starts)}',
+                        style: TextStyle(fontSize: 13, color: ctx.textTertiary)),
                   ),
                 ]),
               ],
@@ -454,6 +485,14 @@ class _CommunityEventsScreenState extends State<CommunityEventsScreen> {
                     },
                   ),
                 ]),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    'الهجري: ${HijriService.hijriShort(DateTime(date.year, date.month, date.day, time.hour, time.minute))}',
+                    style: TextStyle(fontSize: 12, color: ctx.textTertiary),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Text('المدة', style: TextStyle(fontSize: 12.5, color: ctx.textTertiary)),
                 const SizedBox(height: 6),
@@ -544,6 +583,19 @@ class _CommunityEventsScreenState extends State<CommunityEventsScreen> {
                 style: TextStyle(color: context.textTertiary, fontSize: 12)),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: _hijri
+                ? 'التاريخ هجري وميلادي — اضغط للميلادي فقط'
+                : 'إظهار التاريخ الهجري مع الميلادي',
+            onPressed: _toggleHijri,
+            icon: Icon(
+              Icons.calendar_today_outlined,
+              size: 20,
+              color: _hijri ? WaslColors.violet : context.iconStd,
+            ),
+          ),
+        ],
       ),
       floatingActionButton: _isAdmin
           ? FloatingActionButton.extended(
@@ -574,7 +626,10 @@ class _CommunityEventsScreenState extends State<CommunityEventsScreen> {
                   onRefresh: _load,
                   child: ListView.builder(
                     itemCount: _events.length,
-                    itemBuilder: (context, i) => _card(_events[i]),
+                    itemBuilder: (context, i) => MotionStagger(
+                      index: i,
+                      child: _card(_events[i]),
+                    ),
                   ),
                 ),
     );

@@ -41,6 +41,32 @@ async function gemini(system: string, turns: Turn[]): Promise<string> {
     .trim();
 }
 
+// تفريغ صوتي (المرحلة 5): يمرر تسجيلاً واحداً بترميز base64 إلى Gemini inline
+async function geminiAudio(system: string, audioB64: string, mime: string): Promise<string> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": KEY },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [
+          {
+            role: "user",
+            parts: [{ inlineData: { mimeType: mime, data: audioB64 } }],
+          },
+        ],
+      }),
+    },
+  );
+  if (!res.ok) throw new Error(`gemini ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  return (j.candidates?.[0]?.content?.parts ?? [])
+    .map((p: { text?: string }) => p.text ?? "")
+    .join("")
+    .trim();
+}
+
 const SYSTEM_CHAT =
   "أنت «وصل AI»، مساعد ذكي داخل تطبيق المراسلة وصل شات. أجب بالعربية الواضحة وباختصار ما لم يطلب المستخدم غير ذلك، وبلغة المستخدم إن كتب بلغة أخرى. كن مفيداً ولطيفاً ودقيقاً، وقل لا أعرف إن لم تكن متأكداً.";
 
@@ -107,6 +133,22 @@ Deno.serve(async (req) => {
       const reply = await gemini(
         "لخّص هذه المحادثة بالعربية في نقاط قصيرة: أهم ما قيل، والقرارات، وأي مهام أو مواعيد مطلوبة. لا تخترع شيئاً غير موجود.",
         [{ role: "user", text: lines.join("\n") }],
+      );
+      return json({ reply });
+    }
+
+    if (mode === "transcribe") {
+      // تفريغ الرسائل الصوتية نصاً (المرحلة 5): التطبيق يرسل الصوت بعد موافقة
+      // صريحة من المستخدم — لا يُخزَّن الصوت هنا ولا يُسجَّل، يمر إلى Gemini فقط.
+      const audio = String(body.audio_b64 ?? "");
+      const mime = body.mime === "audio/webm" ? "audio/webm" : "audio/mp4";
+      if (!audio) return json({ error: "لا يوجد صوت للتفريغ" }, 400);
+      // حد 10.5 م.ب صوتاً (≈14 م.ب بترميز base64)
+      if (audio.length > 14_000_000) return json({ error: "الصوت أطول من الحد المسموح" }, 400);
+      const reply = await geminiAudio(
+        "هذا تسجيل صوتي من تطبيق مراسلة. اكتب تفريغاً نصياً دقيقاً لما يُقال فيه، بنفس لغة التسجيل، دون أي تعليق أو شرح أو علامات تنسيق زائدة. إن لم يكن فيه كلام مفهوم اكتب: لم أتمكن من فهم هذا الصوت.",
+        audio,
+        mime,
       );
       return json({ reply });
     }

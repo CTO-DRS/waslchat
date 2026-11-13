@@ -1,16 +1,23 @@
+import 'dart:io' show Platform;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
+import '../services/voice_commands_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/motion.dart';
+import 'ai_screen.dart';
 import 'channels_screen.dart';
 import 'chats_screen.dart';
 import 'communities_screen.dart';
 import 'e2e_key_screen.dart';
+import 'new_chat_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -61,6 +68,46 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// الأوامر الصوتية متاحة على الويب والجوال — سطح المكتب لا (خدمة النظام غير موجودة)
+  static bool get _voiceSupported => kIsWeb || Platform.isAndroid || Platform.isIOS;
+
+  void _handleVoiceCommand(VoiceCommand cmd) {
+    final action = cmd.action;
+    if (action.startsWith('tab:')) {
+      final i = int.tryParse(action.substring(4));
+      if (i != null && i >= 0 && i < _pages.length && mounted) {
+        setState(() => _index = i);
+      }
+      return;
+    }
+    if (action == 'ai') {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const AiScreen()));
+      return;
+    }
+    if (action == 'newchat') {
+      Navigator.push(
+          context, MaterialPageRoute(builder: (_) => const NewChatScreen()));
+    }
+  }
+
+  /// ورقة الأوامر الصوتية (المرحلة 5)
+  void _openVoiceCommands() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(ctx).scaffoldBackgroundColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: VoiceCommandsSheet(onCommand: _handleVoiceCommand),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     PresenceService.stop();
@@ -79,7 +126,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(index: _index, children: _pages),
+      body: Stack(children: [
+        IndexedStack(index: _index, children: _pages),
+        // زر الأوامر الصوتية (المرحلة 5): تجربة صوتية بلا لمس
+        if (_voiceSupported)
+          PositionedDirectional(
+            end: 16,
+            bottom: 96,
+            child: MotionScaleIn(
+              child: FloatingActionButton.small(
+                heroTag: 'voice-commands',
+                tooltip: 'الأوامر الصوتية',
+                backgroundColor: context.glass,
+                foregroundColor: context.textPrimary,
+                elevation: 0,
+                onPressed: _openVoiceCommands,
+                child: const Icon(Icons.mic_rounded),
+              ),
+            ),
+          ),
+      ]),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
