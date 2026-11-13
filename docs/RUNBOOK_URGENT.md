@@ -112,6 +112,14 @@ npx supabase functions deploy bots-api --no-verify-jwt
 - `--no-verify-jwt` مقصودة: الدالة تحمي نفسها برمز البوت المُجزّأ (لا JWT مستخدمين يمر منها)، والمنطق الحساس داخل دوال SQL بصلاحية `service_role` فقط.
 - تتطلب تشغيل `supabase/025_phase4.sql` أولاً. التوثيق الكامل للمطوّرين: `docs/BOTS_API.md`.
 
+## 3.5) نشر دالة `moderation-ai` بعد تحديث 0.15.0 (دقيقتان، مرة واحدة)
+```bash
+npx supabase functions deploy moderation-ai
+```
+- بلا `--no-verify-jwt`: الدالة تتحقق من JWT الطالب أولاً ثم من أنّه مشرف مجتمع عام مفعّل فيه المساعد، وتبحث وتكتب بمفتاح `service_role` بعد ذلك فقط.
+- تتطلب تشغيل `supabase/027_ai_moderation.sql` أولاً وضبط سر `GEMINI_API_KEY` (نفس سر دالة `ai` — إن كان مضبوطاً فهذا يعمل فوراً).
+- قبل نشرها تعمل كل أدوات الإشراف بلا خطأ وزر الفحص فقط يظهر رسالة «تعذّر تشغيل الفحص».
+
 ## 4) إضافة بصمات مفتاح التوقيع إلى Firebase (مهمة 3ج)
 
 البصمات في `secrets/KEYSTORE_INFO.txt` **تم التحقق منها فعلياً من ملف `wasl-release.jks` نفسه عبر keytool — متطابقة** (المفتاح باسم `wasl`، صالح حتى 2054).
@@ -156,7 +164,7 @@ npx supabase functions deploy bots-api --no-verify-jwt
 
 ---
 
-## 6) ترحيلات قاعدة البيانات من 0.6.0 حتى 0.14.0 (مطلوبة قبل تثبيت آخر APK)
+## 6) ترحيلات قاعدة البيانات من 0.6.0 حتى 0.15.0 (مطلوبة قبل تثبيت آخر APK)
 
 شغّل بالترتيب في Supabase > SQL Editor (كل ملف وحده ثم Run):
 
@@ -181,7 +189,7 @@ npx supabase functions deploy bots-api --no-verify-jwt
 10. `supabase/024_community_events.sql` — أحداث المجتمع وتذكيراتها (0.12.0): جدولا `community_events` و`community_event_rsvps` بـRLS (قراءة لأعضاء المجتمع فقط — الكتابة عبر الدوال حصراً) + دوال: `community_event_create/update/delete` (للمشرفين أو منشئ الحدث — التعديل قبل البدء فقط ويعيد تسليح التذكير) و`community_event_respond` (سأحضر/ربما/لن أحضر/إلغاء لأي عضو على حدث لم ينتهِ) وقائمتا `community_events_list` (بالعدّادات وردّي وشارة انتهاء) و`community_event_rsvps_list` (بالأسماء) + وظيفتا cron: `wasl-event-reminders` كل 10 دقائق (تستدعي دالة event-reminders بالسر نفسه المستخرج من notify_push) و`wasl-events-expiry` يومياً 04:33 (حذف المنتهي قبل 30 يوماً).
    تحقق بعدها: `select proname from pg_proc where proname in ('community_event_create','community_event_update','community_event_delete','community_event_respond','community_events_list','community_event_rsvps_list');` يعيد 6 صفوف، و`select jobname, schedule from cron.job where jobname in ('wasl-event-reminders','wasl-events-expiry');` يعيد سطرين، و`select tablename, rowsecurity from pg_tables where tablename in ('community_events','community_event_rsvps');` يعيد صفاً بقيمة `t`، وبعد إنشاء حدث من التطبيق: `select * from community_events_list('<cid>');` يعيد صفه بلا خطأ.
 
-> مهم: حتى لا يُشغَّل 015/016/017/018/019/020/021/022/023/024/025/026، تعمل بقية الميزات (القفل، المظهر، الروابط) لكن الحظر والتحديث والدعوات والحالات والعرض-مرة-واحدة والسرية الأمامية وتعدد الأجهزة وتشفير الاسم/التفاعلات/صورة المجموعة وأدوات الإشراف والأحداث والمحفوظة وأسماء المستخدمين والبوتات والمشاهدات وشارة التوثيق لن تعمل
+> مهم: حتى لا يُشغَّل 015/016/017/018/019/020/021/022/023/024/025/026/027، تعمل بقية الميزات (القفل، المظهر، الروابط) لكن الحظر والتحديث والدعوات والحالات والعرض-مرة-واحدة والسرية الأمامية وتعدد الأجهزة وتشفير الاسم/التفاعلات/صورة المجموعة وأدوات الإشراف والأحداث والمحفوظة وأسماء المستخدمين والبوتات والمشاهدات وشارة التوثيق والمساعد الذكي لن تعمل
 > (التطبيق يتعامل بهدوء مع غيابها: المحادثات الخاصة تبقى على تشفير v1 الثابت حتى تطبيق 020/021، واسم مجموعة جديدة يبقى «مجموعة» إن فشل تثبيت الاسم المشفر، وأدوات الإشراف تظهر بلا خطأ لكن الخادم يرفض إجراءاتها).
 
 ### اختبار سريع لميزات 0.6.0 على الجهازين
@@ -301,6 +309,8 @@ npx supabase functions deploy bots-api --no-verify-jwt
    تحقق بعدها: `select proname from pg_proc where proname in ('saved_chat_get','username_set','profile_by_username','bot_create','bot_start_chat','bot_send_message','channel_track_views','channel_stats');` يعيد 8 صفوف، و`select count(*) from pg_tables where tablename in ('bots','message_views');` = 2، و`select saved_chat_get();` يعيد uuid ويعيد المعرف نفسه عند الإعادة، و`select username_available('ahmed_1');` = true و`select username_available('admin');` = false (محجوز)، و`select tgname from pg_trigger where tgname='bot_webhook_dispatch';` يعيد صفاً، ومحاولة `select public.bot_send_message(gen_random_uuid(), gen_random_uuid(), 'x');` من حساب مستخدم عادي ترفض (دالة الخدمة فقط)، وبعد إنشاء بوت من التطبيق: `select username, char_length(token_hash) from bots;` يعيد 64 (مُجزّأً لا خاماً).
 12. `supabase/026_verification.sql` — شارة التوثيق (0.14.0): عمودا `verified` على `communities` و`conversations` (للقنوات المستقلة — قنوات المجتمع ترث شارة مجتمعها) بلا جداول جديدة ولا سياسات كتابة إضافية (العمود يُقرأ عبر سياسات القراءة القائمة) + دالتا `verify_community` و`verify_channel` security definer لمسؤولي التطبيق حصراً (عبر `is_app_admin` من ترحيل 014 — الدوال ترفض غيرهم حتى لو استُدعيت خارج التطبيق) + إعادة تعريف قوائم القراءة الأربع `my_communities` و`discover_communities` و`my_channels` و`discover_channels` بنفس استعلاماتها مع عمود `verified` زائد.
    تحقق بعدها: `select table_name from information_schema.columns where column_name='verified' and table_name in ('communities','conversations');` يعيد صفيْن، و`select proname from pg_proc where proname in ('verify_community','verify_channel');` يعيد صفيْن، وبعد منح مجتمع من حساب مسؤول التطبيق: `select verified from communities where id='<cid>';` = `t`، والنداء نفسه من حساب غير مسؤول يعطي خطأ `not allowed`، و`verify_channel('<conv>', true)` على قناة داخل مجتمع لا يغيّر شيئاً (الشرط: قناة مستقلة حصراً).
+13. `supabase/027_ai_moderation.sql` — مساعد الإشراف الذكي (0.15.0): عمود `ai_moderation` على `communities` + جدول `community_ai_flags` بـRLS (قراءة لمشرفي المجتمع فقط عبر is_community_admin — بلا أي سياسات كتابة للمستخدمين؛ دالة moderation-ai تكتب بمفتاح service_role بعد التحقق من أن الطالب مشرف) + فهرس فريد جزئي (message_id, category) يمنع تكرار الملاحظة غير المعالَجة + دوال: `community_set_ai_moderation` (لمشرفي المجتمع — ترفض المجتمعات الخاصة المشفرة بخطأ not public) و`community_ai_flags_list` (بأسماء المرسلين والغرف ومن عالج) و`community_ai_flag_resolve` (تجاهل/كتم/طرد/حذف/إنذار) + ثم انشر دالة moderation-ai (§3.5).
+   تحقق بعدها: `select tablename, rowsecurity from pg_tables where tablename='community_ai_flags';` يعيد صفاً بقيمة `t`، و`select proname from pg_proc where proname in ('community_set_ai_moderation','community_ai_flags_list','community_ai_flag_resolve');` يعيد 3 صفوف، و`select indexname from pg_indexes where tablename='community_ai_flags';` يعرض `community_ai_flags_unique` و`community_ai_flags_recent`، ومحاولة `insert into community_ai_flags (community_id, conversation_id, sender_id, category) values (gen_random_uuid(), gen_random_uuid(), auth.uid(), 'spam');` من مستخدم عادي تُرفض (بلا سياسة كتابة)، ومحاولة تفعيل المساعد على مجتمع غير عام تعطي خطأ `not public`.
 
 ### اختبار ميزات 0.12.0 (أحداث المجتمع وتذكيراتها — بعد تشغيل 024 ونشر event-reminders §3.3)
 
@@ -352,6 +362,17 @@ npx supabase functions deploy bots-api --no-verify-jwt
 | 104 | المنح والسحب (المالك) | من حساب مسؤول التطبيق: `select public.verify_community('<cid>', true);` ثم `select verified from communities where id='<cid>';` = `t` — و`verify_channel('<conv>', true)` للقناة المستقلة — والسحب بـ`false` يخفي الشارة من كل الواجهات بعد التحديث |
 | 105 | الفرض من الخادم | مالك مجتمع عادي (غير مسؤول) يستدعي `verify_community` → خطأ `not allowed`؛ و`verify_channel` على قناة داخل مجتمع → لا يغيّر شيئاً (ترث شارة مجتمعها فقط) |
 | 106 | التوافق قبل 026 | قبل تشغيل الترحيل (قاعدة قديمة): القوائم والشاشات تعمل بلا خطأ ولا تظهر شارة (العمود المفقود يعود فارغاً والشرط `== true` يفشل بأمان) |
+
+### اختبار ميزات 0.15.0 (مساعد الإشراف الذكي — بعد تشغيل 027 ونشر moderation-ai §3.5)
+
+| # | الاختبار | التوقع |
+|---|---|---|
+| 107 | التفعيل | شاشة الإشراف ← تبويب «المساعد الذكي» الجديد (السادس) ← مفتاح «تشغيل المساعد الذكي» يعمل ويُحفظ — تحقق SQL: `select ai_moderation from communities where id='<cid>';` |
+| 108 | الفحص عند الطلب | زر «فحص آخر الرسائل» بعد التفعيل: رسالة «فُحصت X رسالة…» وتظهر الملاحظات بالفئة واللون والسبب والغرفة والوقت، وخطورة عالية بلون أحمر — تحقق SQL: `select category, severity, excerpt from community_ai_flags order by created_at desc limit 5;` |
+| 109 | المعالجة | الضغط على ملاحظة ← ورقة القرار: «تجاهل الملاحظة» تنقلها للمُعالَجة، و«كتمت المرسل»/«طرّدت المرسل» تفتح ورقة العضو القائمة بأدوات 023 ثم تُعيّن الإجراء — وتظهر المُعالَجة خافتة بنص ما فُعل واسم مَن عالج |
+| 110 | يقترح ولا ينفذ | ملاحظة احتيال أو إساءة لا تُحذف رسالتها ولا يُكتم مرسلها تلقائياً — لا إجراء يحدث إلا بضغطة مشرف، وسجل الإشراف لا يُظهر أي إجراء بمنفّذ «مساعد» |
+| 111 | الفرض من الخادم | مجتمع خاص (غير عام): تفعيل المساعد يظهر لافتة «المجتمعات الخاصة المشفّرة لا تدعم المساعد» والنداء يرد `not public`؛ وعضو غير مشرف يستدعي `community_set_ai_moderation` → `not allowed`؛ وإدراج مباشر في `community_ai_flags` من مستخدم عادي مرفوض |
+| 112 | الهاطفتان | قبل تشغيل 027: التبويب يظهر والمفتاح يهبط لـ«إيقاف» بلا تعطل وبقية أدوات الإشراف تعمل؛ بعد الترحيل وقبل نشر الدالة: زر الفحص يظهر «تعذّر تشغيل الفحص» ولا شيء آخر يتأثر |
 
 ## 7) تفعيل النسخة الاحتياطية الليلية لقاعدة البيانات (مرة واحدة — 5 دقائق)
 
