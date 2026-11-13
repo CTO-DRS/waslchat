@@ -41,6 +41,7 @@ import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
+import 'voice_room_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -712,6 +713,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       return;
     }
     await Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(session: s)));
+  }
+
+  /// فتح غرفة الصوت الجماعية (0.18.0): للمجموعات الخاصة المشفّرة فقط
+  Future<void> _openVoiceRoom() async {
+    if (_isPrivateGroup) {
+      await showVoiceRoomIntro(
+          context, conversationId: widget.conversationId, title: _title);
+    }
   }
 
   Future<void> _showSafetyNumber() async {
@@ -2304,6 +2313,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
          ]),
         ),
         actions: [
+          // غرفة الصوت الجماعية (0.18.0): للمجموعات الخاصة المشفّرة فقط —
+          // لا قنوات ولا المحفوظة ولا المكالمات الفردية
+          if (_isPrivateGroup)
+            IconButton(
+              tooltip: 'غرفة صوت',
+              onPressed: _openVoiceRoom,
+              icon: const Icon(Icons.spatial_audio_off_rounded),
+            ),
           // أزرار المكالمة (0.17.0): المحادثات الخاصة الحقيقية فقط —
           // لا قنوات ولا مجموعات ولا بوتات (لا ترد المكالمة) ولا المحفوظة
           if (!widget.isGroup && widget.otherId != null && !widget.isBot) ...[
