@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
+import 'bots_screen.dart';
 import 'linked_devices_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
@@ -67,6 +68,14 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const LinkedDevicesScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.smart_toy_outlined, color: WaslColors.violet),
+            title: const Text('البوتات وواجهة المطوّرين'),
+            subtitle: const Text('أنشئ بوتات برمز وواجهة وويب هوك موقّع'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const BotsScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.password, color: WaslColors.teal),

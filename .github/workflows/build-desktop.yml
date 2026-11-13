@@ -1,0 +1,49 @@
+name: Build desktop
+# المرحلة 4: نسخة سطح المكتب (ويندوز / لينكس / ماك) — بناء عند كل إصدار مميز
+# بوسم v* (مثل v0.13.0) أو يدوياً من تبويب Actions. المجلدات الأصلية
+# (windows/linux/macos) تُولَّد في الـCI بـ flutter create كي لا تثقل المستودع.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+concurrency:
+  group: build-desktop
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows
+            artifact: wasl_chat_windows
+            path: build/windows/x64/runner/Release/*
+          - os: ubuntu-latest
+            target: linux
+            artifact: wasl_chat_linux
+            path: build/linux/x64/release/bundle/*
+          - os: macos-latest
+            target: macos
+            artifact: wasl_chat_macos
+            path: build/macos/Build/Products/Release/*.app
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.9
+          cache: true
+      # توليد مجلدات المنصة المطلوبة فقط (لا تمس الأندرويد والويب القائمين)
+      - run: flutter config --enable-${{ matrix.target }}-desktop
+      - run: flutter create . --project-name wasl_chat --platforms=${{ matrix.target }}
+      - run: flutter pub get
+      # وصل AI والبوتات والتحديث تعمل على سطح المكتب كأي سطح؛ منع لقطات
+      # الشاشة وقفل البصمة ميزات جوال ويُتخلى عنها بأمان على المكتب.
+      - run: flutter build ${{ matrix.target }} --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
