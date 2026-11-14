@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../services/device_security_service.dart';
 import '../services/e2e_service.dart';
 import '../theme.dart';
 
@@ -65,6 +68,8 @@ class _LinkedDevicesScreenState extends State<LinkedDevicesScreen> {
   }
 
   Future<void> _load() async {
+    // مطابقة فورية عند فتح الشاشة: جلسات أجهزة أُزيلت فتُسقط هنا أولاً
+    unawaited(DeviceSecurityService.reconcile());
     final rows = await E2eService.listDevices();
     if (!mounted) return;
     setState(() {
@@ -81,8 +86,8 @@ class _LinkedDevicesScreenState extends State<LinkedDevicesScreen> {
       builder: (c) => AlertDialog(
         title: const Text('إزالة الجهاز؟'),
         content: Text(mine
-            ? 'هذا هو جهازك الحالي: ستتوقف رسائل التشفير الجديدة عن الوصول إليه حتى تعيد فتح التطبيق فتُسجَّل له هوية جديدة.'
-            : 'لن يصله أي رسالة مشفرة جديدة من التطبيقات المحدثة، وإن ظل مسجلاً الدخول فسيُعيد تسجيل نفسه بهوية جديدة عند فتح التطبيق عليه وسيظهر هنا من جديد.'),
+            ? 'هذا هو جهازك الحالي: تُحذف مفاتيحه الأولية من الخادم فوراً وتُسقط جلساته على بقية الأجهزة لحظياً، وستتوقف رسائل التشفير الجديدة عن الوصول إليه حتى تعيد فتح التطبيق فتُسجَّل له هوية جديدة.'
+            : 'تُحذف مفاتيحه الأولية والمكممة ML-KEM من الخادم فوراً وتُسقط جلساته محلياً على بقية الأجهزة لحظياً بحدث الخادم فلن يصله أي رسالة مشفرة جديدة من التطبيقات المحدثة، وإن ظل مسجلاً الدخول فسيُعيد تسجيل نفسه بهوية جديدة عند فتح التطبيق عليه وسيظهر هنا من جديد.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
           FilledButton(
@@ -115,7 +120,7 @@ class _LinkedDevicesScreenState extends State<LinkedDevicesScreen> {
                   child: const Padding(
                     padding: EdgeInsets.all(14),
                     child: Text(
-                      'كل جهاز سجّل دخوله لهذا الحساب يولّد هوية تشفير ومفاتيح أولية خاصّة به لا تخرج منه. الرسائل الخاصة بين تطبيقين محدّثين تُشفَّر لكل جهاز على حدة، ورسائلك المرسلة تُقرأ على بقية أجهزتك أيضاً. إزالة جهاز توقف توصيل الرسائل المشفرة الجديدة إليه.',
+                      'كل جهاز سجّل دخوله لهذا الحساب يولّد هوية تشفير ومفاتيح أولية خاصّة به لا تخرج منه — ومنذ 0.24.0 يرافق كل مفتاح أولي مفتاح ما بعد الكم ML-KEM لبدء جلسات هجينة، وتدخل الوسائط الجلسة المتدرجة كالنصوص. إزالة جهاز إزالة كاملة: حذف مخزونه من الخادم فوراً وإسقاط جلساته على بقية الأجهزة لحظياً.',
                       style: TextStyle(height: 1.6),
                     ),
                   ),

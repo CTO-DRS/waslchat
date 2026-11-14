@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:pqcrypto/pqcrypto.dart';
 
 /// السرية الأمامية للمحادثات الخاصة — النواة النقية (بلا Flutter ولا Supabase).
 ///
@@ -37,9 +38,54 @@ class RatchetCrypto {
   static final Hmac _hmacSha = Hmac.sha256();
 
   static const infoX3dh = 'wasl-x3dh-v1';
+  static const infoX3dhPq = 'wasl-x3dh-pq-v1';
   static const infoRoot = 'wasl-dr-rk-v1';
   static const infoMsg = 'wasl-dr-msg-v1';
   static const _ff = 0xff;
+
+  /// محرك ML-KEM-768 (FIPS 203 — NIST Level 3) لبدء جلسات ما بعد الكم الهجين.
+  /// المفتاح العام 1184 بايت، نص التغليف 1088، السر المشترك 32 بايت.
+  static final KyberKem _pq = PqcKem.kyber768;
+  static const pqPubBytes = 1184;
+  static const pqCtBytes = 1088;
+  static const pqSsBytes = 32;
+
+  /// يولّد زوج ML-KEM-768 — null عند أي فشل (الفشل يهبط للمسار الكلاسيكي).
+  static (List<int>, List<int>)? pqGenerate() {
+    try {
+      final (pk, sk) = _pq.generateKeyPair();
+      if (pk.length != pqPubBytes || sk.length < 1000) return null;
+      return (pk, sk);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// تغليف ما بعد الكم على مفتاح أولي ML-KEM: يعيد (نص التغليف، السر المشترك).
+  /// null عند فشل الإدخال أو الخوارزمية — والمتصل يهبط للمسار الكلاسيكي.
+  static (List<int>, List<int>)? pqEncapsulate(List<int> pqPub) {
+    try {
+      if (pqPub.length != pqPubBytes) return null;
+      final (ct, ss) = _pq.encapsulate(Uint8List.fromList(pqPub));
+      if (ct.length != pqCtBytes || ss.length != pqSsBytes) return null;
+      return (ct, ss);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// فك تغليف ما بعد الكم بالمفتاح الخاص المخزّن محلياً. null عند الفشل.
+  static List<int>? pqDecapsulate(List<int> pqPriv, List<int> pqCt) {
+    try {
+      if (pqCt.length != pqCtBytes) return null;
+      final ss = _pq.decapsulate(
+          Uint8List.fromList(pqPriv), Uint8List.fromList(pqCt));
+      if (ss.length != pqSsBytes) return null;
+      return ss;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// أقصى عدد مفاتيح متخطاة محفوظة لكل جلسة (رسائل وصلت بلا ترتيب)
   static const maxSkipped = 512;
@@ -109,16 +155,21 @@ class RatchetCrypto {
 
   // ---------- X3DH ----------
 
-  static Future<Uint8List> _x3dhSecret(
-      List<List<int>> dhParts) async {
+  /// سرّ X3DH من أجزاء DH — نقية وقابلة للتمديد: الهجين ما بعد الكم يضيف سرّ ML-KEM
+  /// جزءاً رابعاً ويغيّر info فقط، فلا يختلط مسار الكمّ بمسار الكلاسيكي إطلاقاً.
+  static Future<Uint8List> x3dhSecret(List<List<int>> dhParts,
+      {String info = infoX3dh}) async {
     final ikm = BytesBuilder(copy: false)
       ..add(List<int>.filled(32, _ff));
     for (final p in dhParts) {
       ikm.add(p);
     }
-    final (sk, _) = await _hkdf64(ikm.toBytes(), Uint8List(32), infoX3dh);
+    final (sk, _) = await _hkdf64(ikm.toBytes(), Uint8List(32), info);
     return sk;
   }
+
+  static Future<Uint8List> _x3dhSecret(List<List<int>> dhParts) =>
+      x3dhSecret(dhParts);
 
   /// سر المبادر: يملك هويته وزوجَه المؤقت ويعرف هوية الطرف ومفتاحه الأولي.
   static Future<Uint8List> initiatorSecret({
@@ -146,6 +197,38 @@ class RatchetCrypto {
         await dh(identityMine, ephemeralRemote), // DH2 (تماثل DH2)
         await dh(prekeyMine, ephemeralRemote), // DH3 (تماثل DH3)
       ]);
+
+  /// سرّ المبادر الهجين (كلاسيكي + ما بعد الكم): نفس X3DH الثلاثي مع سرّ ML-KEM
+  /// من تغليف مفتاح أولي كمومي للطرف، وinfo مخصّصة يفصل المسارين.
+  static Future<Uint8List> initiatorSecretPq({
+    required SimpleKeyPair identityMine,
+    required SimplePublicKey identityRemote,
+    required SimpleKeyPair ephemeral,
+    required SimplePublicKey prekeyRemote,
+    required List<int> pqShared,
+  }) async =>
+      x3dhSecret([
+        await dh(identityMine, identityRemote), // DH1
+        await dh(ephemeral, identityRemote), // DH2
+        await dh(ephemeral, prekeyRemote), // DH3
+        pqShared, // ML-KEM-768 (ما بعد الكم)
+      ], info: infoX3dhPq);
+
+  /// سرّ المستجيب الهجين: فك تغليف ما بعد الكم بمفتاحه الأولي الخاص ثم نفس
+  /// تركيبة المبادر حرفياً — التطابق شرط نجاح الجلسة.
+  static Future<Uint8List> responderSecretPq({
+    required SimpleKeyPair identityMine,
+    required SimplePublicKey identityRemote,
+    required SimpleKeyPair prekeyMine,
+    required SimplePublicKey ephemeralRemote,
+    required List<int> pqShared,
+  }) async =>
+      x3dhSecret([
+        await dh(identityMine, identityRemote), // DH1 (تماثل DH1)
+        await dh(identityMine, ephemeralRemote), // DH2 (تماثل DH2)
+        await dh(prekeyMine, ephemeralRemote), // DH3 (تماثل DH3)
+        pqShared, // ML-KEM-768 (ما بعد الكم)
+      ], info: infoX3dhPq);
 
   // ---------- الترويسة ----------
 
@@ -180,6 +263,7 @@ class RatchetState {
     this.used = false,
     this.ekB64,
     this.prekeyId,
+    this.pqCtB64,
     this.ikB64,
     Map<String, Uint8List>? skipped,
   }) : skipped = skipped ?? {};
@@ -196,6 +280,7 @@ class RatchetState {
   bool used; // جرحت الجلسة نجاحاً ولو مرة (يمنع استبدالها برسالة أولى معاد تشغيلها)
   String? ekB64; // المفتاح المؤقت لأول رسالة (يُمسح بعد أول إرسال)
   int? prekeyId; // رقم المفتاح الأولي المسحوب لأول رسالة
+  String? pqCtB64; // نص تغليف ما بعد الكم لأول رسالة (يُمسح بعد أول إرسال)
   String? ikB64; // هوية جهاز المرسل (ترويسة الافتتاح فقط — جلسات v3 لكل جهاز)
   final Map<String, Uint8List> skipped; // "<rpubB64>:<n>" -> مفتاح الرسالة
 
@@ -212,6 +297,7 @@ class RatchetState {
         'used': used,
         'ek': ekB64,
         'pk': prekeyId,
+        'q': pqCtB64,
         'ik': ikB64,
         'sk': skipped.map((k, v) => MapEntry(k, base64Encode(v))),
       };
@@ -238,6 +324,7 @@ class RatchetState {
       used: j['used'] == true,
       ekB64: j['ek'] as String?,
       prekeyId: (j['pk'] as num?)?.toInt(),
+      pqCtB64: j['q'] as String?,
       ikB64: j['ik'] as String?,
       skipped: sk,
     );
@@ -269,6 +356,7 @@ class DoubleRatchet {
     required SimplePublicKey remoteRatchetPub,
     String? ekB64,
     int? prekeyId,
+    String? pqCtB64,
     String? identityPubB64,
   }) async {
     final pair = await RatchetCrypto.newKeyPair();
@@ -286,6 +374,7 @@ class DoubleRatchet {
       used: false,
       ekB64: ekB64,
       prekeyId: prekeyId,
+      pqCtB64: pqCtB64,
       ikB64: identityPubB64,
     );
   }
@@ -322,6 +411,7 @@ class DoubleRatchet {
     if (st.ekB64 != null && st.prekeyId != null) {
       header['e'] = st.ekB64;
       header['k'] = st.prekeyId;
+      if (st.pqCtB64 != null) header['q'] = st.pqCtB64; // ما بعد الكم
       if (st.ikB64 != null) header['i'] = st.ikB64;
     }
     final hdrB64 = RatchetCrypto.encodeHeader(header);
@@ -329,6 +419,7 @@ class DoubleRatchet {
     st.ns += 1;
     st.ekB64 = null;
     st.prekeyId = null;
+    st.pqCtB64 = null;
     st.used = true;
     final (key, nonce) = await RatchetCrypto.messageKey(mk);
     final box = await RatchetCrypto._aes.encrypt(
@@ -564,13 +655,26 @@ class V3Codec {
 
   /// الحد الأقصى لطول النص الصريح داخل v3 (يحفظ الرسالة كاملة داخل قيد 4000 حرف).
   /// صفر = الترويسة أكلت الميزانية (أجهزة كثيرة جداً) — يرجع المرسل لمسار v2.
-  static int plainLimit({required int peerDevices, required int myDevices}) {
-    var hdrRaw = _hdrBase + _perWrap * peerDevices + _perSelf * myDevices;
+  /// [initialPqWraps]: عدد أجهزة الطرف بلا جلسة قائمة ستبدأ افتتاحية هجينة ما بعد
+  /// الكم — نص تغليف ML-KEM-768 (~1088 بايت ≈ 1452 حرفاً b64) يضخم ترويسة
+  /// الرسالة الأولى وحدها، فيخصم من ميزانية النص في تلك الرسالة تحديداً.
+  static int plainLimit({
+    required int peerDevices,
+    required int myDevices,
+    int initialPqWraps = 0,
+  }) {
+    var hdrRaw = _hdrBase +
+        _perWrap * peerDevices +
+        _perSelf * myDevices +
+        _pqInitial * initialPqWraps;
     hdrRaw = hdrRaw * 4 ~/ 3 + 4; // تضخم base64 للترويسة
     final budget = (3950 - 3 - 1 - 45 - hdrRaw) * 3 ~/ 4;
     if (budget < 500) return 0;
     return budget.clamp(500, 2600);
   }
+
+  /// نصيب الافتتاحية الهجينة الإضافي: نص تغليف ML-KEM-768 بالـb64 + هامش JSON
+  static const _pqInitial = 1600;
 
   /// حزم رسالة v3 كاملة. [body] بصيغة v1.<nonce>.<ct>.<mac> تحت مفتاح المحتوى.
   static String pack({

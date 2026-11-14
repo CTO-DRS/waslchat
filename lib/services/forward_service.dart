@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart' show SecretKey;
@@ -8,8 +9,9 @@ import 'media_service.dart';
 
 /// إعادة توجيه رسالة إلى محادثة أخرى من قائمة «المحادثات».
 /// المحتوى يُفك على الجهاز ثم يُشفَّر من جديد بمفتاح المحادثة الهدف — الخادم لا يرى شيئاً.
-/// في المحادثات الخاصة: النص يُشفَّر عبر الجلسة المتدرجة v2 (سرية أمامية) إن أمكن،
-/// وتبقى بايتات الوسيط على مفتاح المحادثة الثابت (حدود هذا الإصدار موثقة في E2EE_PLAN).
+/// في المحادثات الخاصة: النص والميتا يُشفَّران عبر الجلسة المتدرجة (سرية أمامية)،
+/// والوسائط أيضاً من المرحلة 10 (0.24.0): مفتاح محتوى عشوائي للوسيط يُغلَّف داخل
+/// ميتا الرسالة المتدرجة — والمجموعات تبقى على مفتاحها المغلَّف كما هي.
 class ForwardService {
   ForwardService._();
 
@@ -59,14 +61,25 @@ class ForwardService {
         return true;
       }
       if (bytes == null) return false;
-      final enc = await E2eService.encryptBytes(key, conv, bytes);
+      final Uint8List enc;
       String meta = '';
-      if (text != null && text.isNotEmpty) {
-        meta = dm
-            ? (await E2eService.encryptDmText(
-                    conv, target['other_id'] as String, text)) ??
-                ''
-            : await E2eService.encryptText(key, conv, text);
+      if (dm) {
+        // المرحلة 10: وسائط الخاص المعاد توجيهها تدخل الجلسة المتدرجة كالمرسلة
+        // مباشرة — مفتاح محتوى عشوائي يُغلَّف داخل الميتا المتدرجة (مع الاسم إن وجد)
+        final mk = await E2eService.newContentKey();
+        enc = await E2eService.encryptBytes(mk, conv, bytes);
+        final metaMap = <String, dynamic>{
+          'mk': base64Encode(await mk.extractBytes()),
+          if (text != null && text.isNotEmpty) 'name': text,
+        };
+        meta = (await E2eService.encryptDmText(
+                conv, target['other_id'] as String, jsonEncode(metaMap))) ??
+            '';
+      } else {
+        enc = await E2eService.encryptBytes(key, conv, bytes);
+        if (text != null && text.isNotEmpty) {
+          meta = await E2eService.encryptText(key, conv, text);
+        }
       }
       final path = await MediaService.upload(
         conversationId: conv,

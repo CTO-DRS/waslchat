@@ -42,7 +42,6 @@ enum VerifyScanResult {
 ///   ويضبط profiles.e2e_version = 2؛ من يبدأ يسحب واحداً بـ e2e_claim_prekey
 ///   (سحب ذري لا يتكرر) ويشتق سرّ X3DH ثم يدير جلسة Double Ratchet محلياً
 ///   (lib/services/ratchet.dart) — فسرقة مفتاح الهوية لاحقاً لا تكشف الرسائل السابقة.
-/// - الصيغة: "v2.<ترويسة b64>.<ciphertext b64>.<mac b64>" وAAD = conv + الترويسة.
 ///
 /// المرحلة 2-ب — تعدد الأجهزة المرتبطة (v3):
 /// - كل جهاز يسجّل نفسه في جدول devices (ترحيل 021) بهوية X25519 ومخزون مفاتيح
@@ -58,8 +57,19 @@ enum VerifyScanResult {
 /// - من لا يدعم v3 (e2e_version < 3 أو بلا أجهزة) يبقى على v2/v1 كما هي.
 /// - من لا يملك الطرف الآخر مفاتيح أولية (تطبيق قديم) يبقى على مسار v1 تلقائياً،
 ///   والقاعدة: الأصغر معرفاً يبدأ v2 — يمنع سباق بدء مزدوج بلا وساطة.
-/// - الوسائط تبقى على مفتاح v1 الثابت في هذا الإصدار (تغليف مفاتيح الوسائط
-///   داخل الرسائل المتدرجة متأجل) — موثق في E2EE_PLAN حدود المرحلة.
+///
+/// المرحلة 10 — تشفير بلا منازع (0.24.0+55):
+/// - الوسائط في المحادثات الخاصة تدخل الجلسة المتدرجة (إغلاق ملاحظة 0.8.0):
+///   كل وسيط جديد يُشفَّر بمفتاح محتوى عشوائي خاص به (mk)، ويُغلف mk داخل
+///   ميتا الرسالة المشفرة بالجلسة المتدرجة نفسها — فسرقة مفتاح الهوية لاحقاً
+///   لا تكشف الوسائط السابقة كما لا تكشف النصوص. عند الاستقبال يُخزَّن mk
+///   محلياً برسالة (المخزن الآمن) فتبقى الوسائط قابلة للفك بعد تدوير الجلسة،
+///   والقديمة (قبل 0.24.0 بلا mk) تُقرأ بمفتاح v1 الثابت رجوعاً — توافق كامل.
+/// - بدء جلسات ما بعد الكم (هجين كلاسيكي + كمومي): مفاتيح ML-KEM-768 (FIPS 203)
+///   لكل مفتاح أولي من مخزون الجهاز (عمود pq_public_key — ترحيل 033)، والمبادر
+///   يغلّف سرّاً كمومياً إضافياً في ترويسة الافتتاحية (حقل q) ويُدمج في SK عبر
+///   HKDF بمسار info مستقل 'wasl-x3dh-pq-v1' — الطرف بلا مفاتيح كمومية
+///   (تطبيق قديم) يبقى على المسار الكلاسيكي حرفياً ولا يتأثر.
 ///
 /// المرحلة 2 — المجموعات الخاصة:
 /// - مفتاح مجموعة عشوائي 32B يثبّته مؤسس المجموعة أول مرة (دالة RPC بقفل استشاري
@@ -309,6 +319,7 @@ class E2eService {
       final all = await _storage.readAll();
       for (final k in all.keys) {
         if (k.startsWith(_prekeyPrivPrefix) ||
+            k.startsWith(_pqPrivPrefix) ||
             k.startsWith(_sessionPrefix) ||
             k.startsWith(_r3Prefix)) {
           await _storage.delete(key: k);
@@ -638,6 +649,9 @@ class E2eService {
 
   static const _sessionPrefix = 'e2e_ratchet_';
   static const _prekeyPrivPrefix = 'e2e_prekey_priv_';
+  static const _pqPrivPrefix = 'e2e_pq_priv_';
+  static const _mediaMkPrefix = 'e2e_media_mk_';
+  static const _devicePrekeysListPrefix = 'e2e_device_prekeys_';
 
   /// حجم مخزون المفاتيح الأولية غير المستهلكة الذي نحافظ عليه
   static const _prekeyPool = 25;
@@ -762,6 +776,7 @@ class E2eService {
       for (final id in stale) {
         await supabase.from('e2e_prekeys').delete().eq('id', id);
         await _storage.delete(key: '$_prekeyPrivPrefix$id');
+        await _storage.delete(key: '$_pqPrivPrefix$id');
       }
     } catch (_) {}
   }
@@ -831,13 +846,33 @@ class E2eService {
       final my = await _loadMyPair();
       final prekeyPair =
           await RatchetCrypto.keyPairFromSeed(base64Decode(privB64));
-      final sk = await RatchetCrypto.responderSecret(
-        identityMine: my,
-        identityRemote: other,
-        prekeyMine: prekeyPair,
-        ephemeralRemote:
-            RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
-      );
+      // مسار v2 على مخزون الحساب الكلاسيكي، وحقل q غير متوقع هنا — إن ظهر فلا
+      // نعرفة بلا مفتاح كمومي محلي (سلوك صادق: فشل بدل خلط مسارين)
+      Uint8List sk;
+      final q = hdr['q'];
+      if (q is String && q.isNotEmpty) {
+        final pqPrivB64 = await _storage.read(key: '$_pqPrivPrefix${hdr['k']}');
+        if (pqPrivB64 == null) return null;
+        final ss = RatchetCrypto.pqDecapsulate(
+            base64Decode(pqPrivB64), base64Decode(q));
+        if (ss == null) return null;
+        sk = await RatchetCrypto.responderSecretPq(
+          identityMine: my,
+          identityRemote: other,
+          prekeyMine: prekeyPair,
+          ephemeralRemote:
+              RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
+          pqShared: ss,
+        );
+      } else {
+        sk = await RatchetCrypto.responderSecret(
+          identityMine: my,
+          identityRemote: other,
+          prekeyMine: prekeyPair,
+          ephemeralRemote:
+              RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
+        );
+      }
       final st = await DoubleRatchet.startResponder(
           sk: sk, ratchetPair: prekeyPair);
       final plain = await DoubleRatchet.decrypt(st, convId, wire);
@@ -993,6 +1028,29 @@ class E2eService {
   }
 
   static Future<void> _resetDeviceIdentity() async {
+    // إزالة جهاز كاملة: أي هوية قديمة تُمسح جلساتها v3 وثَرَيات مخزونها
+    // الأولي (بمن فيه المفاتيح الكمومية) قبل توليد الهوية الجديدة
+    final oldId = _deviceId;
+    try {
+      final all = await _storage.readAll();
+      for (final k in all.keys) {
+        if (k.startsWith(_r3Prefix)) {
+          await _storage.delete(key: k);
+          _v3Cache.remove(k.substring(_r3Prefix.length));
+        }
+      }
+      if (oldId != null) {
+        final list = await _storage.read(key: '$_devicePrekeysListPrefix$oldId');
+        if (list != null) {
+          for (final id in list.split(',')) {
+            if (id.isEmpty) continue;
+            await _storage.delete(key: '$_prekeyPrivPrefix$id');
+            await _storage.delete(key: '$_pqPrivPrefix$id');
+          }
+          await _storage.delete(key: '$_devicePrekeysListPrefix$oldId');
+        }
+      }
+    } catch (_) {}
     final nid = _newUuid();
     final made = await _x25519.newKeyPair();
     await _storage.write(key: _deviceIdKey, value: nid);
@@ -1085,28 +1143,53 @@ class E2eService {
         toMake.add({'is_last_resort': false, 'device_id': devId});
       }
       if (toMake.isNotEmpty) {
-        // نولّد الأزواج محلياً ثم نرفعها ونعرف الخاص بمعرّف الخادم عبر مطابقة العام
+        // نولّد الأزواج محلياً (X25519 لكل مفتاح أولي + ML-KEM-768 مرافق له —
+        // المرحلة 10: بدء جلسات ما بعد الكم الهجين) ثم نرفعها ونعرف الخاص
+        // بمعرّف الخادم عبر مطابقة العام
         final pairs = <SimpleKeyPair>[];
+        final pqPrivs = <List<int>>[];
         for (final row in toMake) {
           final p = await RatchetCrypto.newKeyPair();
           pairs.add(p);
           row['public_key'] = base64Encode((await p.extractPublicKey()).bytes);
+          final pq = RatchetCrypto.pqGenerate();
+          if (pq != null) {
+            row['pq_public_key'] = base64Encode(pq.$1);
+            pqPrivs.add(pq.$2);
+          } else {
+            pqPrivs.add(const []);
+          }
         }
         final inserted = await supabase
             .from('e2e_prekeys')
             .insert(toMake)
             .select('id, public_key');
+        final privIds = <String>[];
         for (final row in inserted) {
           final pub = row['public_key'] as String;
-          for (final p in pairs) {
-            if (base64Encode((await p.extractPublicKey()).bytes) == pub) {
+          final rowId = '${row['id']}';
+          for (var i = 0; i < pairs.length; i++) {
+            if (base64Encode((await pairs[i].extractPublicKey()).bytes) == pub) {
               await _storage.write(
-                key: '$_prekeyPrivPrefix${row['id']}',
-                value: base64Encode(await p.extractPrivateKeyBytes()),
+                key: '$_prekeyPrivPrefix$rowId',
+                value: base64Encode(await pairs[i].extractPrivateKeyBytes()),
               );
+              if (pqPrivs[i].isNotEmpty) {
+                await _storage.write(
+                  key: '$_pqPrivPrefix$rowId',
+                  value: base64Encode(pqPrivs[i]),
+                );
+              }
+              privIds.add(rowId);
               break;
             }
           }
+        }
+        // سجل مفاتيح مخزون هذا الجهاز — يُسقط كاملاً عند إعادة تسجيل الهوية
+        // (إزالة جهاز كاملة: بلا ثَرَيات يتيمة لجهاز لم يعد موجوداً)
+        if (privIds.isNotEmpty) {
+          await _storage.write(
+              key: '$_devicePrekeysListPrefix$devId', value: privIds.join(','));
         }
       }
       // تقليم المستهلكة الأقدم من 30 يوماً (pg_cron ينظف أيضاً على الخادم)
@@ -1124,6 +1207,7 @@ class E2eService {
       for (final id in stale) {
         await supabase.from('e2e_prekeys').delete().eq('id', id);
         await _storage.delete(key: '$_prekeyPrivPrefix$id');
+        await _storage.delete(key: '$_pqPrivPrefix$id');
       }
     } catch (_) {}
   }
@@ -1207,7 +1291,8 @@ class E2eService {
   }
 
   /// بدء جلسة v3 نحو جهاز الطرف: سحب مفتاح من مخزونه الخاص + X3DH على هويتَي
-  /// الجهازين. بلا قاعدة ترتيب: سباق البدء يحل بتبنّي الافتتاحيات وأرشفتها.
+  /// الجهازين — وهجين ما بعد الكم تلقائياً إن نشر المخزون مفتاح ML-KEM (حقل q
+  /// في ترويسة الافتتاحية). بلا قاعدة ترتيب: سباق البدء يحل بتبنّي الافتتاحيات.
   static Future<V3MultiSession?> _startV3Session(
       String convId, String peerUserId, DeviceRow peerDev) async {
     final myPair = _devicePair;
@@ -1221,20 +1306,41 @@ class E2eService {
     final row = claimed.first as Map<String, dynamic>;
     final keyId = ((row['o_key_id'] ?? row['key_id']) as num?)?.toInt();
     final pkB64 = (row['o_public_key'] ?? row['public_key']) as String?;
+    final pqPubB64 = (row['o_pq_public_key'] ?? row['pq_public_key']) as String?;
     if (keyId == null || pkB64 == null) return null;
     final myDevPubB64 = base64Encode((await myPair.extractPublicKey()).bytes);
     final ek = await RatchetCrypto.newKeyPair();
-    final sk = await RatchetCrypto.initiatorSecret(
-      identityMine: myPair,
-      identityRemote: RatchetCrypto.publicKeyFromB64(peerDev.pub),
-      ephemeral: ek,
-      prekeyRemote: RatchetCrypto.publicKeyFromB64(pkB64),
-    );
+    // الهجين الكلاسيكي + الكمومي: إن نشر الطرف مفتاح ML-KEM نغلف سرّاً كمومياً
+    // إضافياً ويُدمج في SK بمسار info مستقل — والفشل يهبط للمسار الكلاسيكي حرفياً
+    String? pqCtB64;
+    Uint8List sk;
+    final pqPub = (pqPubB64 == null || pqPubB64.isEmpty)
+        ? null
+        : RatchetCrypto.pqEncapsulate(base64Decode(pqPubB64));
+    if (pqPub != null) {
+      final (ct, ss) = pqPub;
+      pqCtB64 = base64Encode(ct);
+      sk = await RatchetCrypto.initiatorSecretPq(
+        identityMine: myPair,
+        identityRemote: RatchetCrypto.publicKeyFromB64(peerDev.pub),
+        ephemeral: ek,
+        prekeyRemote: RatchetCrypto.publicKeyFromB64(pkB64),
+        pqShared: ss,
+      );
+    } else {
+      sk = await RatchetCrypto.initiatorSecret(
+        identityMine: myPair,
+        identityRemote: RatchetCrypto.publicKeyFromB64(peerDev.pub),
+        ephemeral: ek,
+        prekeyRemote: RatchetCrypto.publicKeyFromB64(pkB64),
+      );
+    }
     final st = await DoubleRatchet.startInitiator(
       sk: sk,
       remoteRatchetPub: RatchetCrypto.publicKeyFromB64(pkB64),
       ekB64: base64Encode((await ek.extractPublicKey()).bytes),
       prekeyId: keyId,
+      pqCtB64: pqCtB64,
       identityPubB64: myDevPubB64,
     );
     final ms = V3MultiSession(cur: st);
@@ -1253,8 +1359,19 @@ class E2eService {
     if (peerDevs.isEmpty) return null;
     final me = supabase.auth.currentUser?.id;
     final myDevs = me == null ? <DeviceRow>[] : await _activeDevices(me);
+    // أجهزة الطرف بلا جلسة قائمة ستبدأ افتتاحية هجينة ما بعد الكم — ترويستها
+    // أكبر (نص تغليف ML-KEM) فيخصم من ميزانية النص في هذه الرسالة تحديداً
+    var initialPq = 0;
+    for (final d in peerDevs) {
+      try {
+        final ms = await _loadV3(convId, d.id);
+        if (ms.cur == null) initialPq++;
+      } catch (_) {}
+    }
     final limit = V3Codec.plainLimit(
-        peerDevices: peerDevs.length, myDevices: myDevs.length);
+        peerDevices: peerDevs.length,
+        myDevices: myDevs.length,
+        initialPqWraps: initialPq);
     if (utf8.encode(plain).length > limit) return null;
     final contentKey = await _aes.newSecretKey();
     final kb = base64Encode(await contentKey.extractBytes());
@@ -1381,12 +1498,31 @@ class E2eService {
       if (myPair == null) return (null, null);
       final prekeyPair =
           await RatchetCrypto.keyPairFromSeed(base64Decode(privB64));
-      final sk = await RatchetCrypto.responderSecret(
-        identityMine: myPair,
-        identityRemote: RatchetCrypto.publicKeyFromB64(ikB64),
-        prekeyMine: prekeyPair,
-        ephemeralRemote: RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
-      );
+      // هجين ما بعد الكم في الافتتاحية (حقل q): فك التغليف بالمفتاح الكمومي
+      // الخاص لهذا المفتاح الأولي — وغيابه يعني فشل الجلسة بصدق (لا كلاسيكي جزئي)
+      Uint8List sk;
+      final q = hdr['q'];
+      if (q is String && q.isNotEmpty) {
+        final pqPrivB64 = await _storage.read(key: '$_pqPrivPrefix${hdr['k']}');
+        if (pqPrivB64 == null) return (null, null);
+        final ss = RatchetCrypto.pqDecapsulate(
+            base64Decode(pqPrivB64), base64Decode(q));
+        if (ss == null) return (null, null);
+        sk = await RatchetCrypto.responderSecretPq(
+          identityMine: myPair,
+          identityRemote: RatchetCrypto.publicKeyFromB64(ikB64),
+          prekeyMine: prekeyPair,
+          ephemeralRemote: RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
+          pqShared: ss,
+        );
+      } else {
+        sk = await RatchetCrypto.responderSecret(
+          identityMine: myPair,
+          identityRemote: RatchetCrypto.publicKeyFromB64(ikB64),
+          prekeyMine: prekeyPair,
+          ephemeralRemote: RatchetCrypto.publicKeyFromB64(hdr['e'] as String),
+        );
+      }
       final st =
           await DoubleRatchet.startResponder(sk: sk, ratchetPair: prekeyPair);
       final k = await DoubleRatchet.decrypt(st, convId, wire);
@@ -1452,8 +1588,11 @@ class E2eService {
     return _activeDevices(me);
   }
 
-  /// إزالة جهاز مرتبط: يُحذف سجله ومخزون مفاتيحه فلا تصله رسائل v3 جديدة
-  /// حتى يفتح التطبيق من جديد (فتُسجَّل له هوية جديدة يراها المالك).
+  /// إزالة جهاز مرتبط إزالة كاملة: يُحذف سجله ومخزون مفاتيحه الأولي (والمكمم)
+  /// من الخادم فوراً؛ وبقية الأجهزة — أجهزة الحساب وأجهزة الأطراف على حد سواء —
+  /// تلتقط حدث الحذف لحظياً (DeviceSecurityService) فتسقط جلسات هذا الجهاز
+  /// محلياً بلا انتظار؛ والجهاز المُزال نفسه يفتح التطبيق فيسجل هوية جديدة
+  /// كلياً (ويُمسح عنده كل أثر الجلسات القديمة) — يراه المالك كسجل جديد.
   static Future<void> removeDevice(String deviceId) async {
     final me = supabase.auth.currentUser?.id;
     if (me == null) return;
@@ -1473,6 +1612,116 @@ class E2eService {
       await _storage.delete(key: _devicePrivKey);
       _deviceId = null;
       _devicePair = null;
+    }
+  }
+
+  // ---------- مفاتيح الوسائط على الجلسة المتدرجة (المرحلة 10) ----------
+
+  /// mk صالح من ميتا مفكوكة — دالة نقية: نص b64 لـ32 بايت حصراً وإلا null.
+  static String? mediaKeyFromMeta(Map<String, dynamic>? meta) {
+    final v = meta?['mk'];
+    if (v is! String || v.isEmpty) return null;
+    try {
+      final b = base64Decode(v);
+      return b.length == 32 ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static SecretKey? _secretFromMkB64(String b64) {
+    try {
+      final b = base64Decode(b64);
+      return b.length == 32 ? SecretKeyData(b) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// يحفظ مفتاح وسيط رسالة (mk من الميتا المتدرجة) محلياً برسالة عند وصولها —
+  /// الجلسة المتدرجة تفك الميتا مرة واحدة فقط، والوسائط تُقرأ بعدها من هذا المخزن
+  /// (المخزن الآمن على الجهاز نفسه الذي يحمل الجلسات أصلاً). صامتة دائماً.
+  static Future<void> rememberMediaKey(
+      String conversationId, String? messageId, String? metaPlain) async {
+    if (messageId == null || messageId.isEmpty) return;
+    if (metaPlain == null || !metaPlain.startsWith('{')) return;
+    try {
+      final map = Map<String, dynamic>.from(jsonDecode(metaPlain) as Map);
+      final mk = mediaKeyFromMeta(map);
+      if (mk != null) {
+        await _storage.write(
+            key: '$_mediaMkPrefix$conversationId@$messageId', value: mk);
+      }
+    } catch (_) {}
+  }
+
+  /// مفتاح فك وسيط محادثة خاصة — الترتيب صارم:
+  /// 1) mk المخزّن محلياً لهذه الرسالة (وسائط الجلسة المتدرجة)،
+  /// 2) mk من الميتا المفكوكة المتاحة الآن (رسائلي وأي ميتا طازجة)،
+  /// 3) مفتاح v1 الثابت (الوسائط القديمة قبل 0.24.0) — توافق رجعي كامل.
+  static Future<SecretKey?> dmMediaKey({
+    required String conversationId,
+    required String otherUserId,
+    String? messageId,
+    Map<String, dynamic>? meta,
+  }) async {
+    if (messageId != null) {
+      try {
+        final stored =
+            await _storage.read(key: '$_mediaMkPrefix$conversationId@$messageId');
+        final k = stored == null ? null : _secretFromMkB64(stored);
+        if (k != null) return k;
+      } catch (_) {}
+    }
+    final mkB64 = mediaKeyFromMeta(meta);
+    if (mkB64 != null) return _secretFromMkB64(mkB64);
+    return dmKey(conversationId, otherUserId);
+  }
+
+  // ---------- إسقاط جلسات الأجهزة الميتة (المرحلة 10) ----------
+
+  /// إسقاط جلسات v3 لجهاز معين على هذا الجهاز — يُستدعى عند بث إزالة جهاز
+  /// (أجهزة الحساب وأجهزة الأطراف تحمل جلسات لكل جهاز طرف). يعيد العدد المسقط.
+  static Future<int> dropDeviceSessions(Set<String> deviceIds) async {
+    if (deviceIds.isEmpty) return 0;
+    var dropped = 0;
+    try {
+      final all = await _storage.readAll();
+      for (final k in all.keys) {
+        if (!k.startsWith(_r3Prefix)) continue;
+        final dev = k.substring(_r3Prefix.length).split('#').last;
+        if (deviceIds.contains(dev)) {
+          await _storage.delete(key: k);
+          _v3Cache.remove(k.substring(_r3Prefix.length));
+          dropped++;
+        }
+      }
+    } catch (_) {}
+    _devicesCache.clear();
+    return dropped;
+  }
+
+  /// مطابقة دورية: أي جلسة v3 لجهاز لم يعد موجوداً في الخادم (أُزيل وفقد
+  /// البثّ اللحظي) تُسقط محلياً — شبكة الأمان إن فوّت جهازٌ حدث البث.
+  static Future<int> reconcileDeviceSessions() async {
+    try {
+      final all = await _storage.readAll();
+      final devIds = <String>{
+        for (final k in all.keys)
+          if (k.startsWith(_r3Prefix))
+            k.substring(_r3Prefix.length).split('#').last
+      };
+      if (devIds.isEmpty) return 0;
+      final rows = await supabase
+          .from('devices')
+          .select('id')
+          .inFilter('id', devIds.toList());
+      final live = <String>{for (final r in rows) r['id'] as String};
+      final dead = devIds.difference(live);
+      if (dead.isEmpty) return 0;
+      return await dropDeviceSessions(dead);
+    } catch (_) {
+      return 0;
     }
   }
 

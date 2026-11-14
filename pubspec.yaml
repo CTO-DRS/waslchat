@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.23.0+54
+version: 0.24.0+55
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -45,6 +45,9 @@ dependencies:
   # التذكيرات الذكية المحلية (0.23.0) — جدولة إشعار تذكير في وقت الموعد
   # (حزمة نقية بلا كود أصلي، وهي تابعة flutter_local_notifications أصلاً)
   timezone: ^0.10.0
+  # المرحلة 10 (0.24.0): ML-KEM (FIPS 203) لبدء جلسات ما بعد الكم الهجين مع X3DH
+  # حزمة نقية Dart صفر اعتماديات مع متجهات NIST KAT مرفقة — بلا كود C إطلاقاً
+  pqcrypto: ^0.4.4
 
 dev_dependencies:
   flutter_test:
