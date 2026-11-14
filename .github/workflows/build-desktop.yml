@@ -51,6 +51,12 @@ jobs:
       # توليد مجلدات المنصة المطلوبة فقط (لا تمس الأندرويد والويب القائمين)
       - run: flutter config --enable-${{ matrix.target }}-desktop
       - run: flutter create . --project-name wasl_chat --platforms=${{ matrix.target }}
+      # لينكس: GCC 15 الجديد يجعل تحذيرات json.hpp القديم داخل flutter_secure_storage
+      # أخطاء بـ-Werror من القالب المولَّد — جعل التحذيرات غير قاتلة (تبقى معروضة)
+      # كي لا يعطل ترقية المُشغّل البناء (الدورة الثالثة 0.28.0)
+      - name: Relax fatal warnings in generated linux runner
+        if: matrix.target == 'linux'
+        run: sed -i 's/ -Werror/ -Wno-error/g' linux/CMakeLists.txt && grep -q "Wno-error" linux/CMakeLists.txt
       - run: flutter pub get
       # وصل AI والبوتات والتحديث تعمل على سطح المكتب كأي سطح؛ منع لقطات
       # الشاشة وقفل البصمة ميزات جوال ويُتخلى عنها بأمان على المكتب،
