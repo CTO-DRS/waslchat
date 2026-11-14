@@ -130,8 +130,11 @@ class ViewOnceImageScreen extends StatelessWidget {
 
 /// فقاعة صورة: تُحمّل مرة واحدة، والضغط يفتحها بملء الشاشة
 class ImageBubble extends StatefulWidget {
-  const ImageBubble({super.key, required this.loader});
+  const ImageBubble({super.key, required this.loader, this.width = 220});
   final MediaLoader loader;
+
+  /// العرض المطلوب (يتغير في شبكة الألبوم — 0.20.0)
+  final double width;
 
   @override
   State<ImageBubble> createState() => _ImageBubbleState();
@@ -146,16 +149,16 @@ class _ImageBubbleState extends State<ImageBubble> {
       future: _future,
       builder: (context, snap) {
         if (!snap.hasData) {
-          return const SizedBox(
-            width: 220,
-            height: 220,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          return SizedBox(
+            width: widget.width,
+            height: widget.width,
+            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
         final bytes = snap.data;
         if (bytes == null) {
           return Container(
-            width: 220,
+            width: widget.width,
             height: 120,
             alignment: Alignment.center,
             decoration: BoxDecoration(
@@ -173,7 +176,7 @@ class _ImageBubbleState extends State<ImageBubble> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Image.memory(bytes, width: 220, fit: BoxFit.cover),
+            child: Image.memory(bytes, width: widget.width, fit: BoxFit.cover),
           ),
         );
       },
