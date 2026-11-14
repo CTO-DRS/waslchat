@@ -1,0 +1,103 @@
+name: Build desktop
+# المرحلة 12 (0.28.0): أول إصدار سطح مكتب رسمي — بناء عند كل إصدار مميز
+# بوسم v* (مثل v0.28.0) أو يدوياً من تبويب Actions، ثم **نشر ثلاث حزم
+# في Releases بجوار APK** من القناة الآلية نفسها. المجلدات الأصلية
+# (windows/linux/macos) تُولَّد في الـCI بـ flutter create كي لا تثقل المستودع.
+# الصدق: حزمة ماك غير موقّعة (بلا developer ID) — الفتح يتطلب تجاوز Gatekeeper
+# يدوياً أول مرة، وهذا معلن في ملاحظات الإصدار.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write # لنشر الإصدار (Release) بالحزم الثلاث
+concurrency:
+  group: build-desktop
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows
+            artifact: wasl_chat_windows
+            path: build/windows/x64/runner/Release/*
+            pack: zip
+          - os: ubuntu-latest
+            target: linux
+            artifact: wasl_chat_linux
+            path: build/linux/x64/release/bundle/*
+            pack: tar.gz
+          - os: macos-latest
+            target: macos
+            artifact: wasl_chat_macos
+            path: build/macos/Build/Products/Release/wasl_chat.app
+            pack: zip-app
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.9
+          cache: true
+      # توليد مجلدات المنصة المطلوبة فقط (لا تمس الأندرويد والويب القائمين)
+      - run: flutter config --enable-${{ matrix.target }}-desktop
+      - run: flutter create . --project-name wasl_chat --platforms=${{ matrix.target }}
+      - run: flutter pub get
+      # وصل AI والبوتات والتحديث تعمل على سطح المكتب كأي سطح؛ منع لقطات
+      # الشاشة وقفل البصمة ميزات جوال ويُتخلى عنها بأمان على المكتب،
+      # وإشعارات سطح المكتب (0.28.0) تعمل بمحرك الإشعار المحلي لكل منصة.
+      - run: flutter build ${{ matrix.target }} --release
+
+      # التغليف لكل منصة بصيغتها الطبيعية
+      - name: Package (windows)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $VERSION = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)').Matches[0].Groups[1].Value
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "wasl_chat_${VERSION}_windows.zip"
+          "PKG=wasl_chat_${VERSION}_windows.zip" >> $env:GITHUB_ENV
+      - name: Package (linux)
+        if: matrix.target == 'linux'
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          tar -czf "wasl_chat_${VERSION}_linux.tar.gz" -C build/linux/x64/release/bundle .
+          echo "PKG=wasl_chat_${VERSION}_linux.tar.gz" >> $GITHUB_ENV
+      - name: Package (macos)
+        if: matrix.target == 'macos'
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          # symlinks محفوظة داخل .app — ditto الصيغة الصحيحة لأرشفة macOS
+          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/wasl_chat.app "wasl_chat_${VERSION}_macos.zip"
+          echo "PKG=wasl_chat_${VERSION}_macos.zip" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
+
+      # النشر في Releases بجوار APK — نفس نمط بناء APK (وسم الإصدار نفسه):
+      # إن كان الوسم موجوداً من بناء APK أُلحقت الحزمة، وإلا أُنشئ الإصدار.
+      - name: Publish release
+        shell: bash
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          TAG="v$VERSION"
+          case "${{ matrix.target }}" in
+            windows) NOTE="ويندوز 64-بت — فك الضغط وشغّل wasl_chat.exe";;
+            linux) NOTE="لينكس 64-بت — فك الأرشيف وشغّل wasl_chat";;
+            macos) NOTE="ماك Intel/Apple Silicon — حزمة غير موقّعة: أول فتح يتطلب نقراً يميناً ثم «فتح» لتجاوز Gatekeeper";;
+          esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$PKG" --clobber
+            echo "updated $TAG with $PKG"
+          else
+            gh release create "$TAG" "$PKG" --title "وصل شات $VERSION" --notes "حزم سطح المكتب لإصدار $VERSION — $NOTE"
+            echo "created $TAG"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
