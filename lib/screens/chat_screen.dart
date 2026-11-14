@@ -3067,6 +3067,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
          ]),
         ),
         actions: [
+          // مكالمة جماعية (0.27.0): للمجموعات الخاصة المشفّرة — محرك mesh
+          // نفسه بنمط مكالمة + دعوة لحظية لا تُخزَّن للأعضاء المتصلين
+          if (_isPrivateGroup)
+            IconButton(
+              tooltip: 'مكالمة جماعية',
+              onPressed: () => startGroupCall(context,
+                  conversationId: widget.conversationId, title: _title),
+              icon: const Icon(Icons.groups_rounded),
+            ),
           // غرفة الصوت الجماعية (0.18.0): للمجموعات الخاصة المشفّرة فقط —
           // لا قنوات ولا المحفوظة ولا المكالمات الفردية
           if (_isPrivateGroup)

@@ -76,6 +76,12 @@ class CallSession {
   Timer? _statsTimer;
   final CallQualityGate _gate = CallQualityGate();
 
+  /// مشاركة الشاشة (المرحلة 11 ب): حالة + تدفق الشاشة ومرسل الفيديو الأصلي
+  final sharingScreen = ValueNotifier<bool>(false);
+  MediaStream? _screen;
+  RTCRtpSender? _videoSender;
+  bool _restoringCamera = false;
+
   RealtimeChannel? _ch;
   RTCPeerConnection? _pc;
   MediaStream? _local;
@@ -237,6 +243,92 @@ class CallSession {
     }
   }
 
+  // ================= مشاركة الشاشة (المرحلة 11 ب — 0.27.0) =================
+
+  /// بدء المشاركة: بث شاشتك بدل الكاميرا على نفس الوصلة المشفرة DTLS-SRTP —
+  /// لا خادم جديد ولا مسار إضافي. أندرويد يعرض حوار MediaProjection، والويب
+  /// يعرض منتقي المتصفح. iOS غير مدعوم من الحزمة — الزر يختفي هناك.
+  Future<String?> startScreenShare() async {
+    if (!ScreenShareFlow.canStart(
+        live: CallFlow.live(status.value),
+        isVideo: isVideo,
+        alreadySharing: sharingScreen.value)) {
+      return 'المشاركة متاحة في المكالمات المرئية المتصلة حصراً';
+    }
+    if (_restoringCamera) return 'جارٍ استعادة الكاميرا — لحظة';
+    try {
+      final screen = await navigator.mediaDevices.getDisplayMedia({
+        'video': true,
+        'audio': false,
+      });
+      final tracks = screen.getVideoTracks();
+      if (tracks.isEmpty) {
+        await screen.dispose();
+        return 'لم تُختار أي شاشة للمشاركة';
+      }
+      // إيقاف تتبع توقف النظام عنده ثم أوقف الكاميرا
+      try {
+        tracks.first.onEnded = () {
+          unawaited(stopScreenShare());
+        };
+      } catch (_) {}
+      await _videoSender?.replaceTrack(tracks.first);
+      _screen = screen;
+      sharingScreen.value = true;
+      for (final t in _local?.getVideoTracks() ?? <MediaStreamTrack>[]) {
+        try {
+          t.enabled = false;
+        } catch (_) {}
+      }
+      cameraOn.value = false;
+      localStreamView.value = screen; // معاينتك الآن شاشتك أنت
+      netNote.value = ScreenShareFlow.sharingNote();
+      return null;
+    } catch (_) {
+      return 'لم تبدأ المشاركة — ألغيت أو النظام رفض الإذن';
+    }
+  }
+
+  /// إيقاف المشاركة واستعادة الكاميرا على الوصلة نفسها — الفشل صادق:
+  /// الكاميرا تبقى مغلقة بملاحظة واضحة والمكالمة لا تتأثر.
+  Future<void> stopScreenShare() async {
+    if (!sharingScreen.value) return;
+    sharingScreen.value = false;
+    _restoringCamera = true;
+    try {
+      final cam = await navigator.mediaDevices.getUserMedia({
+        'audio': false,
+        'video': {'facingMode': 'user', 'width': {'ideal': 1280}, 'height': {'ideal': 720}},
+      });
+      final camTrack = cam.getVideoTracks().first;
+      await _videoSender?.replaceTrack(camTrack);
+      try {
+        await _local?.dispose();
+      } catch (_) {}
+      _local = cam;
+      localStreamView.value = cam;
+      cameraOn.value = true;
+      netNote.value = null;
+    } catch (_) {
+      cameraOn.value = false;
+      netNote.value = ScreenShareFlow.restoreNote(reacquired: false);
+    } finally {
+      _restoringCamera = false;
+      final s = _screen;
+      _screen = null;
+      if (s != null) {
+        for (final t in s.getTracks()) {
+          try {
+            await t.stop();
+          } catch (_) {}
+        }
+        try {
+          await s.dispose();
+        } catch (_) {}
+      }
+    }
+  }
+
   // ================= WebRTC والإشارات =================
 
   Future<void> _openChannel() async {
@@ -326,7 +418,8 @@ class CallSession {
 
     // إضافة مساراتنا (متحدة التخطيط)
     for (final t in media.getTracks()) {
-      await pc.addTrack(t, media);
+      final sender = await pc.addTrack(t, media);
+      if (t.kind == 'video') _videoSender = sender;
     }
   }
 
@@ -482,6 +575,7 @@ class CallSession {
     _ticker?.cancel();
     _statsTimer?.cancel();
     _statsTimer = null;
+    sharingScreen.value = false;
     try {
       final ch = _ch;
       _ch = null;
@@ -510,6 +604,18 @@ class CallSession {
           } catch (_) {}
         }
         await local.dispose();
+      }
+    } catch (_) {}
+    try {
+      final screen = _screen;
+      _screen = null;
+      if (screen != null) {
+        for (final t in screen.getTracks()) {
+          try {
+            await t.stop();
+          } catch (_) {}
+        }
+        await screen.dispose();
       }
     } catch (_) {}
   }

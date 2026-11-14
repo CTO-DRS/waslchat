@@ -6,6 +6,7 @@
 /// صغيرة. لا زر رجوع يهرب من المكالمة: الرجوع يعني الإنهاء الصريح.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -337,6 +338,8 @@ class _CallScreenState extends State<CallScreen> {
             ),
           ),
         if (_s.isVideo) const SizedBox(width: 14),
+        if (_s.isVideo) _screenShareButton(),
+        if (_s.isVideo) const SizedBox(width: 14),
         if (_s.isVideo)
           _roundButton(
             icon: Icons.flip_camera_android_rounded,
@@ -352,6 +355,37 @@ class _CallScreenState extends State<CallScreen> {
           onTap: () => _s.hangUp(),
         ),
       ]),
+    );
+  }
+
+  /// زر مشاركة الشاشة (11 ب): يظهر في المكالمات المرئية على المنصات
+  /// المدعومة فعلياً — أندرويد والويب؛ iOS لا يدعمه بلا امتداد نظامي
+  /// فلا يُعرض أصلاً (لا وعود زائفة)
+  Widget _screenShareButton() {
+    final supported = ScreenShareFlow.platformSupported(
+        isWeb: kIsWeb,
+        isIos: defaultTargetPlatform == TargetPlatform.iOS);
+    if (!supported) return const SizedBox.shrink();
+    return ValueListenableBuilder<bool>(
+      valueListenable: _s.sharingScreen,
+      builder: (context, sharing, __) => _roundButton(
+        icon: sharing
+            ? Icons.stop_screen_share_rounded
+            : Icons.screen_share_rounded,
+        color: sharing ? WaslColors.teal : Colors.white24,
+        tooltip: sharing ? 'إيقاف المشاركة' : 'مشاركة الشاشة',
+        onTap: () async {
+          if (sharing) {
+            _s.stopScreenShare();
+          } else {
+            final err = await _s.startScreenShare();
+            if (err != null && mounted) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(err)));
+            }
+          }
+        },
+      ),
     );
   }
 

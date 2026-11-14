@@ -26,6 +26,11 @@ class StatusService {
   /// حد نص الحالة بالأحرف
   static const maxTextChars = 700;
 
+  /// حدود فيديو الحالة (المرحلة 11 ب — 0.27.0): 12 م.ب و 15 ثانية —
+  /// حدّان معلنان في الواجهة نفسها، والبايتات هي الحارس الصارم دائماً.
+  static const maxVideoBytes = 12 * 1024 * 1024;
+  static const maxVideoSeconds = 15;
+
   static final Map<String, SecretKey> _keyCache = {};
   static final Map<String, String> _textCache = {};
   static final Map<String, Uint8List> _mediaCache = {};
@@ -50,25 +55,37 @@ class StatusService {
   }
 
   /// نشر حالة نصية — تُشفَّر قبل مغادرة الجهاز
-  static Future<void> publishText(String text) async {
+  static Future<void> publishText(String text, {String? replyTo}) async {
     final t = text.trim();
     if (t.isEmpty || t.length > maxTextChars) throw Exception('bad status text');
     if (!E2eService.withinPlainLimit(t)) throw Exception('status text too long');
-    await _publish(kind: 'text', body: t);
+    await _publish(kind: 'text', body: t, replyTo: replyTo);
   }
 
   /// نشر حالة صورة (تُشفَّر بايتاتها ثم تُرفع بامتداد .enc.bin)
-  static Future<void> publishImage(Uint8List bytes) async {
+  static Future<void> publishImage(Uint8List bytes, {String? replyTo}) async {
     if (bytes.isEmpty || bytes.length > 24 * 1024 * 1024) {
       throw Exception('bad status image');
     }
-    await _publish(kind: 'image', imageBytes: bytes);
+    await _publish(kind: 'image', imageBytes: bytes, replyTo: replyTo);
+  }
+
+  /// نشر حالة فيديو (المرحلة 11 ب): نفس التشفير حرفياً — مفتاح عشوائي
+  /// يُغلَّف لكل مشاهد، والبايتات تُشفَّر بسياق معرف الحالة وتُرفع .enc.bin.
+  /// المدة غير المقاسة لا تمنع النشر — حد البايتات هو الحارس الصارم،
+  /// والقياس المفقود لا يُخمَّن (إفصاح صادق في الواجهة).
+  static Future<void> publishVideo(Uint8List bytes,
+      {int? durationSeconds, String? replyTo}) async {
+    final err = validateVideo(bytes: bytes.length, durationSeconds: durationSeconds);
+    if (err != null) throw Exception(err);
+    await _publish(kind: 'video', imageBytes: bytes, replyTo: replyTo);
   }
 
   static Future<void> _publish({
     required String kind,
     String? body,
     Uint8List? imageBytes,
+    String? replyTo,
   }) async {
     final me = supabase.auth.currentUser!.id;
     final id = newId();
@@ -76,7 +93,7 @@ class StatusService {
 
     String bodyEnc = '';
     String? mediaPath;
-    if (kind == 'image') {
+    if (kind == 'image' || kind == 'video') {
       final payload = await E2eService.encryptBytes(key, id, imageBytes!);
       mediaPath = await MediaService.upload(
         conversationId: id, // المجلد الأول = معرف الحالة (سياسة تخزين الحالات)
@@ -95,6 +112,7 @@ class StatusService {
       'body': bodyEnc,
       if (mediaPath != null) 'media_path': mediaPath,
       if (mediaPath != null) 'media_mime': 'application/octet-stream',
+      if (replyTo != null && replyTo.isNotEmpty) 'reply_to': replyTo,
     });
 
     // ظرفي أولاً: بلا عندها أفقد حالتي بعد إعادة تشغيل التطبيق
@@ -233,6 +251,47 @@ class StatusService {
   }
 
   // ---------- دوال نقية (قابلة للاختبار) ----------
+
+  /// تحقق فيديو الحالة الصادق — رسالة عربية جاهزة للعرض أو null للسليم:
+  /// البايتات حارس صارم، والمدة المقاسة تُفرض، وغير المقاسة لا تُخمَّن.
+  static String? validateVideo({required int bytes, int? durationSeconds}) {
+    if (bytes <= 0) return 'الفيديو فارغ — اختر مقطعاً صحيحاً';
+    if (bytes > maxVideoBytes) {
+      return 'الفيديو أكبر من 12 ميغابايت — اختر مقطعاً أقصر';
+    }
+    if (durationSeconds != null) {
+      if (durationSeconds <= 0) return 'مدة الفيديو غير صالحة';
+      if (durationSeconds > maxVideoSeconds) {
+        return 'الفيديو أطول من 15 ثانية — الحالات القصيرة أجمل';
+      }
+    }
+    return null;
+  }
+
+  /// اسم صاحب الحالة الأصلية التي رُدّ عليها — من التغذية المعروضة حصراً؛
+  /// ما لم يوجد فيها (انتهى الأصل مثلاً) يعيد null ولا تخمين.
+  static String? replyAuthorName(
+      String? replyTo, List<Map<String, dynamic>> groups) {
+    if (replyTo == null || replyTo.isEmpty) return null;
+    for (final g in groups) {
+      final sts = g['statuses'];
+      if (sts is! List) continue; // تغذية مشوهة تُسقط بلا استثناء
+      for (final s in sts) {
+        if (s is! Map<String, dynamic>) continue;
+        if (s['status_id'] == replyTo) {
+          final name = g['author_name'];
+          return name is String && name.isNotEmpty ? name : null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// سطر رأس الرد الصادق: باسم الأصل إن وُجد، أو سطر عام بلا ادعاء
+  static String replyHeaderText(String? authorName) =>
+      authorName != null && authorName.isNotEmpty
+          ? 'رداً على حالة $authorName'
+          : 'رد على حالة';
 
   /// تجميع التغذية حسب صاحبها: حالتي أولاً، ثم أصحاب بأحدث حالاتهم.
   /// كل مجموعة: {author_id, author_name, author_avatar, is_me, all_viewed, statuses}

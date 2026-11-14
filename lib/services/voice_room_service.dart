@@ -31,6 +31,7 @@ class VoiceRoomSession {
     required this.meId,
     required this.meName,
     this.meAvatar,
+    this.mode = RoomMode.room,
   });
 
   final String conversationId;
@@ -38,6 +39,9 @@ class VoiceRoomSession {
   final String meId;
   final String meName;
   final String? meAvatar;
+
+  /// النمط: غرفة صوت تعاونية أو مكالمة جماعية — المحرك واحد بلا خادم
+  final RoomMode mode;
 
   final phase = ValueNotifier<RoomPhase>(RoomPhase.joining);
   final duration = ValueNotifier<int>(0);
@@ -139,7 +143,29 @@ class VoiceRoomSession {
       duration.value = duration.value + 1;
     });
     _startVoiceWatch(); // المرحلة 11 أ: مؤشر «يتحدث» من إحصاءات الاتصال
+    if (mode == RoomMode.call) {
+      unawaited(_broadcastInvite()); // المرحلة 11 ب: دعوة لحظية للأعضاء
+    }
     return true;
+  }
+
+  /// بثّ دعوة المكالمة الجماعية عبر قناة عالمية لا تُخزَّن إطلاقاً —
+  /// الفشل صامت: الغرفة نفسها تعمل والدعوة مجاملة لا شرط.
+  Future<void> _broadcastInvite() async {
+    try {
+      final ch = supabase.channel('gcall');
+      await ch.subscribe();
+      await ch.sendBroadcastMessage(
+          event: 'invite',
+          payload: GroupCallInvite(
+            conversationId: conversationId,
+            by: meId,
+            byName: meName,
+            at: DateTime.now().toUtc(),
+          ).toPayload());
+      await ch.unsubscribe();
+      await supabase.removeChannel(ch);
+    } catch (_) {}
   }
 
   // ============== مؤشر «يتحدث» (المرحلة 11 أ — 0.26.0) ==============
@@ -532,11 +558,76 @@ class VoiceRoomService {
   static final ValueNotifier<VoiceRoomSession?> active =
       ValueNotifier<VoiceRoomSession?>(null);
 
+  /// دعوة مكالمة جماعية وصلت الآن (المرحلة 11 ب) — الواجهة تعرضها وتقرر
+  static final ValueNotifier<GroupCallInvite?> incomingInvite =
+      ValueNotifier<GroupCallInvite?>(null);
+
+  static RealtimeChannel? _inviteCh;
+  static bool _invitesWatching = false;
+  static String? _lastInviteKey;
+
+  /// الإصغاء لدعوات المكالمات الجماعية — قناة عالمية واحدة؛ كل دعوة
+  /// تُتحقق عضويتها في المحادثة عبر جدول محمي بـRLS قبل أي عرض،
+  /// ويتجاهل المكرر داخل نافذة الحياة (45 ثانية).
+  static Future<void> watchInvites() async {
+    if (_invitesWatching) return;
+    _invitesWatching = true;
+    try {
+      _inviteCh = supabase
+          .channel('gcall-watcher')
+          .onBroadcast(event: 'invite', callback: (payload) {
+        unawaited(_onInvitePayload(payload));
+      })
+          .subscribe();
+    } catch (_) {
+      _invitesWatching = false;
+    }
+  }
+
+  static Future<void> stopWatchingInvites() async {
+    final ch = _inviteCh;
+    _inviteCh = null;
+    _invitesWatching = false;
+    try {
+      if (ch != null) {
+        await ch.unsubscribe();
+        await supabase.removeChannel(ch);
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> _onInvitePayload(Object? payload) async {
+    try {
+      final inv = GroupCallInvite.tryParse(payload);
+      if (inv == null) return;
+      final now = DateTime.now().toUtc();
+      if (!inv.isFresh(now)) return;
+      if (inv.by == supabase.auth.currentUser?.id) return; // دعوتك أنت
+      if (active.value != null) return; // أنت في جلسة أخرى أصلاً
+      // منع تكرار نفس الدعوة داخل نافذة الحياة
+      final key = '${inv.conversationId}:${inv.by}:${inv.at.millisecondsSinceEpoch}';
+      if (_lastInviteKey == key) return;
+      _lastInviteKey = key;
+      // بوابة العضوية: جدول محمي بـRLS — دعوة محادثة لست عضواً فيها تُسقط
+      final me = supabase.auth.currentUser?.id;
+      if (me == null) return;
+      final rows = await supabase
+          .from('conversation_participants')
+          .select('user_id')
+          .eq('conversation_id', inv.conversationId)
+          .eq('user_id', me)
+          .limit(1);
+      if ((rows as List).isEmpty) return;
+      incomingInvite.value = inv;
+    } catch (_) {}
+  }
+
   /// الانضمام لغرفة محادثة — null عند وجود غرفة أخرى أو غياب الدخول.
   /// الجلسة تعود دائماً حتى الفاشلة (لِيَعرض الخطأ صادقاً ثم يخرج).
   static Future<VoiceRoomSession?> join({
     required String conversationId,
     required String title,
+    RoomMode mode = RoomMode.room,
   }) async {
     if (active.value != null) return null;
     final me = supabase.auth.currentUser?.id;
@@ -548,6 +639,7 @@ class VoiceRoomService {
       meId: me,
       meName: profile.$1,
       meAvatar: profile.$2,
+      mode: mode,
     );
     active.value = s;
     final ok = await s.join();

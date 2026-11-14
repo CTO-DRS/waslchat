@@ -87,6 +87,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   }
 
   Widget _header() {
+    final isCall = _s.mode == RoomMode.call;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: ValueListenableBuilder<RoomPhase>(
@@ -116,7 +117,10 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                 ),
               ),
               const SizedBox(height: 4),
-              Text('غرفة صوت · تشفير مباشر بين الأجهزة · بلا خادم يسمع',
+              Text(
+                  isCall
+                      ? 'مكالمة جماعية · تشفير مباشر بين الأجهزة · بلا خادم يسمع · حتى ${RoomFlow.maxParticipants} أعضاء'
+                      : 'غرفة صوت · تشفير مباشر بين الأجهزة · بلا خادم يسمع',
                   style: TextStyle(color: Colors.white38, fontSize: 11.5)),
               const SizedBox(height: 2),
               Text('موجة التحدث من إحصاءات جهازك — جهاز لا يوفّرها يبقى بلا موجة',
@@ -287,7 +291,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         _bigButton(
           icon: Icons.call_end_rounded,
           color: const Color(0xFFEF4444),
-          tooltip: 'مغادرة الغرفة',
+          tooltip: _s.mode == RoomMode.call ? 'مغادرة المكالمة' : 'مغادرة الغرفة',
           onTap: () => _s.leave(),
         ),
       ]),
@@ -356,29 +360,73 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 /// حوار قبل الانضمام: يوضح الحدود صادقاً ثم يفتح الغرفة — يُستدعى من شريط
 /// المحادثات الخاصة.
 Future<void> showVoiceRoomIntro(BuildContext context,
+    {required String conversationId, required String title,
+    bool asCall = false}) async {
+  // الدعوة عبر لافتة المكالمة الجماعية أسقت الحدود أصلاً — بلا حوار ثانٍ
+  bool ok = true;
+  if (!asCall) {
+    ok = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: Row(children: [
+              Icon(roomIcon(), size: 22, color: WaslColors.teal),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('غرفة صوت جماعية')),
+            ]),
+            content: Text(roomDisclaimer(), style: const TextStyle(height: 1.7)),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+              FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('انضمام')),
+            ],
+          ),
+        ) ??
+        false;
+  }
+  if (ok != true || !context.mounted) return;
+  final s = await VoiceRoomService.join(
+      conversationId: conversationId,
+      title: title,
+      mode: asCall ? RoomMode.call : RoomMode.room);
+  if (!context.mounted) return;
+  if (s == null) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('لا يمكن الانضمام الآن — أنت في غرفة أخرى بالفعل')));
+    return;
+  }
+  await Navigator.push(
+      context, MaterialPageRoute(builder: (_) => VoiceRoomScreen(session: s)));
+}
+
+
+/// بدء مكالمة جماعية من محادثة مجموعة خاصة (المرحلة 11 ب — 0.27.0):
+/// نفس محرك الغرف mesh حرفياً بنمط مكالمة + بثّ دعوة لحظية لا تُخزَّن.
+Future<void> startGroupCall(BuildContext context,
     {required String conversationId, required String title}) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (c) => AlertDialog(
       title: Row(children: [
-        Icon(roomIcon(), size: 22, color: WaslColors.teal),
+        const Icon(Icons.groups_rounded, size: 22, color: WaslColors.teal),
         const SizedBox(width: 8),
-        const Expanded(child: Text('غرفة صوت جماعية')),
+        const Expanded(child: Text('مكالمة جماعية')),
       ]),
-      content: Text(roomDisclaimer(), style: const TextStyle(height: 1.7)),
+      content: Text(groupCallDisclaimer(), style: const TextStyle(height: 1.7)),
       actions: [
         TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
-        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('انضمام')),
+        FilledButton(
+            onPressed: () => Navigator.pop(c, true), child: const Text('بدء المكالمة')),
       ],
     ),
   );
   if (ok != true || !context.mounted) return;
   final s = await VoiceRoomService.join(
-      conversationId: conversationId, title: title);
+      conversationId: conversationId,
+      title: title,
+      mode: RoomMode.call);
   if (!context.mounted) return;
   if (s == null) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('لا يمكن الانضمام الآن — أنت في غرفة أخرى بالفعل')));
+        content: Text('لا يمكن بدء المكالمة الآن — أنت في جلسة صوتية أخرى')));
     return;
   }
   await Navigator.push(
