@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Project Settings > API > Project URL و anon public key
 class AppConfig {
   /// إصدار هذا البناء — يُحدّث مع كل إصدار (وليس تلقائياً)
-  static const appVersion = '0.24.0';
+  static const appVersion = '0.25.0';
   static const appBuild = 54;
 
   /// رابط الموقع الرسمي (يُستخدم لروابط الدعوة وصفحات الويب)
