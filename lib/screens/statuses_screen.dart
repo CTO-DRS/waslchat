@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:video_player/video_player.dart';
 
 import '../services/status_service.dart';
+import '../services/webio/web_files.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -116,20 +121,23 @@ class StatusStrip extends StatelessWidget {
   }
 }
 
-/// ورقة نشر حالة (نص أو صورة)
-Future<void> showStatusComposer(BuildContext context) async {
+/// ورقة نشر حالة (نص أو صورة أو فيديو — أو رد بحالة على حالة أخرى)
+Future<void> showStatusComposer(BuildContext context,
+    {String? replyTo, String? replyAuthor}) async {
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: context.surfaceAlt,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-    builder: (ctx) => const _StatusComposer(),
+    builder: (ctx) => _StatusComposer(replyTo: replyTo, replyAuthor: replyAuthor),
   );
 }
 
 class _StatusComposer extends StatefulWidget {
-  const _StatusComposer();
+  const _StatusComposer({this.replyTo, this.replyAuthor});
+  final String? replyTo;
+  final String? replyAuthor;
 
   @override
   State<_StatusComposer> createState() => _StatusComposerState();
@@ -139,6 +147,9 @@ class _StatusComposerState extends State<_StatusComposer> {
   final _controller = TextEditingController();
   final _picker = ImagePicker();
   Uint8List? _image;
+  // فيديو الحالة (0.27.0): بايتات ومدة مقاسة وقيمة قابلة للإزالة
+  Uint8List? _videoBytes;
+  int? _videoSeconds;
   bool _busy = false;
   String? _error;
 
@@ -154,8 +165,63 @@ class _StatusComposerState extends State<_StatusComposer> {
     final bytes = await x.readAsBytes();
     setState(() {
       _image = bytes;
+      _videoBytes = null;
+      _videoSeconds = null;
       _error = null;
     });
+  }
+
+  /// اختيار فيديو حالة (0.27.0): البايتات حارس صارم والمدة تُقاس محلياً
+  /// بالمشغّل نفسه — قياس مفقود لا يمنع النشر ولا يُخمَّن (حد البايتات يحمي).
+  Future<void> _pickVideo() async {
+    final x = await _picker.pickVideo(
+        source: ImageSource.gallery,
+        maxDuration: const Duration(seconds: StatusService.maxVideoSeconds));
+    if (x == null) return;
+    final bytes = await x.readAsBytes();
+    var err = StatusService.validateVideo(bytes: bytes.length);
+    if (err != null) {
+      setState(() => _error = err);
+      return;
+    }
+    setState(() => _error = null);
+    // قياس المدة محلياً: ملف مؤقت على الجوال أو رابط blob على الويب
+    String? blobUrl;
+    try {
+      VideoPlayerController c;
+      if (kIsWeb) {
+        blobUrl = webBlobUrl(bytes, 'video/mp4');
+        c = VideoPlayerController.networkUrl(Uri.parse(blobUrl));
+      } else {
+        c = VideoPlayerController.file(File(x.path));
+      }
+      await c.initialize();
+      final secs = c.value.duration.inSeconds;
+      await c.dispose();
+      err = StatusService.validateVideo(
+          bytes: bytes.length, durationSeconds: secs);
+      if (!mounted) return;
+      if (err != null) {
+        setState(() => _error = err);
+        return;
+      }
+      setState(() {
+        _videoBytes = bytes;
+        _videoSeconds = secs;
+        _image = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // تعذر القياس — نقبل النشر بحد البايتات ونعلن ذلك بصدق
+      setState(() {
+        _videoBytes = bytes;
+        _videoSeconds = null;
+        _image = null;
+        _error = 'لم نتمكن من قياس مدة الفيديو — الحد المطبق 12 م.ب حصراً';
+      });
+    } finally {
+      if (blobUrl != null) webRevoke(blobUrl);
+    }
   }
 
   Future<void> _publish() async {
@@ -164,17 +230,23 @@ class _StatusComposerState extends State<_StatusComposer> {
       _error = null;
     });
     try {
-      if (_image != null) {
-        await StatusService.publishImage(_image!);
+      if (_videoBytes != null) {
+        await StatusService.publishVideo(_videoBytes!,
+            durationSeconds: _videoSeconds, replyTo: widget.replyTo);
+      } else if (_image != null) {
+        await StatusService.publishImage(_image!, replyTo: widget.replyTo);
       } else {
-        await StatusService.publishText(_controller.text);
+        await StatusService.publishText(_controller.text,
+            replyTo: widget.replyTo);
       }
       if (mounted) Navigator.pop(context, true);
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = 'تعذّر نشر الحالة — تأكد من الاتصال وحاول مجدداً';
+          _error = e is Exception && e.toString().contains('bad status')
+              ? 'تعذّر نشر الحالة — تحقق من المحتوى'
+              : 'تعذّر نشر الحالة — تأكد من الاتصال وحاول مجدداً';
         });
       }
     }
@@ -191,13 +263,19 @@ class _StatusComposerState extends State<_StatusComposer> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(children: [
-              const Text('حالة جديدة',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              Text(widget.replyTo != null ? 'رد بحالة' : 'حالة جديدة',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
               const Spacer(),
               IconButton(
                 tooltip: 'صورة من المعرض',
                 icon: const Icon(Icons.image_outlined, color: WaslColors.teal),
                 onPressed: _busy ? null : _pickImage,
+              ),
+              // فيديو الحالة (0.27.0): حتى 15 ثانية و12 م.ب — الحدود معلنة هنا
+              IconButton(
+                tooltip: 'فيديو من المعرض (حتى 15 ثانية)',
+                icon: const Icon(Icons.videocam_outlined, color: WaslColors.teal),
+                onPressed: _busy ? null : _pickVideo,
               ),
               if (_image != null)
                 IconButton(
@@ -205,8 +283,61 @@ class _StatusComposerState extends State<_StatusComposer> {
                   icon: Icon(Icons.close, color: context.textFaint),
                   onPressed: _busy ? null : () => setState(() => _image = null),
                 ),
+              if (_videoBytes != null)
+                IconButton(
+                  tooltip: 'إزالة الفيديو',
+                  icon: Icon(Icons.close, color: context.textFaint),
+                  onPressed: _busy
+                      ? null
+                      : () => setState(() {
+                            _videoBytes = null;
+                            _videoSeconds = null;
+                          }),
+                ),
             ]),
-            if (_image != null)
+            if (widget.replyTo != null) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: WaslColors.teal.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    StatusService.replyHeaderText(widget.replyAuthor),
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: WaslColors.teal),
+                  ),
+                ),
+              ),
+            ],
+            if (_videoBytes != null)
+              // معاينة صادقة: صندوق فيديو بمدته المقاسة إن وُجدت
+              Container(
+                height: 170,
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.movie_outlined,
+                        color: Colors.white54, size: 36),
+                    const SizedBox(height: 8),
+                    Text(
+                      _videoSeconds != null
+                          ? '${_videoSeconds} ث · ${(_videoBytes!.length / 1024 / 1024).toStringAsFixed(1)} م.ب'
+                          : '${(_videoBytes!.length / 1024 / 1024).toStringAsFixed(1)} م.ب · المدة غير مقاسة',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                    ),
+                  ]),
+                ),
+              )
+            else if (_image != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(14),
                 child: ConstrainedBox(
@@ -232,7 +363,9 @@ class _StatusComposerState extends State<_StatusComposer> {
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: WaslColors.indigo),
               onPressed: _busy ||
-                      (_image == null && _controller.text.trim().isEmpty)
+                      (_image == null &&
+                          _videoBytes == null &&
+                          _controller.text.trim().isEmpty)
                   ? null
                   : _publish,
               icon: _busy
@@ -241,10 +374,13 @@ class _StatusComposerState extends State<_StatusComposer> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.send, size: 18),
-              label: const Text('نشر الحالة'),
+              label: Text(widget.replyTo != null ? 'نشر الرد' : 'نشر الحالة'),
             ),
             const SizedBox(height: 6),
-            Text('مشفّرة بين الطرفين — تظهر لشركاء محادثاتك الفردية 24 ساعة',
+            Text(
+                'مشفّرة بين الطرفين — تظهر لشركاء محادثاتك الفردية 24 ساعة'
+                '${widget.replyTo != null ? ' · الرد حيّة ما دامت حالتك حية' : ''}'
+                ' · فيديو حتى 15 ثانية و12 م.ب',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11, color: context.textFaint)),
           ],
@@ -281,6 +417,9 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
   bool _changed = false;
   Timer? _timer;
 
+  /// تقدم فيديو الحالة الحالي 0..1 — يدفعه المشغّل نفسه (0.27.0)
+  final _videoProgress = ValueNotifier<double>(0);
+
   @override
   void initState() {
     super.initState();
@@ -298,6 +437,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _videoProgress.dispose();
     _page.dispose();
     super.dispose();
   }
@@ -307,10 +447,15 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
       (_group['statuses'] as List)[_flat[_i].index] as Map<String, dynamic>;
   bool get _isMine => _group['is_me'] == true;
 
-  /// عند عرض حالة غيري غير المشهودة: تسجيل مشاهدة + تحديث محلي
+  /// عند عرض حالة غيري غير المشهودة: تسجيل مشاهدة + تحديث محلي.
+  /// فيديو الحالة (0.27.0) بلا مؤقت ثابت — مشغّله هو من ينادي التالي
+  /// عند اكتماله، والتقدم يقرأ من مشغّله حصراً لا تخمين.
   void _onShown() {
     _timer?.cancel();
-    _timer = Timer(_status['kind'] == 'image' ? _imgDur : _txtDur, _next);
+    _videoProgress.value = 0;
+    if (_status['kind'] != 'video') {
+      _timer = Timer(_status['kind'] == 'image' ? _imgDur : _txtDur, _next);
+    }
     if (!_isMine && _status['viewed'] != true) {
       final sid = _status['status_id'] as String;
       _status['viewed'] = true;
@@ -497,15 +642,27 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                             Expanded(
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 2),
-                                child: LinearProgressIndicator(
-                                  value: j < posInGroup
-                                      ? 1
-                                      : (j == posInGroup ? 0.35 : 0),
-                                  minHeight: 3,
-                                  backgroundColor: Colors.white24,
-                                  valueColor:
-                                      const AlwaysStoppedAnimation(Colors.white),
-                                ),
+                                child: j == posInGroup && s['kind'] == 'video'
+                                    ? ValueListenableBuilder<double>(
+                                        valueListenable: _videoProgress,
+                                        builder: (context, p, __) =>
+                                            LinearProgressIndicator(
+                                          value: p.clamp(0.0, 1.0),
+                                          minHeight: 3,
+                                          backgroundColor: Colors.white24,
+                                          valueColor: const AlwaysStoppedAnimation(
+                                              Colors.white),
+                                        ),
+                                      )
+                                    : LinearProgressIndicator(
+                                        value: j < posInGroup
+                                            ? 1
+                                            : (j == posInGroup ? 0.35 : 0),
+                                        minHeight: 3,
+                                        backgroundColor: Colors.white24,
+                                        valueColor:
+                                            const AlwaysStoppedAnimation(Colors.white),
+                                      ),
                               ),
                             ),
                         ],
@@ -535,6 +692,16 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                   color: Colors.white, fontWeight: FontWeight.w700)),
+                          if (s['reply_to'] != null)
+                            Text(
+                                StatusService.replyHeaderText(
+                                    StatusService.replyAuthorName(
+                                        s['reply_to'] as String?, widget.groups)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Color(0xFF5EEAD4), fontSize: 11.5,
+                                    fontWeight: FontWeight.w700)),
                           Text(StatusService.ageText(s['created_at'] as String),
                               style:
                                   const TextStyle(color: Colors.white54, fontSize: 12)),
@@ -595,7 +762,29 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                   ),
                 )
               else
-                const SizedBox(height: 18),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(children: [
+                      // الرد بحالة (0.27.0): تنشر حالتك مشفرة بمرجع لأصلها —
+                      // والمرجع يفرضه الخادم حياً وشريكاً بلا حظر عبر RLS
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white12,
+                            foregroundColor: Colors.white),
+                        onPressed: () => showStatusComposer(
+                          context,
+                          replyTo: s['status_id'] as String,
+                          replyAuthor: (g['author_name'] ?? '') as String,
+                        ),
+                        icon: const Icon(Icons.reply_rounded, size: 18),
+                        label: const Text('رد بحالة'),
+                      ),
+                      const Spacer(),
+                    ]),
+                  ),
+                ),
             ]);
           },
         ),
@@ -604,6 +793,27 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
   }
 
   Widget _body(Map<String, dynamic> s) {
+    if (s['kind'] == 'video') {
+      return FutureBuilder<Uint8List?>(
+        future: StatusService.decryptMedia(s),
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Column(mainAxisSize: MainAxisSize.min, children: [
+              CircularProgressIndicator(color: Colors.white),
+              SizedBox(height: 10),
+              Text('جارٍ فك التشفير…', style: TextStyle(color: Colors.white54)),
+            ]);
+          }
+          final bytes = snap.data;
+          if (bytes == null) return _locked();
+          return _StatusVideoBody(
+            bytes: bytes,
+            progress: _videoProgress,
+            onEnded: _next,
+          );
+        },
+      );
+    }
     if (s['kind'] == 'image') {
       return FutureBuilder<Uint8List?>(
         future: StatusService.decryptMedia(s),
@@ -658,6 +868,107 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
         Text('تعذّر فك تشفير هذه الحالة على هذا الجهاز',
             style: TextStyle(color: Colors.white38)),
       ]);
+}
+
+/// مشغّل فيديو الحالة (0.27.0): بايتات مفكوكة تُكتب ملفاً مؤقتاً على الجوال
+/// أو رابط blob على الويب — يعمل مع بدء الحالة، ويشغّل التالية عند اكتماله،
+/// والتقدم يقرأ من مشغّله حصراً. الملف المؤقت يُحذف عند الخروج.
+class _StatusVideoBody extends StatefulWidget {
+  const _StatusVideoBody({
+    required this.bytes,
+    required this.progress,
+    required this.onEnded,
+  });
+  final Uint8List bytes;
+  final ValueNotifier<double> progress;
+  final VoidCallback onEnded;
+
+  @override
+  State<_StatusVideoBody> createState() => _StatusVideoBodyState();
+}
+
+class _StatusVideoBodyState extends State<_StatusVideoBody> {
+  VideoPlayerController? _c;
+  File? _tmp;
+  String? _blobUrl;
+  bool _ready = false;
+  bool _failed = false;
+  bool _ended = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepare();
+  }
+
+  Future<void> _prepare() async {
+    try {
+      if (kIsWeb) {
+        _blobUrl = webBlobUrl(widget.bytes, 'video/mp4');
+        _c = VideoPlayerController.networkUrl(Uri.parse(_blobUrl!));
+      } else {
+        final dir = Directory('${(await getTemporaryDirectory()).path}/wasl_status');
+        await dir.create(recursive: true);
+        _tmp = File(
+            '${dir.path}/st_${DateTime.now().millisecondsSinceEpoch}.mp4');
+        await _tmp!.writeAsBytes(widget.bytes, flush: true);
+        _c = VideoPlayerController.file(_tmp!);
+      }
+      await _c!.initialize();
+      _c!.addListener(_onTick);
+      if (!mounted) return;
+      setState(() => _ready = true);
+      await _c!.play();
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  void _onTick() {
+    final c = _c!;
+    final dur = c.value.duration.inMilliseconds;
+    if (dur > 0) {
+      widget.progress.value = c.value.position.inMilliseconds / dur;
+    }
+    if (c.value.isCompleted && !_ended) {
+      _ended = true;
+      widget.onEnded();
+    }
+  }
+
+  @override
+  void dispose() {
+    try {
+      _c?.removeListener(_onTick);
+    } catch (_) {}
+    _c?.dispose();
+    _tmp?.delete().ignore();
+    if (_blobUrl != null) webRevoke(_blobUrl!);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) {
+      return const Text('تعذّر تشغيل فيديو هذه الحالة على هذا الجهاز',
+          style: TextStyle(color: Colors.white54));
+    }
+    if (!_ready) {
+      return const CircularProgressIndicator(color: Colors.white);
+    }
+    final c = _c!;
+    return GestureDetector(
+      onTap: () => c.value.isPlaying ? c.pause() : c.play(),
+      child: AspectRatio(
+        aspectRatio: c.value.aspectRatio,
+        child: Stack(alignment: Alignment.center, children: [
+          VideoPlayer(c),
+          if (!c.value.isPlaying && !c.value.isCompleted)
+            const Icon(Icons.play_circle_fill, size: 64, color: Colors.white70),
+        ]),
+      ),
+    );
+  }
 }
 
 class _FlatStatus {

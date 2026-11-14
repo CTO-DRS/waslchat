@@ -149,6 +149,36 @@ class CallSignal {
       };
 }
 
+/// منطق مشاركة الشاشة في المكالمة الفردية (المرحلة 11 ب — 0.27.0) —
+/// نقي مُختبَر: القرارات المحلية قبل أي WebRTC. التشفير كما هو:
+/// بث الفيديو مشفّر DTLS-SRTP بين الجهازين مباشرة ولا يعبر خادماً —
+/// المشاركة لا تغير شيئاً في مسار التشفير إطلاقاً.
+class ScreenShareFlow {
+  /// المنصات المدعومة فعلياً: أندرويد (MediaProjection) والويب (منتقي
+  /// المتصفح). iOS لا يدعمه flutter_webrtc بلا إضافة Broadcast Extension
+  /// نظامية — بلا وعود زائفة: الزر يختفي هناك كلياً.
+  static bool platformSupported({required bool isWeb, required bool isIos}) =>
+      isWeb || !isIos;
+
+  /// هل يمكن بدء المشاركة الآن؟ حيّة + مرئية + ليست مشاركة بالفعل.
+  static bool canStart({
+    required bool live,
+    required bool isVideo,
+    required bool alreadySharing,
+  }) =>
+      live && isVideo && !alreadySharing;
+
+  /// قرار الاستعادة بعد إيقاف المشاركة: إن أعيدت الكاميرا بنجاح تعود
+  /// للمعاينة، وإلا تبقى مغلقة بملاحظة صادقة — لا فشل صامت ولا ادعاء.
+  static String? restoreNote({required bool reacquired}) => reacquired
+      ? null
+      : 'تعذّر إعادة تشغيل الكاميرا بعد المشاركة — شغّلها من زر الكاميرا';
+
+  /// سطر الإفصاح الصادق في الشاشة أثناء المشاركة
+  static String sharingNote() =>
+      'أنت تشارك شاشتك الآن — كل ما يظهر فيها يراه الطرف الآخر مباشرة';
+}
+
 /// صف سجل مكالمة كما يعود من الخادم (select على جدول calls)
 class CallRecord {
   const CallRecord({

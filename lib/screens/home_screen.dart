@@ -11,11 +11,13 @@ import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
 import '../services/voice_commands_service.dart';
+import '../services/voice_room_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
 import 'ai_screen.dart';
 import 'call_screen.dart';
+import 'voice_room_screen.dart';
 import 'calls_history_screen.dart';
 import 'channels_screen.dart';
 import 'chats_screen.dart';
@@ -45,6 +47,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // المكالمات (0.17.0): الاستماع للواردات وفتح شاشة المكالمة فوراً
     CallService.onIncoming = _openIncomingCall;
     CallService.watchIncoming();
+    // المكالمة الجماعية (0.27.0): إصغاء الدعوات اللحظية وعرض ورقة انضمام
+    VoiceRoomService.watchInvites();
+    VoiceRoomService.incomingInvite.addListener(_showGroupCallInvite);
     // فحص مفتاح التشفير: توليد أول مرة، أو استعادة من النسخة الاحتياطية على جهاز جديد
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkE2eKeys(context);
@@ -69,6 +74,74 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openIncomingCall(CallSession session) {
     if (!mounted) return;
     Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(session: session)));
+  }
+
+  /// دعوة مكالمة جماعية وصلت (0.27.0): ورقة انضمام صادقة — والانضمام
+  /// يمر بالبوابة نفسها (عضوية RLS وسعة 8) فلا حلول وهمية
+  bool _inviteSheetOpen = false;
+
+  Future<void> _showGroupCallInvite() async {
+    final inv = VoiceRoomService.incomingInvite.value;
+    if (inv == null || _inviteSheetOpen || !mounted) return;
+    _inviteSheetOpen = true;
+    VoiceRoomService.incomingInvite.value = null;
+    try {
+      final join = await showModalBottomSheet<bool>(
+        context: context,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                const Icon(Icons.groups_rounded, color: WaslColors.teal),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(inv.bannerText(),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 15.5)),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Text('صوت مباشر بين الأجهزة بلا خادم يسمع — الدعوة لحظية لا تُخزَّن',
+                  style: TextStyle(
+                      fontSize: 12.5, color: context.textSecondary)),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('تجاهل'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: WaslColors.teal),
+                    onPressed: () => Navigator.pop(ctx, true),
+                    icon: const Icon(Icons.call_rounded, size: 18),
+                    label: const Text('انضمام'),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      );
+      if (join == true && mounted) {
+        await showVoiceRoomIntro(
+          context,
+          conversationId: inv.conversationId,
+          title: 'مكالمة جماعية',
+          asCall: true,
+        );
+      }
+    } finally {
+      _inviteSheetOpen = false;
+    }
   }
 
   /// فحص «تحديث متوفر» بعد فتح التطبيق بثوانٍ (حتى لا يزاحم حوار المفاتيح)
@@ -143,6 +216,8 @@ class _HomeScreenState extends State<HomeScreen> {
     PresenceService.stop();
     CallService.onIncoming = null;
     CallService.stopWatching();
+    VoiceRoomService.incomingInvite.removeListener(_showGroupCallInvite);
+    VoiceRoomService.stopWatchingInvites();
     super.dispose();
   }
 

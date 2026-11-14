@@ -15,6 +15,13 @@ import 'call_logic.dart'; // CallSignal — تغليفها في RoomSignal
 /// حالة الغرفة من منظور جهازك
 enum RoomPhase { joining, live, left, failed }
 
+/// نمط الجلسة (المرحلة 11 ب): غرفة صوت تعاونية أو «مكالمة جماعية» —
+/// المحرك mesh واحد نفسه بلا أي خادم، والنمط يغيّر الدعوة والتسميات فقط.
+enum RoomMode { room, call }
+
+String roomModeLabel(RoomMode m) =>
+    m == RoomMode.call ? 'مكالمة جماعية' : 'غرفة صوت';
+
 RoomPhase? roomPhaseFrom(String? s) => switch (s) {
       'joining' => RoomPhase.joining,
       'live' => RoomPhase.live,
@@ -382,5 +389,14 @@ class GroupCallInvite {
   static bool canJoin({required bool inAnotherSession}) => !inAnotherSession;
 
   /// سطر الدعوة الصادق في اللافتة
-  String bannerText() => '$byName بدأ مكالمة جماعية — حتى ${RoomFlow.maxParticipants} أعضاء';
+  String bannerText() =>
+      '$byName بدأ مكالمة جماعية — حتى ${RoomFlow.maxParticipants} أعضاء';
 }
+
+/// إفصاح صادق قبل بدء مكالمة جماعية: الدعوة لحظية عبر بثّ لا يُخزَّن،
+/// والغائبون (التطبيق ميت) لا يصلهم رن — mesh بلا خادم لا يستطيع ذلك.
+String groupCallDisclaimer() =>
+    'مكالمة صوتية جماعية بتشفير مباشر بين الأجهزة — حتى ${RoomFlow.maxParticipants} أعضاء، '
+    'والصوت يمر بين جهازك وأجهزتهم مباشرة ولا يسمعه خادم وصل. '
+    'الدعوة لحظية عبر قناة لا تُخزَّن: يراها الأعضاء المتصلون الآن في التطبيق — '
+    'ومن حال عليه أو ميت لا يصلته رن لأن المحرك بلا خادم، وهذا حدّ معلن لا عيب.';
