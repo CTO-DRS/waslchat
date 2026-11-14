@@ -118,45 +118,54 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
               const SizedBox(height: 4),
               Text('غرفة صوت · تشفير مباشر بين الأجهزة · بلا خادم يسمع',
                   style: TextStyle(color: Colors.white38, fontSize: 11.5)),
+              const SizedBox(height: 2),
+              Text('موجة التحدث من إحصاءات جهازك — جهاز لا يوفّرها يبقى بلا موجة',
+                  style: TextStyle(color: Colors.white24, fontSize: 10)),
             ]),
       ),
     );
   }
 
   /// شبكة المشاركين: أنت أولاً ثم الآخرون بأسمائهم وأعلام كتمهم وحالة وصلاتهم
+  /// وموجات «يتحدث» الحية من إحصاءات جهازك (المرحلة 11 أ)
   Widget _roster() {
     return ValueListenableBuilder<int>(
       valueListenable: _s.rosterVersion,
       builder: (context, __, ___) => ValueListenableBuilder<Map<String, String>>(
         valueListenable: _s.peerLinks,
-        builder: (context, links, __) {
-          final others = _s.others;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Wrap(
-              spacing: 14,
-              runSpacing: 18,
-              alignment: WrapAlignment.center,
-              children: [
-                _chip(
-                  name: '${_s.meName} (أنت)',
-                  avatar: _s.meAvatar,
-                  micOn: _s.micOn.value,
-                  link: null,
-                  indigo: true,
-                ),
-                for (final p in others)
+        builder: (context, links, __) => ValueListenableBuilder<Map<String, double>>(
+          valueListenable: _s.speakingMap,
+          builder: (context, speaking, ___) {
+            final others = _s.others;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: Wrap(
+                spacing: 14,
+                runSpacing: 18,
+                alignment: WrapAlignment.center,
+                children: [
                   _chip(
-                    name: p.name,
-                    avatar: p.avatar,
-                    micOn: p.micOn,
-                    link: links[p.id],
-                    indigo: false,
+                    name: '${_s.meName} (أنت)',
+                    avatar: _s.meAvatar,
+                    micOn: _s.micOn.value,
+                    link: null,
+                    indigo: true,
+                    level: speaking['me'] ?? 0,
                   ),
-              ],
-            ),
-          );
-        },
+                  for (final p in others)
+                    _chip(
+                      name: p.name,
+                      avatar: p.avatar,
+                      micOn: p.micOn,
+                      link: links[p.id],
+                      indigo: false,
+                      level: speaking[p.id] ?? 0,
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -167,9 +176,11 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     required bool micOn,
     required String? link,
     required bool indigo,
+    required double level,
   }) {
     final connecting = link == 'connecting';
     final lost = link == 'lost';
+    final talking = level > 0;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Stack(clipBehavior: Clip.none, children: [
         Container(
@@ -208,6 +219,26 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           ),
       ]),
       const SizedBox(height: 8),
+      // الموجة الحية (11 أ): أربع قضبان بارتفاعات من المستوى المُنعَّم —
+      // من إحصاءات جهازك حصراً؛ غياب القياس يعني بلا موجة ولا ادعاء
+      SizedBox(
+        height: 14,
+        child: talking
+            ? Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final b in waveBars(level))
+                  Container(
+                    width: 4,
+                    height: 5 + 9 * b,
+                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                    decoration: BoxDecoration(
+                      color: WaslColors.teal,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+              ])
+            : const SizedBox.shrink(),
+      ),
+      const SizedBox(height: 2),
       Text(name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -217,12 +248,14 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       Text(
         connecting
             ? 'يتصل…'
-            : (lost ? 'انقطع' : 'متصل'),
+            : (lost ? 'انقطع' : (talking ? 'يتحدث…' : 'متصل')),
         style: TextStyle(
             fontSize: 10.5,
             color: connecting
                 ? Colors.white38
-                : (lost ? Colors.red.shade300 : WaslColors.teal)),
+                : (lost
+                    ? Colors.red.shade300
+                    : (talking ? WaslColors.teal : Colors.white38))),
       ),
     ]);
   }

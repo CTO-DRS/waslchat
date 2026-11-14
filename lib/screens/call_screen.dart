@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../services/call_logic.dart';
+import '../services/call_quality_service.dart';
 import '../services/call_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -172,9 +173,40 @@ class _CallScreenState extends State<CallScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(_s.peerName,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800)),
+        Row(children: [
+          Expanded(
+            child: Text(_s.peerName,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800)),
+          ),
+          // شارة الجودة الصادقة (11 أ): من إحصاءات جهازك حصراً — لا شارة
+          // قبل أول قياس ولا ادعاء بجودة غير مقاسة
+          ValueListenableBuilder<CallQualityLevel?>(
+            valueListenable: _s.quality,
+            builder: (context, q, _) {
+              if (q == null || !CallFlow.live(st)) return const SizedBox.shrink();
+              return Tooltip(
+                message: 'قياس محلي من إحصاءات الاتصال على جهازك — لا يُرسل لأحد',
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white12,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(CallQualityView.icon(q), size: 14,
+                        color: CallQualityView.color(q)),
+                    const SizedBox(width: 5),
+                    Text(CallQualityView.label(q),
+                        style: TextStyle(
+                            color: CallQualityView.color(q),
+                            fontSize: 11.5, fontWeight: FontWeight.w700)),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ]),
         const SizedBox(height: 6),
         ValueListenableBuilder<int>(
           valueListenable: _s.duration,
@@ -188,8 +220,15 @@ class _CallScreenState extends State<CallScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        Text('مكالمة ${callKindLabel(_s.kind)} · تشفير مباشر بين الجهازين',
-            style: TextStyle(color: Colors.white38, fontSize: 11.5)),
+        ValueListenableBuilder<String?>(
+          valueListenable: _s.netNote,
+          builder: (context, note, _) => Text(
+            note ?? 'مكالمة ${callKindLabel(_s.kind)} · تشفير مباشر بين الجهازين',
+            style: TextStyle(
+                color: note != null ? const Color(0xFFF59E0B) : Colors.white38,
+                fontSize: 11.5),
+          ),
+        ),
       ]),
     );
   }

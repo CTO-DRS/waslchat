@@ -51,13 +51,19 @@ class VoiceRoomSession {
   /// حالة وصلة كل مشارك: 'connecting' / 'connected' / 'lost'
   final peerLinks = ValueNotifier<Map<String, String>>({});
 
+  /// مستوى التحدث لكل مشارك 0..1 (مفتاحك 'me') من إحصاءات الاتصال على
+  /// جهازك حصراً — صفر للمشاركين الصامتين وغياب القياس (المرحلة 11 أ)
+  final speakingMap = ValueNotifier<Map<String, double>>({});
+
   RoomRoster? _roster;
   RealtimeChannel? _ch;
   MediaStream? _local;
   final Map<String, RTCPeerConnection> _pcs = {};
   final Map<String, List<CallSignal>> _pendingIce = {};
   final Map<String, Timer> _peerTimers = {};
+  final Map<String, SpeakingWave> _waves = {};
   Timer? _ticker;
+  Timer? _voiceTimer;
   bool _closing = false;
 
   int get participantCount => _roster?.count ?? 1;
@@ -132,7 +138,57 @@ class VoiceRoomSession {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       duration.value = duration.value + 1;
     });
+    _startVoiceWatch(); // المرحلة 11 أ: مؤشر «يتحدث» من إحصاءات الاتصال
     return true;
+  }
+
+  // ============== مؤشر «يتحدث» (المرحلة 11 أ — 0.26.0) ==============
+
+  /// قياس محلي كل 700ms: مستوى صوتي من إحصاءات الوصلات على جهازك حصراً —
+  /// لا شيء من الخادم ولا يُرسل لأحد. جهاز لا يعيد الإحصاءات يبقى بلا موجة
+  /// له صادقاً (الحد معلن في الشاشة)، والمكالمة نفسها لا تتأثر إطلاقاً.
+  void _startVoiceWatch() {
+    _voiceTimer ??= Timer.periodic(const Duration(milliseconds: 700), (_) async {
+      if (_closing || phase.value != RoomPhase.live) return;
+      try {
+        await _pollSpeaking();
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _pollSpeaking() async {
+    double? localLevel;
+    final updated = <String, double>{};
+    for (final entry in _pcs.entries) {
+      final reports = await entry.value.getStats();
+      double? remote;
+      for (final r in reports) {
+        final v = r.values;
+        final t = r.type; // النوع على التقرير نفسه في النمط الأصلي
+        if (t == 'inbound-rtp') {
+          final a = audioLevelFromStats(v);
+          if (a != null && a > (remote ?? -1)) remote = a;
+        } else if ((t == 'outbound-rtp' || t == 'media-source') &&
+            localLevel == null) {
+          localLevel = audioLevelFromStats(v);
+        }
+      }
+      final wave = _waves.putIfAbsent(entry.key, SpeakingWave.new);
+      wave.add(remote);
+      if (wave.speaking) updated[entry.key] = wave.level;
+    }
+    // مستواك أنت: من إحصاءات الإرسال المحلي (مكتوم = صفر تلقائياً)
+    if (localLevel != null) {
+      final wave = _waves.putIfAbsent('me', SpeakingWave.new);
+      wave.add(localLevel);
+      if (wave.speaking) updated['me'] = wave.level;
+    } else if (_waves.containsKey('me')) {
+      _waves['me']!.add(0.0);
+    }
+    final current = speakingMap.value;
+    final changed = current.length != updated.length ||
+        updated.entries.any((e) => (current[e.key] ?? 0) != e.value);
+    if (changed) speakingMap.value = updated;
   }
 
   Map<String, Object?> _meMeta() => {
@@ -369,6 +425,10 @@ class VoiceRoomSession {
   /// بلا استثناءات هاربة. تعمل من المغادرة ومن الفشل على السواء.
   Future<void> _teardown({required bool sendBye}) async {
     _ticker?.cancel();
+    _voiceTimer?.cancel();
+    _voiceTimer = null;
+    _waves.clear();
+    speakingMap.value = {};
     for (final t in _peerTimers.values) {
       t.cancel();
     }

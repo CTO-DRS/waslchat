@@ -230,3 +230,157 @@ String roomDisclaimer() =>
     'غرفة صوت جماعية بتشفير مباشر بين الأجهزة — حتى ${RoomFlow.maxParticipants} مشاركين. '
     'الصوت يمر بين جهازك وأجهزة المشاركين مباشرة ولا يسمعه خادم وصل، '
     'وإشارات الاتصال تمر لحظياً ولا تُخزَّن.';
+
+/// مؤشر «يتحدث» بموجات حية (المرحلة 11 أ — 0.26.0) — نقي مُختبَر.
+///
+/// المدخل مستويات صوتية 0..1 قادمة من إحصاءات getStats على جهازك حصراً —
+/// لا شيء من الخادم ولا أي رفع. القواعد:
+/// - عتبة تكيفية: أرضية ضوضاء تُعاير من أوائل العينات الهادئة، والعتبة
+///   فوقها بهامش ثابت — فتعمل بغرفة هادئة وبمقهى مزعج على السواء.
+/// - تباين (hysteresis): البدء فوق العتبة والتوقف تحتها بهامش، مع مهلة
+///   تراجع 400ms كي لا تومض الموجة مع كل وقفة نفس.
+/// - تنعيم EMA للمستوى المعروض كي تبقى الموجة سلسة بلا قفزات.
+/// - غياب الإحصاءات على جهاز ما → بلا موجة له، ولا ادعاء — الحد معلن.
+class SpeakingWave {
+  SpeakingWave();
+
+  /// المستوى المعروض بعد التنعيم 0..1
+  double level = 0;
+
+  /// هل يتحدث الآن؟
+  bool speaking = false;
+
+  final List<double> _calibration = [];
+  double _noiseFloor = 0.02;
+  DateTime? _lastLoud;
+
+  /// مهلة تراجع التوقف بعد آخر عينة قوية
+  static const decay = Duration(milliseconds: 400);
+  static const calibrationSamples = 8;
+  static const floorMin = 0.012;
+  static const startMargin = 1.6;
+  static const stopMargin = 0.9;
+
+  /// إدخال عينة خام — null أو NaN أو خارج النطاق تُتجاهل بلا استثناء
+  void add(double? raw) {
+    if (raw == null || raw.isNaN || raw < 0 || raw > 1) return;
+        if (_calibration.length < calibrationSamples) {
+      _calibration.add(raw);
+      _noiseFloor = _calibration.reduce((a, b) => a < b ? a : b);
+      if (_noiseFloor < floorMin) _noiseFloor = floorMin;
+    } else {
+      // الأرضية تنخفض فقط مع العينات الهادئة الجديدة — لا ترفعها
+      // ذروة مفاجئة كي لا تُصمّ العتبة عمداً
+      if (raw < _noiseFloor) _noiseFloor = (raw * 0.5 + _noiseFloor * 0.5);
+    }
+
+    // تنعيم EMA — صعود أسرع من هبوط كي تظهر البدايات فوراً
+    const up = 0.45;
+    const down = 0.18;
+    final target = raw;
+    level = target > level ? level + (target - level) * up : level + (target - level) * down;
+
+    final startThreshold = (_noiseFloor * startMargin).clamp(floorMin * 1.5, 0.35);
+    final stopThreshold = startThreshold * stopMargin;
+    final now = DateTime.now();
+    if (raw >= startThreshold) {
+      _lastLoud = now;
+      speaking = true;
+    } else if (speaking && raw < stopThreshold) {
+      if (_lastLoud != null && now.difference(_lastLoud!) >= decay) {
+        speaking = false;
+      }
+    }
+  }
+
+  /// إعادة معايرة كاملة (عند مغادرة/انضمام)
+  void reset() {
+    _calibration.clear();
+    _noiseFloor = 0.02;
+    _lastLoud = null;
+    level = 0;
+    speaking = false;
+  }
+}
+
+/// أعمدة الموجة النصية للعرض: بارتفاعات 0..1 لأربع قضبان — قيم مشتقة
+/// حتمياً من المستوى المُنعَّم كي تتحرك الموجة دون عشوائية زائفة.
+List<double> waveBars(double level, {int count = 4}) {
+  final c = level.clamp(0.0, 1.0);
+  final out = <double>[];
+  for (var i = 0; i < count; i++) {
+    // توزيع جيبي متدرج بين الأعمدة يعطي شكل موجة صادقة عن المستوى
+    final phase = (i / count) * 3.14159;
+    final w = c * (0.55 + 0.45 * (0.5 + 0.5 * (1 - (phase / 3.14159).abs())));
+    out.add(w.clamp(0.18, 1.0));
+  }
+  return out;
+}
+
+/// استخراج المستوى الصوتي من صف إحصاء واحد (StatsReport.values) — دفاعي:
+/// أي غرابة → null. يحبّذ audioLevel المباشر، وإن غاب يحسب المتوسط من
+/// totalAudioEnergy على totalSamplesDuration وفق المواصفة.
+double? audioLevelFromStats(Map<dynamic, dynamic> values) {
+  final a = values['audioLevel'];
+  if (a is num && a.isFinite && a >= 0 && a <= 1) return a.toDouble();
+  final energy = values['totalAudioEnergy'];
+  final dur = values['totalSamplesDuration'];
+  if (energy is num && dur is num && dur > 0 && energy.isFinite) {
+    final v = (energy / dur).clamp(0.0, 1.0);
+    return v;
+  }
+  return null;
+}
+
+/// دعوة مكالمة جماعية لحظية (المرحلة 11 ب — 0.27.0) — نقي مُختبَر.
+///
+/// بدء «مكالمة جماعية» يبثّ دعوة عبر قناة Realtime لا تُخزَّن إطلاقاً؛
+/// من يستلمها يتحقق أنه عضو بالمحادثة عبر جدول محمي بـRLS قبل أي عرض.
+/// الحد محدد، والدعوة بطيئة: عمرها داخل 45 ثانية ثم تموت — لا مكالمة
+/// شبح تعيش بعد مغادرة مدعوها.
+class GroupCallInvite {
+  const GroupCallInvite({
+    required this.conversationId,
+    required this.by,
+    required this.byName,
+    required this.at,
+  });
+  final String conversationId;
+  final String by;
+  final String byName;
+  final DateTime at;
+
+  static const lifetime = Duration(seconds: 45);
+
+  Map<String, Object?> toPayload() => {
+        'c': conversationId,
+        'f': by,
+        'n': byName,
+        'at': at.millisecondsSinceEpoch,
+      };
+
+  /// تحليل دفاعي: أي غرابة → null تُتجاهل
+  static GroupCallInvite? tryParse(Object? payload) {
+    if (payload is! Map) return null;
+    final c = payload['c'];
+    final f = payload['f'];
+    final n = payload['n'];
+    final at = payload['at'];
+    if (c is! String || c.isEmpty) return null;
+    if (f is! String || f.isEmpty) return null;
+    if (n is! String || n.isEmpty) return null;
+    if (at is! num) return null;
+    final dt = DateTime.fromMillisecondsSinceEpoch(at.toInt());
+    return GroupCallInvite(conversationId: c, by: f, byName: n, at: dt);
+  }
+
+  /// حيّة أم ميتة؟ (عمرها داخل النافذة)
+  bool isFresh(DateTime now) =>
+      !now.isBefore(at) && now.difference(at) <= lifetime;
+
+  /// هل يُسمح بالانضمام لهذه الدعوة الآن؟
+  static bool canJoin({required bool inAnotherSession}) => !inAnotherSession;
+
+  /// سطر الدعوة الصادق في اللافتة
+  String bannerText() => '$byName بدأ مكالمة جماعية — حتى ${RoomFlow.maxParticipants} أعضاء';
+}
