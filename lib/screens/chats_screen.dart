@@ -5,6 +5,7 @@ import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../services/saved_service.dart';
+import '../services/widget_data_service.dart';
 import '../theme.dart';
 import '../services/status_service.dart';
 import '../widgets/common.dart';
@@ -15,6 +16,7 @@ import 'chat_screen.dart';
 import 'create_group_screen.dart';
 import 'new_chat_screen.dart';
 import 'statuses_screen.dart';
+import 'unified_search_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -79,6 +81,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           .fold<int>(0, (s, c) => s + ((c['unread'] as num?)?.toInt() ?? 0));
       _decryptPreviews(chats);
       _decryptTitles(chats);
+      _updateWidget(chats);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -133,7 +136,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
               content: lm,
             );
       job.then((plain) {
-        if (mounted) setState(() => _previews[lm] = plain);
+        if (!mounted) return;
+        setState(() => _previews[lm] = plain);
+        // معاينة الويدجت تتحدّث بعد فك النص أيضاً (0.21.0)
+        _updateWidget(_chats);
       });
     }
   }
@@ -142,6 +148,21 @@ class _ChatsScreenState extends State<ChatsScreen> {
     if (iso == null) return '';
     final d = DateTime.parse(iso).toLocal();
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// ويدجت «آخر المحادثات» (0.21.0): يكتب آخر 3 محادثات ظاهرة (المؤرشفة
+  /// خارجها) بالمعاينة المفكوكة إن وصلت — كل شيء محلي على الجهاز حصراً،
+  /// والفشل يهبط للسلوك السابق (بلا ويدجت محدث) بلا أي تعطيل.
+  void _updateWidget(List<Map<String, dynamic>> chats) {
+    final rows = <WidgetRow>[];
+    for (final c in chats) {
+      if (c['archived'] == true) continue;
+      final name = _nameOf(c);
+      rows.add(WidgetRow(name, _preview(c), _time(c['last_at'] as String?),
+          (c['unread'] as num?)?.toInt() ?? 0));
+      if (rows.length >= WidgetDataService.maxRows) break;
+    }
+    WidgetDataService.update(rows);
   }
 
   String _preview(Map<String, dynamic> c) {
@@ -350,6 +371,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
         title: Text(_showArchived ? 'المؤرشفة' : 'المحادثات',
             style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
         actions: [
+          IconButton(
+            tooltip: 'بحث موحد في كل المحادثات',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const UnifiedSearchScreen())),
+            icon: const Icon(Icons.search_rounded),
+          ),
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 8),
             child: ActionChip(

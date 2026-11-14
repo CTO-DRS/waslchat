@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'app_keys.dart';
 import 'services/app_lock_service.dart';
+import 'services/link_preview_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
@@ -26,6 +27,7 @@ Future<void> main() async {
     publishableKey: AppConfig.supabaseAnonKey,
   );
   await PushService.init();
+  await LinkPreviewService.init(); // معاينة الروابط (0.21.0): المفتاح والكاش المحلي
   _initCrashlytics();
   runApp(const WaslApp());
 }

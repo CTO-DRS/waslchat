@@ -12,6 +12,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -22,14 +23,17 @@ import '../services/app_lock_service.dart';
 import '../services/block_service.dart';
 import '../services/call_logic.dart';
 import '../services/call_service.dart';
+import '../services/channel_bell_service.dart';
 import '../services/channel_stats_service.dart';
 import '../services/e2e_service.dart';
 import '../services/export_service.dart';
 import '../services/forward_service.dart';
 import '../services/image_edit_service.dart';
+import '../services/link_preview_service.dart';
 import '../services/local_ai_service.dart';
 import '../services/saved_service.dart';
 import '../services/smart_search_service.dart';
+import '../services/voice_read_service.dart';
 import '../services/webio/web_files.dart';
 import '../services/media_service.dart';
 import '../services/moderation_service.dart';
@@ -38,6 +42,7 @@ import '../services/push_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
+import '../widgets/link_preview_card.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/motion.dart';
 import '../widgets/report_dialog.dart';
@@ -46,6 +51,7 @@ import 'call_screen.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
 import 'image_editor_screen.dart';
+import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import 'voice_room_screen.dart';
@@ -64,6 +70,7 @@ class ChatScreen extends StatefulWidget {
     this.isSaved = false,
     this.isBot = false,
     this.officialVerified = false,
+    this.focusMessageId,
   });
   final String conversationId;
   final String title;
@@ -88,6 +95,10 @@ class ChatScreen extends StatefulWidget {
 
   /// الطرف الآخر بوت (محادثة مباشرة غير مشفرة بالتصميم — البوت يقرأها)
   final bool isBot;
+
+  /// القفز إلى رسالة محددة عند الفتح (معرض الوسائط — 0.21.0):
+  /// يمرر القائمة على موضع الرسالة ويبرزها لحظة
+  final String? focusMessageId;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -148,6 +159,18 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   /// آخر نسخة كاملة من الرسائل (للتصدير النصي من قائمة ⋮)
   List<Map<String, dynamic>> _allMsgs = const [];
+
+  // القفز والإبراز (0.21.0): معرض الوسائط يفتح المحادثة على وسيط محدد
+  final _itemScroll = ItemScrollController();
+  bool _jumpDone = false;
+  String? _highlightId;
+
+  // جرس القنوات (0.21.0): حالة هذه القناة تُحمّل مرة وتحدّث من الحوار
+  String _bell = 'all';
+  bool _bellLoaded = false;
+
+  // القراءة الصوتية (0.21.0)
+  bool _ttsBusy = false;
 
   /// مفتاح «عرض مرة واحدة» في ورقة المرفقات — يسري على الصورة/الفيديو التالي
   bool _viewOnce = false;
@@ -403,6 +426,162 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
+  /// ---------- المرحلة 8 ب (0.21.0): القفز والإبراز والقراءة الصوتية والجرس ----------
+
+  /// القفز إلى الرسالة المطلوبة عند الفتح (من معرض الوسائط): يمرر القائمة
+  /// على موضع الرسالة (فهرس مجموعتها في القائمة) ويبرزها 4 ثوانٍ —
+  /// مرة واحدة حصراً: التحديثات اللاحقة لا تعيد القفزة.
+  void _maybeJumpToFocus(List<List<Map<String, dynamic>>> items) {
+    if (_jumpDone) return;
+    final target = widget.focusMessageId;
+    if (target == null) {
+      _jumpDone = true;
+      return;
+    }
+    final idx = items.indexWhere((g) => g.any((m) => m['id'] == target));
+    if (idx < 0) {
+      _jumpDone = true; // الرسالة محذوفة أو قبل المسح الشخصي — بلا قفزة
+      return;
+    }
+    _jumpDone = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await _itemScroll.scrollTo(
+            index: idx, duration: const Duration(milliseconds: 350), alignment: 0.35);
+      } catch (_) {
+        return; // فشل القفز: يبقى السلوك الافتراضي (آخر الرسائل)
+      }
+      if (mounted) {
+        setState(() => _highlightId = target);
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted && _highlightId == target) {
+            setState(() => _highlightId = null);
+          }
+        });
+      }
+    });
+  }
+
+  /// فتح معرض وسائط المحادثة — يمرر معاملات التشفير نفسها للمطابقة
+  void _openMediaGallery() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MediaGalleryScreen(
+          conversationId: widget.conversationId,
+          title: _title,
+          isGroup: widget.isGroup,
+          isChannel: widget.isChannel,
+          encrypted: widget.encrypted,
+          otherId: widget.otherId,
+          isSaved: widget.isSaved,
+          isBot: widget.isBot,
+        ),
+      ),
+    );
+  }
+
+  /// القراءة الصوتية لآخر رسائل المحادثة (TTS عربي على الجهاز حصراً):
+  /// زر واحد — تشغيل يقرأ آخر 10 رسائل مفكوكة، نقر مجدد يوقف.
+  Future<void> _toggleSpeak() async {
+    if (VoiceReadService.speaking.value) {
+      await VoiceReadService.stop();
+      setState(() => _ttsBusy = false);
+      return;
+    }
+    // آخر 10 رسائل مفكوكة بالترتيب الزمني التصاعدي (الأقدم يُقرأ أولاً)
+    final spoken = <(String, String)>[];
+    for (final m in _allMsgs.reversed) {
+      if (m['deleted_at'] != null) continue;
+      final t = _textOf(m);
+      if (t == null || t.isEmpty || t == '🔒 تعذّر فك التشفير' || E2eService.isEncrypted(t)) {
+        continue;
+      }
+      spoken.insert(0, (_senderName(m['sender_id'] as String? ?? ''), t));
+      if (spoken.length >= 10) break;
+    }
+    if (spoken.isEmpty) {
+      _snack('لا رسائل نصية مفكوكة للقراءة بعد');
+      return;
+    }
+    final text = VoiceReadService.buildSpokenText(spoken, isGroup: widget.isGroup && !widget.isChannel);
+    setState(() => _ttsBusy = true);
+    final ok = await VoiceReadService.speak(text);
+    if (!mounted) return;
+    setState(() => _ttsBusy = false);
+    if (!ok) _snack('القراءة غير مدعومة على هذا الجهاز — أو لا يوجد محرك عربي');
+  }
+
+  /// حالة جرس القناة — تُحمّل مرة (وهبوط للافتراضي بلا ترحيل 032)
+  Future<void> _loadBell() async {
+    if (_bellLoaded || !widget.isChannel) return;
+    _bellLoaded = true;
+    try {
+      final rows = await supabase
+          .from('conversation_participants')
+          .select('bell')
+          .eq('conversation_id', widget.conversationId)
+          .eq('user_id', _me)
+          .limit(1);
+      if (mounted && rows.isNotEmpty) {
+        setState(() => _bell = ChannelBellService.normalize(
+            (rows.first as Map)['bell'] as String?));
+      }
+    } catch (_) {
+      // عمود bell غير موجود بعد (الترحيل 032 لم يُشغّل) — الافتراضي all
+    }
+  }
+
+  /// حوار اختيار جرس القناة: كل المنشورات / المثبتة فقط / صمت
+  Future<void> _showBellDialog() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Wrap(children: [
+          const ListTile(title: Text('إشعارات هذه القناة',
+              style: TextStyle(fontWeight: FontWeight.w800))),
+          for (final (v, icon, label) in const [
+            ('all', Icons.notifications_active_outlined, 'كل المنشورات'),
+            ('pinned', Icons.push_pin_outlined, 'المنشورات المثبتة فقط'),
+            ('mute', Icons.notifications_off_outlined, 'صمت — لا إشعارات'),
+          ])
+            ListTile(
+              leading: Icon(icon,
+                  color: _bell == v ? WaslColors.teal : null),
+              title: Text(label),
+              trailing: _bell == v
+                  ? const Icon(Icons.check_rounded,
+                      size: 18, color: WaslColors.teal)
+                  : null,
+              onTap: () async {
+                Navigator.pop(ctx);
+                final old = _bell;
+                setState(() => _bell = v);
+                try {
+                  await ChannelBellService.set(widget.conversationId, v);
+                  if (mounted) {
+                    _snack(v == 'mute'
+                        ? 'صمتت هذه القناة — لن تصلك بياناتها أصلاً'
+                        : v == 'pinned'
+                            ? 'ستنبّهك المنشورات المثبتة فقط'
+                            : 'ستنبهك كل منشورات القناة');
+                  }
+                } catch (_) {
+                  if (mounted) {
+                    setState(() => _bell = old);
+                    _snack('تعذّر الحفظ — تأكد من تشغيل الترحيل 032 والاتصال');
+                  }
+                }
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+
   /// تصدير المحادثة نصاً — كل النصوص من المفكوك على جهازك، والملف لا يغادر
   /// جهازك إلا بمشاركتك أنت (تقرير الشفافية: مسار محلي صريح)
   Future<void> _exportConversation() async {
@@ -467,6 +646,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     unawaited(_loadMuteState());
     unawaited(_loadAutoTranslatePref());
     unawaited(_loadClearedAt());
+    unawaited(_loadBell()); // جرس القنوات (0.21.0)
     PushService.visibleConversation = widget.conversationId;
     ScreenshotService.flagOf(widget.conversationId).then((v) {
       if (!mounted || !v) return;
@@ -751,6 +931,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     if (PushService.visibleConversation == widget.conversationId) {
       PushService.visibleConversation = null;
     }
+    // القراءة الصوتية تتوقف عند مغادرة المحادثة (0.21.0)
+    VoiceReadService.stop();
     _ticker?.cancel();
     _typingSweep?.cancel();
     _partsSub?.cancel();
@@ -1562,11 +1744,28 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           ),
         );
       default:
-        final text = _textOf(m) ?? '🔒 جارٍ فك التشفير…';
+        final text = _textOf(m);
         final mine = m['sender_id'] == _me;
-        return Text(text,
-            style: TextStyle(
-                color: mine ? Colors.white : context.textPrimary, fontSize: 16));
+        final shown = text ?? '🔒 جارٍ فك التشفير…';
+        // معاينة الروابط (0.21.0): بطاقة تحت النص إن كان يضم رابطاً عاماً —
+        // بلا رابط أو ميزة معطلة أو فشل جلب: لا بطاقة إطلاقاً (هبوط صامت)
+        final hasUrl = text != null &&
+            text.isNotEmpty &&
+            !text.startsWith('{') &&
+            !E2eService.isEncrypted(text) &&
+            LinkPreviewService.enabled.value &&
+            LinkPreviewService.extractFirstUrl(text) != null;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(shown,
+                style: TextStyle(
+                    color: mine ? Colors.white : context.textPrimary, fontSize: 16)),
+            if (hasUrl && m['deleted_at'] == null)
+              LinkPreviewCard(text: text, mine: mine),
+          ],
+        );
     }
   }
 
@@ -2585,6 +2784,39 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               onPressed: _showChannelStats,
               icon: const Icon(Icons.query_stats_rounded),
             ),
+          // جرس القنوات (0.21.0): تفضيل الإشعار لهذه القناة حصراً
+          if (widget.isChannel)
+            IconButton(
+              tooltip: 'إشعارات القناة: ${ChannelBellService.label(_bell)}',
+              onPressed: _showBellDialog,
+              icon: Icon(
+                _bell == 'mute'
+                    ? Icons.notifications_off_outlined
+                    : _bell == 'pinned'
+                        ? Icons.push_pin_outlined
+                        : Icons.notifications_active_outlined,
+                color: _bell == 'all'
+                    ? null
+                    : _bell == 'pinned'
+                        ? WaslColors.teal
+                        : context.textFaint,
+              ),
+            ),
+          // القراءة الصوتية (0.21.0): TTS عربي على الجهاز حصراً
+          IconButton(
+            tooltip: _ttsBusy || VoiceReadService.speaking.value
+                ? 'إيقاف القراءة'
+                : 'اقرأ آخر الرسائل',
+            onPressed: _toggleSpeak,
+            icon: Icon(
+              _ttsBusy || VoiceReadService.speaking.value
+                  ? Icons.stop_circle_outlined
+                  : Icons.volume_up_outlined,
+              color: _ttsBusy || VoiceReadService.speaking.value
+                  ? WaslColors.teal
+                  : null,
+            ),
+          ),
           IconButton(
             tooltip: 'بحث',
             onPressed: () => setState(() => _searching = true),
@@ -2618,6 +2850,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
               if (v == 'screenshots') _toggleNoScreenshots();
               if (v == 'autotranslate') _toggleAutoTranslate();
+              if (v == 'media') _openMediaGallery();
               if (v == 'export') _exportConversation();
               if (v == 'clear') _clearConversation();
             },
@@ -2625,6 +2858,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               PopupMenuItem(
                 value: 'starred',
                 child: Text(_starredOnly ? 'كل الرسائل' : 'الرسائل المميزة بنجمة'),
+              ),
+              const PopupMenuItem(
+                value: 'media',
+                child: Row(children: [
+                  Icon(Icons.photo_library_outlined, size: 20, color: WaslColors.teal),
+                  SizedBox(width: 12),
+                  Text('معرض الوسائط'),
+                ]),
               ),
               if (!widget.isChannel)
                 PopupMenuItem(
@@ -2793,10 +3034,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
                 final items = AlbumService.group(msgs);
                 _allMsgs = all;
-                return ListView.builder(
+                _maybeJumpToFocus(items);
+                return ScrollablePositionedList.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),
                   itemCount: items.length,
+                  itemScrollController: _itemScroll,
                   itemBuilder: (context, i) {
                     final item = items[i];
                     if (item.length > 1) return _albumTile(item);
@@ -2818,6 +3061,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                           gradient: mine ? WaslColors.gradient : null,
                           color: mine ? null : context.bubbleOther,
                           borderRadius: BorderRadius.circular(20),
+                          // الإبراز عند القفز (معرض الوسائط): إطار فاتح يذوب
+                          border: _highlightId == m['id']
+                              ? Border.all(color: Colors.tealAccent, width: 2.5)
+                              : null,
+                          boxShadow: _highlightId == m['id']
+                              ? [BoxShadow(color: Colors.tealAccent.withValues(alpha: 0.35), blurRadius: 18)]
+                              : null,
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,

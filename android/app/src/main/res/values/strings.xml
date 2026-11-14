@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ويدجت «آخر المحادثات» (0.21.0) -->
+    <string name="widget_desc">آخر 3 محادثات بمعاينتها — تحديث محلي عند فتح التطبيق</string>
+</resources>
