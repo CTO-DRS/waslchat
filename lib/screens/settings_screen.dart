@@ -15,6 +15,7 @@ import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
 import 'bots_screen.dart';
 import 'feedback_screen.dart';
+import 'key_log_screen.dart';
 import 'linked_devices_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
@@ -73,6 +74,14 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const LinkedDevicesScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.fact_check_outlined, color: WaslColors.teal),
+            title: const Text('سجل مفاتيحي'),
+            subtitle: const Text('شفافية المفاتيح: تاريخ أحداث المفاتيح بسلسلة تتحقق محلياً'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const KeyLogScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.smart_toy_outlined, color: WaslColors.violet),

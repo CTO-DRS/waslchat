@@ -7,6 +7,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config.dart';
+import 'key_transparency_service.dart';
 import 'platform_name.dart';
 import 'ratchet.dart';
 
@@ -151,10 +152,14 @@ class E2eService {
   static Future<void> _publishMyKey() async {
     final uid = supabase.auth.currentUser!.id;
     final pub = await (await _loadMyPair()).extractPublicKey();
+    final fp = await fingerprint(pub.bytes);
     await supabase.from('profiles').update({
       'identity_public_key': base64Encode(pub.bytes),
-      'key_fp': await fingerprint(pub.bytes),
+      'key_fp': fp,
     }).eq('id', uid);
+    // شفافية المفاتيح (0.25.0 — ترحيل 034): نشر الهوية حدث مُلحَّص بسلسلة
+    unawaited(KeyTransparencyService.log(
+        kind: 'identity_publish', fingerprint: fp));
   }
 
   static void _clearKeyCaches() {
@@ -327,6 +332,10 @@ class E2eService {
       }
     } catch (_) {}
     await createBackup(passphrase);
+    // شفافية المفاتيح: المفتاح الجديد الكلي حدث مُلحَّص
+    final newPub = await (await _loadMyPair()).extractPublicKey();
+    unawaited(KeyTransparencyService.log(
+        kind: 'key_reset', fingerprint: await fingerprint(newPub.bytes)));
     _ready = true;
     _onReady();
   }
@@ -1084,6 +1093,7 @@ class E2eService {
         (id, pair) = await _loadDevice();
       }
       final pub = base64Encode((await pair.extractPublicKey()).bytes);
+      final devFp = await fingerprint(base64Decode(pub));
       if (row == null || row['revoked_at'] != null) {
         await supabase.from('devices').upsert({
           'id': id,
@@ -1091,8 +1101,11 @@ class E2eService {
           'name': _deviceName(),
           'platform': devicePlatformLabel(),
           'identity_public_key': pub,
-          'key_fp': await fingerprint(base64Decode(pub)),
+          'key_fp': devFp,
         });
+        // شفافية المفاتيح: تسجيل الجهاز حدث مُلحَّص (الظهور الدوري لا يسجل)
+        unawaited(KeyTransparencyService.log(
+            kind: 'device_register', fingerprint: devFp, deviceId: id));
       } else {
         await supabase.from('devices').update({
           'last_seen_at': DateTime.now().toUtc().toIso8601String(),
@@ -1596,6 +1609,16 @@ class E2eService {
   static Future<void> removeDevice(String deviceId) async {
     final me = supabase.auth.currentUser?.id;
     if (me == null) return;
+    // شفافية المفاتيح: بصمة الجهاز تُلحَّص قبل حذف سجله (الصف يغادر الخادم)
+    var devFp = '';
+    try {
+      final r = await supabase
+          .from('devices')
+          .select('key_fp')
+          .eq('id', deviceId)
+          .maybeSingle();
+      devFp = (r?['key_fp'] as String?) ?? '';
+    } catch (_) {}
     try {
       await supabase.from('e2e_prekeys').delete().eq('device_id', deviceId);
     } catch (_) {}
@@ -1606,6 +1629,8 @@ class E2eService {
           .eq('id', deviceId)
           .eq('user_id', me);
     } catch (_) {}
+    unawaited(KeyTransparencyService.log(
+        kind: 'device_remove', fingerprint: devFp, deviceId: deviceId));
     _devicesCache.remove(me);
     if (deviceId == _deviceId) {
       await _storage.delete(key: _deviceIdKey);
