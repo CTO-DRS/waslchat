@@ -4,6 +4,7 @@ import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
+import 'community_calendar_screen.dart';
 import 'community_events_screen.dart';
 import 'community_moderation_screen.dart';
 
@@ -104,6 +105,20 @@ class _CommunityScreenState extends State<CommunityScreen> {
           ],
         ]),
         actions: [
+          IconButton(
+              tooltip: 'التقويم الشهري',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CommunityCalendarScreen(
+                      communityId: widget.communityId,
+                      communityName: widget.name,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.calendar_month_outlined)),
           IconButton(
               tooltip: 'الأحداث',
               onPressed: () {
