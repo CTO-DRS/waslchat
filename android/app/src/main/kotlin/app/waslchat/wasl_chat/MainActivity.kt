@@ -44,7 +44,7 @@ class MainActivity : FlutterFragmentActivity() {
                         try {
                             val alias = call.argument<String>("alias") ?: "MainActivityClassic"
                             val pkg = packageName
-                            val pm = getSystemService(Context.PACKAGE_SERVICE) as PackageManager
+                            val pm = packageManager // موروث من النشاط مباشرة — لا حاجة لـgetSystemService
                             val enableOne = { name: String, enabled: Boolean ->
                                 pm.setComponentEnabledSetting(
                                     ComponentName(pkg, "$pkg.$name"),
