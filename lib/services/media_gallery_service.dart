@@ -15,6 +15,7 @@ class MediaItem {
     required this.mine,
     this.name,
     this.caption,
+    this.rawContent,
   });
 
   final String messageId;
@@ -24,6 +25,7 @@ class MediaItem {
   final bool mine;
   final String? name;
   final String? caption;
+  final String? rawContent; // نص الرسالة كما على الخادم (مشفّر) — لقراءة mk الوسيط
 
   bool get isImage => type == 'image';
   bool get isVideo => type == 'video';
@@ -79,6 +81,7 @@ class MediaGalleryService {
         mine: m['sender_id'] == myId,
         name: name,
         caption: caption,
+        rawContent: m['content'] as String?,
       ));
     }
     // الأحدث أولاً

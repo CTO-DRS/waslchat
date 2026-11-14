@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/call_service.dart';
+import '../services/device_security_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
@@ -38,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
+    // المرحلة 10: إزالة جهاز كاملة — إصغاء لحظي لإزالة الأجهزة فتسقط الجلسات
+    // الميتة محلياً فوراً + مطابقة دورية شبكة أمان
+    DeviceSecurityService.attach();
     // المكالمات (0.17.0): الاستماع للواردات وفتح شاشة المكالمة فوراً
     CallService.onIncoming = _openIncomingCall;
     CallService.watchIncoming();
@@ -122,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    DeviceSecurityService.detach();
     PresenceService.stop();
     CallService.onIncoming = null;
     CallService.stopWatching();

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
 
@@ -145,6 +147,11 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
               !_plain.containsKey(c)) {
             futures.add(_decrypt(c).then((p) {
               _plain[c] = p ?? '🔒';
+              // mk الوسيط من الميتا المتدرجة يُخزّن برسالة عند الفك الأول
+              if (p != null && p.startsWith('{')) {
+                E2eService.rememberMediaKey(
+                    widget.conversationId, m['id'] as String?, p);
+              }
             }));
           }
         }
@@ -267,7 +274,7 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
   Widget _tile(MediaItem item) {
     Widget child;
     if (item.isImage) {
-      child = _GridImage(loader: () => _mediaBytes(item.mediaUrl));
+      child = _GridImage(loader: () => _mediaBytes(item));
     } else {
       final icon = item.isVideo
           ? Icons.play_circle_fill
@@ -315,12 +322,28 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
     );
   }
 
-  Future<Uint8List?> _mediaBytes(String path) async {
+  Future<Uint8List?> _mediaBytes(MediaItem item) async {
     try {
+      final path = item.mediaUrl;
       final raw = await MediaService.download(path);
       if (!E2eService.isEncryptedPath(path) || !_e2e) return raw;
       if (!widget.isGroup) {
-        final key = await _convKey();
+        if (widget.otherId == null) return null;
+        // مفتاح الوسيط: mk من الميتا المفكوكة (أو المخزّن عند الوصول) —
+        // والقديمة بلا mk تهبط لمفتاح v1 الثابت تلقائياً (dmMediaKey)
+        Map<String, dynamic>? meta;
+        final t = item.rawContent == null ? null : _plain[item.rawContent!];
+        if (t != null && t.startsWith('{')) {
+          try {
+            meta = Map<String, dynamic>.from(jsonDecode(t) as Map);
+          } catch (_) {}
+        }
+        final key = await E2eService.dmMediaKey(
+          conversationId: widget.conversationId,
+          otherUserId: widget.otherId!,
+          messageId: item.messageId,
+          meta: meta,
+        );
         if (key == null) return null;
         return await E2eService.decryptBytes(key, widget.conversationId, raw);
       }
@@ -333,11 +356,5 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
     } catch (_) {
       return null;
     }
-  }
-
-  // مفتاح المحادثة الفردية (ECDH) — المجموعات تمر عبر decryptGroupBytes
-  Future<dynamic> _convKey() async {
-    if (widget.otherId == null) return null;
-    return E2eService.dmKey(widget.conversationId, widget.otherId!);
   }
 }

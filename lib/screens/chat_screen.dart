@@ -246,9 +246,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   final Set<String> _decrypting = {};
 
-  Future<void> _decryptInto(String content) async {
+  Future<void> _decryptInto(String content, {String? msgId}) async {
     if (!_decrypting.add(content)) return;
     final plain = await _decrypt(content);
+    // mk الوسائط (إن وُجد في الميتا المتدرجة) يُخزّن برسالة عند الفك الأول —
+    // فالوسائط تُقرأ لاحقاً حتى بعد تدوير الجلسة أو إعادة فتح التطبيق
+    if (plain != null && plain.startsWith('{')) {
+      await E2eService.rememberMediaKey(widget.conversationId, msgId, plain);
+    }
     if (mounted && !_plain.containsKey(content)) {
       setState(() => _plain[content] = plain ?? '🔒 تعذّر فك التشفير');
     }
@@ -297,16 +302,23 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     return E2eService.isEncrypted(raw) ? _plain[raw] : raw;
   }
 
-  /// يفك تشفير الرسائل النصية المشفّرة الجديدة في الخلفية
+  /// يفك تشفير الرسائل المشفّرة الجديدة في الخلفية (نصوص وميتا الوسائط —
+  /// المرحلة 10: ميتا الصور والصوتيات أيضاً لأنها تحمل mk الوسيط)
   void _scheduleDecrypt(List<Map<String, dynamic>> msgs) {
     if (!_e2e) return;
     for (final m in msgs) {
       final t = m['type'] ?? 'text';
-      if (t != 'text' && t != 'file' && t != 'video') continue;
+      if (t != 'text' &&
+          t != 'file' &&
+          t != 'video' &&
+          t != 'image' &&
+          t != 'voice') {
+        continue;
+      }
       if (m['deleted_at'] != null) continue;
       final content = m['content'] as String? ?? '';
       if (!E2eService.isEncrypted(content) || _plain.containsKey(content)) continue;
-      unawaited(_decryptInto(content));
+      unawaited(_decryptInto(content, msgId: m['id'] as String?));
     }
   }
 
@@ -1208,34 +1220,50 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }) async {
     setState(() => _uploading = true);
     try {
-      var content = meta == null ? '' : jsonEncode(meta);
+      var content = '';
+      var metaMap = meta == null
+          ? <String, dynamic>{
+              if (durationMs != null) 'duration': durationMs,
+            }
+          : Map<String, dynamic>.from(meta);
       var payload = bytes;
       var upExt = ext;
       var upType = contentType;
+      var dmRatchet = false;
       if (_e2e) {
-        // بايتات الوسيط تبقى على مفتاح المحادثة الثابت في هذا الإصدار،
-        // وبيانات الوصف/التسمية تمر عبر الجلسة المتدرجة في الخاص
+        // المرحلة 10 (0.24.0): الوسائط في الخاص على الجلسة المتدرجة — كل وسيط
+        // بمفتاح محتوى عشوائي خاص به (mk) يُغلَّف داخل ميتا الرسالة المشفرة
+        // بالجلسة نفسها (سرية أمامية للوسائط كالنصوص)، والمجموعات تبقى على
+        // مفتاحها المغلف كما هي، والقديمة بلا mk تُقرأ بمفتاح v1 رجوعاً
         final key = await _convKey();
         if (key == null) {
           _snack(_keyMissingMsg());
           return;
         }
-        payload = await E2eService.encryptBytes(key, widget.conversationId, bytes);
-        if (content.isNotEmpty) {
-          if (!widget.isGroup && widget.otherId != null) {
-            final p = await E2eService.encryptDmText(
-                widget.conversationId, widget.otherId!, content);
-            if (p == null) {
-              _snack(_keyMissingMsg());
-              return;
-            }
-            content = p;
-          } else {
-            content = await E2eService.encryptText(key, widget.conversationId, content);
+        dmRatchet = !widget.isGroup && widget.otherId != null;
+        if (dmRatchet) {
+          final mk = await E2eService.newContentKey();
+          metaMap['mk'] = base64Encode(await mk.extractBytes());
+          payload = await E2eService.encryptBytes(mk, widget.conversationId, bytes);
+        } else {
+          payload = await E2eService.encryptBytes(key, widget.conversationId, bytes);
+        }
+        final content0 = jsonEncode(metaMap);
+        if (dmRatchet) {
+          final p = await E2eService.encryptDmText(
+              widget.conversationId, widget.otherId!, content0);
+          if (p == null) {
+            _snack(_keyMissingMsg());
+            return;
           }
+          content = p;
+        } else {
+          content = await E2eService.encryptText(key, widget.conversationId, content0);
         }
         upExt = 'enc.bin';
         upType = 'application/octet-stream';
+      } else {
+        content = metaMap.isEmpty ? '' : jsonEncode(metaMap);
       }
       final path = await MediaService.upload(
         conversationId: widget.conversationId,
@@ -1244,7 +1272,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         contentType: upType,
       );
       final replyTo = _replyTo;
-      await supabase.from('messages').insert({
+      final ins = await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
         'type': type,
@@ -1254,7 +1282,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         if (viewOnce) 'view_once': true,
         if (groupId != null) 'media_group_id': groupId,
         if (replyTo != null) 'reply_to': replyTo['id'],
-      });
+      }).select('id').single();
+      // رسائلي المرسلة: mk يُخزّن برسالة فوراً فتُقرأ وسائطي بعد أي تدوير جلسة
+      if (dmRatchet) {
+        await E2eService.rememberMediaKey(
+            widget.conversationId, ins['id'] as String?, jsonEncode(metaMap));
+      }
       if (mounted) setState(() {
         _replyTo = null;
         _viewOnce = false;
@@ -1371,7 +1404,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     if (kIsWeb) return _openMediaWeb(m);
     setState(() => _uploading = true);
     try {
-      final bytes = await _mediaBytes(m['media_url'] as String);
+      final bytes = await _mediaBytes(m);
       if (bytes == null) {
         _snack('تعذّر تنزيل الملف');
         return;
@@ -1402,7 +1435,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   Future<void> _openMediaWeb(Map<String, dynamic> m) async {
     setState(() => _uploading = true);
     try {
-      final bytes = await _mediaBytes(m['media_url'] as String);
+      final bytes = await _mediaBytes(m);
       if (bytes == null) {
         _snack('تعذّر تنزيل الملف');
         return;
@@ -1542,12 +1575,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   /// تنزيل وسيط وفكّ تشفيره إن كان مشفّراً (null = فشل)
-  Future<Uint8List?> _mediaBytes(String path) async {
+  /// الخاص: مفتاح الوسيط عبر dmMediaKey (mk المخزّن أو الميتا أو v1 للقديم)
+  Future<Uint8List?> _mediaBytes(Map<String, dynamic> m) async {
     try {
+      final path = m['media_url'] as String?;
+      if (path == null) return null;
       final raw = await MediaService.download(path);
       if (!E2eService.isEncryptedPath(path) || !_e2e) return raw;
       if (!widget.isGroup) {
-        final key = await _convKey();
+        if (widget.otherId == null) return null;
+        final key = await E2eService.dmMediaKey(
+          conversationId: widget.conversationId,
+          otherUserId: widget.otherId!,
+          messageId: m['id'] as String?,
+          meta: _metaOf(m),
+        );
         if (key == null) return null;
         return await E2eService.decryptBytes(key, widget.conversationId, raw);
       }
@@ -1584,7 +1626,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final wasSecure = await ScreenshotService.flagOf(widget.conversationId);
     var secured = false;
     try {
-      final bytes = await _mediaBytes(m['media_url'] as String);
+      final bytes = await _mediaBytes(m);
       if (bytes == null) {
         _snack('انتهى هذا الوسيط أو تعذّر فك تشفيره');
         return;
@@ -1668,7 +1710,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                     width: tile,
                     height: tile,
                     child: ImageBubble(
-                        loader: () => _mediaBytes(m['media_url'] as String),
+                        loader: () => _mediaBytes(m),
                         width: tile),
                   ),
               ],
@@ -1718,10 +1760,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
     switch (m['type'] as String? ?? 'text') {
       case 'image':
-        return ImageBubble(loader: () => _mediaBytes(m['media_url'] as String));
+        return ImageBubble(loader: () => _mediaBytes(m));
       case 'voice':
         return VoiceBubble(
-            loader: () => _mediaBytes(m['media_url'] as String),
+            loader: () => _mediaBytes(m),
             durationMs: m['duration_ms'] as int?);
       case 'video':
       case 'file':
@@ -2155,7 +2197,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     _transcribing.add(id);
     _showAiResult('تفريغ الرسالة الصوتية', () async {
       try {
-        final bytes = await _mediaBytes(m['media_url'] as String);
+        final bytes = await _mediaBytes(m);
         if (bytes == null) throw Exception('no audio');
         final t = await AiService.transcribe(
           bytes,
@@ -2646,7 +2688,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     if (type == 'text') {
       ok = await ForwardService.send(target: target, type: 'text', text: _textOf(m));
     } else {
-      final bytes = await _mediaBytes(m['media_url'] as String);
+      final bytes = await _mediaBytes(m);
       ok = bytes != null &&
           await ForwardService.send(
               target: target,
