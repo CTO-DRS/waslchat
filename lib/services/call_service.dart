@@ -13,11 +13,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint, ValueNotifier;
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import 'call_logic.dart';
+import 'call_quality_service.dart';
+import 'push_service.dart';
 
 /// جلسة مكالمة حية — حالة واحدة تلاحظها الواجهة وتدفعها الخدمة.
 /// كل الحقول ValueNotifier فتتحدث الشاشة لحظياً بلا setState يدوي.
@@ -61,6 +64,17 @@ class CallSession {
 
   /// رسالة فشل صادقة للعرض (صلاحيات، شبكة، إلغاء طرف…)
   final error = ValueNotifier<String?>(null);
+
+  /// جودة الوصلة المستقرة من إحصاءات جهازك — null قبل أول قياس
+  /// (لا شارة ولا ادعاء) (المرحلة 11 أ — 0.26.0)
+  final quality = ValueNotifier<CallQualityLevel?>(null);
+
+  /// ملاحظة الشبكة/التكييف الصادقة — تظهر أسفل الاسم بلا إنذار زائف
+  final netNote = ValueNotifier<String?>(null);
+
+  bool _adapted = false;
+  Timer? _statsTimer;
+  final CallQualityGate _gate = CallQualityGate();
 
   RealtimeChannel? _ch;
   RTCPeerConnection? _pc;
@@ -300,6 +314,7 @@ class CallSession {
       if (event.streams.isNotEmpty) {
         remoteStream.value ??= event.streams.first;
         _startTicker(); // الوسائط وصلت — تبدأ مدة المكالمة
+        _startQualityWatch(); // المرحلة 11 أ: بدء مراقبة الجودة من الإحصاءات
       }
     };
     pc.onConnectionState = (state) {
@@ -465,6 +480,8 @@ class CallSession {
     _ringTimer?.cancel();
     _connectTimer?.cancel();
     _ticker?.cancel();
+    _statsTimer?.cancel();
+    _statsTimer = null;
     try {
       final ch = _ch;
       _ch = null;
@@ -503,6 +520,51 @@ class CallSession {
       if (status.value != CallStatus.answered) return;
       duration.value = duration.value + 1;
     });
+  }
+
+  // ============== مراقبة الجودة والتكييف (المرحلة 11 أ — 0.26.0) ==============
+
+  /// قياس محلي كل 4 ثوانٍ من إحصاءات الاتصال على جهازك حصراً — لا شيء
+  /// يُرسل للخادم ولا للطرف الآخر. غياب الإحصاءات لا يغيّر شيئاً.
+  void _startQualityWatch() {
+    _statsTimer ??= Timer.periodic(const Duration(seconds: 4), (_) async {
+      final pc = _pc;
+      if (pc == null || status.value != CallStatus.answered) return;
+      try {
+        final reports = await pc.getStats();
+        final sample = parseQualitySample(
+            [for (final r in reports) (r.type, r.values)]);
+        final level = _gate.add(sample);
+        if (level != null && quality.value != level) {
+          quality.value = level;
+        }
+        _applyAdaptation();
+      } catch (_) {
+        // getStats غير مدعوم أو فشل — بلا شارة ولا ادعاء، والمكالمة كما هي
+      }
+    });
+  }
+
+  /// التكييف الصادق الوحيد: إيقاف الكاميرا مرة واحدة عند «ضعيفة» في
+  /// المكالمات المرئية — الصوت أولاً. لا إعادة تشغيل تلقائية أبداً.
+  void _applyAdaptation() {
+    final level = quality.value;
+    if (level == null) return;
+    final d = decideAdaptation(level,
+        isVideo: isVideo,
+        cameraOn: cameraOn.value,
+        alreadyAdapted: _adapted);
+    if (d == CallAdaptation.none) return;
+    netNote.value = adaptationNote(d);
+    if (d == CallAdaptation.dimCamera) {
+      _adapted = true;
+      cameraOn.value = false;
+      try {
+        for (final t in _local?.getVideoTracks() ?? <MediaStreamTrack>[]) {
+          t.enabled = false;
+        }
+      } catch (_) {}
+    }
   }
 }
 
@@ -569,9 +631,60 @@ class CallService {
         peerAvatar: avatar,
       );
       active.value = s;
+      // المرحلة 11 أ (0.26.0): الرن فوق القفل — التطبيق ليس أمام المستخدم
+      // → إشعار محلي بنية ملء الشاشة يرن ويظهر فوق القفل (صلاحية أندرويد
+      //   14+ بموافقة المستخدم)، والتطبيق مفتوح أمامك → شاشة المكالمة كما اليوم.
+      final resumed =
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+      if (decidePresentation(appResumed: resumed) ==
+          CallAlertPresentation.fullScreenNotification) {
+        unawaited(PushService.showIncomingCallNotification(
+          callerName: name,
+          video: rec.kind == CallKind.video,
+          conversationId: rec.conversationId,
+        ));
+      }
       await s.beginIncoming();
       onIncoming?.call(s);
     } catch (_) {}
+  }
+
+  /// استئناف مكالمة من نقرة إشعار البدء البارد (المرحلة 11 أ): يجلب الصف
+  /// من الخادم ويحكم بحارس الرن الحقيقي — رنّة حية أنا المستدعى فيها وعمرها
+  /// داخل مهلة الرنين. ما بعده صف ميت فلا شاشة ولا ادعاء.
+  static Future<CallSession?> resumeFromCallData(Map<String, dynamic> data) async {
+    final callId = data['call_id'];
+    if (callId is! String || callId.isEmpty) return null;
+    if (active.value != null) return null;
+    final me = supabase.auth.currentUser?.id;
+    if (me == null) return null;
+    try {
+      final rows = await supabase.from('calls').select().eq('id', callId).limit(1);
+      if (rows.isEmpty) return null;
+      final rec = CallRecord.fromRow(rows.first);
+      final ok = CallAlert.resumeEligible(
+        status: rec.status.name,
+        iAmCallee: !rec.outgoing(me),
+        age: DateTime.now().difference(rec.createdAt),
+      );
+      if (!ok) return null;
+      final name = await _profileName(rec.callerId);
+      final avatar = await _profileAvatar(rec.callerId);
+      final s = CallSession(
+        callId: rec.id,
+        conversationId: rec.conversationId,
+        kind: rec.kind,
+        role: CallRole.callee,
+        peerId: rec.callerId,
+        peerName: name,
+        peerAvatar: avatar,
+      );
+      active.value = s;
+      await s.beginIncoming();
+      return s;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// بدء مكالمة صادرة — null إن كان هناك خطأ أو مكالمة جارية
@@ -636,6 +749,8 @@ class CallService {
 
   static void clearActive(CallSession s) {
     if (identical(active.value, s)) active.value = null;
+    // الرن فوق القفل يصمت بأي نهاية للمكالمة (رد/رفض/فائتة/إلغاء)
+    PushService.cancelIncomingCallNotification();
   }
 
   static Future<String> _profileName(String id) async {

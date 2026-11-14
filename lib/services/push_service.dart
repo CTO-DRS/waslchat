@@ -14,6 +14,7 @@ import '../app_keys.dart';
 import '../config.dart';
 import '../firebase_options.dart';
 import '../theme.dart';
+import 'call_quality_service.dart';
 import 'quick_action_service.dart';
 
 /// الإشعارات عبر Firebase Cloud Messaging (اختيارية: إن لم يُعدّ Firebase تُتجاهل).
@@ -205,6 +206,76 @@ class PushService {
         payload: payload,
       );
     } catch (_) {}
+  }
+
+  /// إشعار «مكالمة واردة» يرن فوق القفل (المرحلة 11 أ — 0.26.0):
+  /// قناة مخصصة بأهمية أقصى ونص ملء الشاشة وصوت المنبه الافتراضي للنظام،
+  /// والإشعار نفسه بنية fullScreenIntent كي يظهر فوق شاشة القفل إن سمح
+  /// النظام (صلاحية تلقائية قبل أندرويد 14 وبموافقة المستخدم بعدها).
+  /// لا نص مخصص للرن: صوت النظام الافتراضي صادق ومضمون العمل.
+  /// معرّف آخر إشعار مكالمة واردة معروض — للإسكات الدقيق بأي نهاية
+  static int? _lastCallNotifId;
+
+  static Future<void> showIncomingCallNotification({
+    required String callerName,
+    required bool video,
+    required String conversationId,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android || !_localNotifReady) {
+      return;
+    }
+    const details = AndroidNotificationDetails(
+      CallAlert.channelId,
+      CallAlert.channelName,
+      channelDescription: CallAlert.channelDescription,
+      importance: Importance.max,
+      priority: Priority.max,
+      category: AndroidNotificationCategory.call,
+      fullScreenIntent: true,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+      autoCancel: true,
+      ongoing: false,
+      visibility: NotificationVisibility.public,
+    );
+    final payload = QuickActionService.encodeOpen(conversationId);
+    final id = CallAlert.notifId(conversationId);
+    _lastCallNotifId = id;
+    try {
+      await _local.show(
+        id,
+        CallAlert.title,
+        CallAlert.body(callerName: callerName, video: video),
+        const NotificationDetails(android: details),
+        payload: payload,
+      );
+    } catch (_) {}
+  }
+
+  /// إسكات رن المكالمة الواردة بأي نهاية لها — صمت صادق لا بواقي
+  static Future<void> cancelIncomingCallNotification() async {
+    if (defaultTargetPlatform != TargetPlatform.android || !_localNotifReady) {
+      return;
+    }
+    try {
+      final id = _lastCallNotifId;
+      _lastCallNotifId = null;
+      if (id != null) await _local.cancel(id);
+    } catch (_) {}
+  }
+
+  /// بيانات مكالمة واردة من نقرة فتح التطبيق بارداً على إشعار الرن
+  /// (المرحلة 11 أ) — null في كل غير ذلك
+  static Future<Map<String, dynamic>?> initialCallData() async {
+    if (!_ready || kIsWeb) return null;
+    try {
+      final m = await FirebaseMessaging.instance.getInitialMessage();
+      if (m == null) return null;
+      final data = m.data;
+      if (data['type'] == 'call' && data['call_id'] is String) {
+        return Map<String, dynamic>.from(data);
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// جدولة تذكير محلي في وقت موعد مكتشف (المرحلة 9 ب — 0.23.0):

@@ -49,7 +49,20 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkE2eKeys(context);
       _checkUpdates();
+      _resumeInitialCall(); // المرحلة 11 أ: فتح بنقرة رن مكالمة فوق القفل
     });
+  }
+
+  /// المرحلة 11 أ: فتح التطبيق بنقرة إشعار الرن — إن كانت المكالمة ما تزال
+  /// تُرن نعرض شاشتها، وإلا لا شيء صادق (لا شاشة شبح)
+  Future<void> _resumeInitialCall() async {
+    final data = await PushService.initialCallData();
+    if (data == null || !mounted) return;
+    final s = await CallService.resumeFromCallData(data);
+    if (s != null && mounted) {
+      Navigator.push(
+          context, MaterialPageRoute(builder: (_) => CallScreen(session: s)));
+    }
   }
 
   /// مكالمة واردة — شاشة ملء فوق كل شيء
