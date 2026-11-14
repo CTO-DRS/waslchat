@@ -99,7 +99,7 @@ class PushService {
     try {
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
       await _local.initialize(
-        settings: const InitializationSettings(android: androidInit),
+        const InitializationSettings(android: androidInit),
         onDidReceiveNotificationResponse: _onNotificationResponse,
         onDidReceiveBackgroundNotificationResponse: notificationBackgroundResponse,
       );
@@ -196,10 +196,10 @@ class PushService {
     );
     try {
       await _local.show(
-        id: conversationId.hashCode.abs(),
-        title: title,
-        body: body,
-        notificationDetails: NotificationDetails(android: details),
+        conversationId.hashCode.abs(),
+        title,
+        body,
+        NotificationDetails(android: details),
         payload: payload,
       );
     } catch (_) {}
