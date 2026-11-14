@@ -163,6 +163,15 @@ class SmartSearchService {
   static bool matches(String messageText, String query) =>
       score(messageText, query) > 0;
 
+  /// توسيع كلمة استعلام (مطبَّعة) بمرادفاتها — يستهلكه البحث الدلالي المتجهي
+  /// (المرحلة 9 — 0.22.0) ليجعل التمثيل المتجهي يفهم «بالمعنى القريب» كما
+  /// يفهمه البحث المعجمي، بلا أي شبكة ولا نموذج سحابي.
+  static Set<String> expansionsFor(String word) {
+    final w = normalize(word);
+    if (w.isEmpty) return const {};
+    return _synonyms[w] ?? const {};
+  }
+
   /// أطوال المقاطع المطابقة داخل النص لإبرازها (بنصه الأصلي غير المطبَّع).
   /// يعيد قائمة (بداية، طول) على النص الأصلي.
   static List<(int, int)> highlightSpans(String original, String query) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -5,6 +7,7 @@ import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../services/saved_service.dart';
+import '../services/smart_order_service.dart';
 import '../services/widget_data_service.dart';
 import '../theme.dart';
 import '../services/status_service.dart';
@@ -45,6 +48,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   void initState() {
     super.initState();
+    // الترتيب الذكي (المرحلة 9 أ): تحميل الحالة والعدّادات المحلية، وإعادة
+    // بناء القائمة عند تغيير المفتاح من الإعدادات
+    unawaited(SmartOrderService.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    }));
+    SmartOrderService.enabled.addListener(_onSmartOrderChanged);
     _load();
     _loadStatuses();
     _loadSaved();
@@ -62,8 +71,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   @override
   void dispose() {
+    SmartOrderService.enabled.removeListener(_onSmartOrderChanged);
     if (_channel != null) supabase.removeChannel(_channel!);
     super.dispose();
+  }
+
+  void _onSmartOrderChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
@@ -198,6 +212,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
     } catch (_) {
       // بلا ترحيل 025: لا صف محفوظة وبقية القائمة تعمل
     }
+  }
+
+  /// قائمة المحادثات الظاهرة بالترتيب المعتمد: الترتيب الذكي المحلي
+  /// (المرحلة 9 أ) في القائمة الرئيسية عند فعله، وترتيب الخادم الأصلي
+  /// في المؤرشفة أو عند التعطيل
+  List<Map<String, dynamic>> _orderedVisible() {
+    final filtered =
+        _chats.where((c) => (c['archived'] == true) == _showArchived).toList();
+    if (_showArchived || !SmartOrderService.enabled.value) return filtered;
+    return SmartOrderService.order(
+      filtered,
+      previews: _previews,
+      openCounts: SmartOrderService.openCounts,
+    );
   }
 
   Widget _savedRow() {
@@ -354,8 +382,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   Widget build(BuildContext context) {
     final archivedCount = _chats.where((c) => c['archived'] == true).length;
-    final visible =
-        _chats.where((c) => (c['archived'] == true) == _showArchived).toList();
+    final visible = _orderedVisible();
     return PopScope(
       canPop: !_showArchived,
       onPopInvokedWithResult: (didPop, _) {
@@ -555,14 +582,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               ],
                             ],
                           ),
-                          onTap: () => _open(ChatScreen(
-                            conversationId: c['conversation_id'] as String,
-                            title: name,
-                            isGroup: isGroup,
-                            otherId: otherId,
-                            isBot: isBot,
-                            encrypted: isGroup || !isBot,
-                          )),
+                          onTap: () {
+                            // عدّاد التفاعل المحلي للترتيب الذكي (9 أ) — بلا أي شبكة
+                            unawaited(SmartOrderService.recordOpen(
+                                c['conversation_id'] as String));
+                            _open(ChatScreen(
+                              conversationId: c['conversation_id'] as String,
+                              title: name,
+                              isGroup: isGroup,
+                              otherId: otherId,
+                              isBot: isBot,
+                              encrypted: isGroup || !isBot,
+                            ));
+                          },
                         );
   }
 }

@@ -6,6 +6,7 @@ import '../services/app_lock_service.dart';
 import '../services/link_preview_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
+import '../services/smart_order_service.dart';
 import '../services/update_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
@@ -134,6 +135,7 @@ class SettingsScreen extends StatelessWidget {
           const _AppLockTile(),
           const _NotificationsTile(),
           const _LinkPreviewTile(),
+          const _SmartOrderTile(),
           const _AppIconTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
@@ -542,6 +544,37 @@ class _LinkPreviewTile extends StatelessWidget {
                 content: Text(v
                     ? 'فُعّلت معاينة الروابط'
                     : 'أُوقفت المعاينة ومُسح الكاش المحلي')));
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة الترتيب الذكي للمحادثات (المرحلة 9 أ — 0.22.0): مفتاح تعطيل واحد
+/// يعيد ترتيب الخادم الأصلي فوراً، والإفصاح الحرفي معروض في الوصف.
+class _SmartOrderTile extends StatelessWidget {
+  const _SmartOrderTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: SmartOrderService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: Icon(Icons.low_priority_rounded,
+            color: on ? WaslColors.teal : context.textFaint),
+        title: const Text('الترتيب الذكي للمحادثات'),
+        subtitle: Text(on
+            ? SmartOrderService.disclosure
+            : 'القائمة بترتيب الخادم الأصلي (الأحدث أولاً)'),
+        value: on,
+        onChanged: (v) async {
+          await SmartOrderService.setEnabled(v);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(v
+                    ? 'فُعّل الترتيب الذكي — المثبّت يبقى أولاً'
+                    : 'عاد الترتيب الأصلي')));
           }
         },
       ),
