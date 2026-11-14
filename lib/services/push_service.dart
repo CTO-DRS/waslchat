@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest_all.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../app_keys.dart';
@@ -203,6 +205,54 @@ class PushService {
         payload: payload,
       );
     } catch (_) {}
+  }
+
+  /// جدولة تذكير محلي في وقت موعد مكتشف (المرحلة 9 ب — 0.23.0):
+  /// إشعار محلي على جهازك حصراً بلا أي خادم — الفشل يعيد رسالة صادقة
+  /// ولا يرمي استثناءً؛ المحاولة الدقيقة أولاً ثم غير الدقيقة على أندرويد
+  /// 12+ إن لم تتاح صلاحية المنبه الدقيق.
+  static Future<String?> scheduleLocalReminder({
+    required String title,
+    required String body,
+    required DateTime fireAt,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return 'التذكير المجدول يعمل على أندرويد حالياً';
+    }
+    await _initLocalNotifications();
+    if (!_localNotifReady) return 'تعذّر تهيئة الإشعارات المحلية';
+    if (!fireAt.isAfter(DateTime.now())) return 'الوقت المكتشف انقضى — بلا جدولة';
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'wasl-reminders',
+        'التذكيرات المحلية',
+        channelDescription: 'تذكيرات المواعيد على جهازك من وصل شات',
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+    );
+    final id = fireAt.millisecondsSinceEpoch ~/ 1000 & 0x7FFFFFFF;
+    try {
+      tz_data.initializeTimeZones();
+      final scheduled = tz.TZDateTime.from(fireAt, tz.UTC);
+      await _local.zonedSchedule(
+        id, title, body, scheduled, details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+      return null;
+    } catch (_) {
+      try {
+        tz_data.initializeTimeZones();
+        final scheduled = tz.TZDateTime.from(fireAt, tz.UTC);
+        await _local.zonedSchedule(
+          id, title, body, scheduled, details,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+        return null;
+      } catch (e) {
+        return 'تعذّرت جدولة التذكير على هذا الجهاز';
+      }
+    }
   }
 
   /// تسجيل مستمع رسائل الخلفية مرة واحدة (بيانات المحادثات فقط)

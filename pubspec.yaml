@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.22.0+53
+version: 0.23.0+54
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -42,6 +42,9 @@ dependencies:
   home_widget: 0.10.0
   # القفز الدقيق إلى رسالة معينة (معرض الوسائط يفتح المحادثة على الوسيط)
   scrollable_positioned_list: 0.3.8
+  # التذكيرات الذكية المحلية (0.23.0) — جدولة إشعار تذكير في وقت الموعد
+  # (حزمة نقية بلا كود أصلي، وهي تابعة flutter_local_notifications أصلاً)
+  timezone: ^0.10.0
 
 dev_dependencies:
   flutter_test:

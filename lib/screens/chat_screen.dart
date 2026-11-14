@@ -32,6 +32,9 @@ import '../services/image_edit_service.dart';
 import '../services/link_preview_service.dart';
 import '../services/daily_summary_service.dart';
 import '../services/local_ai_service.dart';
+import '../services/local_translate_service.dart';
+import '../services/promise_reminder_service.dart';
+import '../services/style_assist_service.dart';
 import '../services/saved_service.dart';
 import '../services/smart_search_service.dart';
 import '../services/voice_read_service.dart';
@@ -203,6 +206,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   /// ويُخزن في المخزن الآمن على الجهاز حصراً — بلا أي شبكة
   final DailySummaryStore _dailyStore = DailySummaryStore();
   bool _dailyTried = false;
+
+  /// التذكيرات الذكية (المرحلة 9 ب — 0.23.0): مواعيد مكتشفة من الوارد
+  /// ومُستبعداها المحفوظان على جهازك — نعرض أحدث كشف فقط
+  List<DetectedPromise> _promises = const [];
+  Set<String> _dismissedPromises = {};
 
   // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
   // نص فك التشفير لكل نص مشفّر: ciphertext -> النص الصريح (يتغيّر النص المشفّر عند التعديل)
@@ -639,7 +647,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   @override
   void initState() {
     super.initState();
-    _stream = supabase
+    // استبعادات التذكير الذكي المحفوظة (9 ب) — تُحمَّل محلياً بلا شبكة
+    _secure
+        .read(key: 'wasl_promise_dismissed_${widget.conversationId}')
+        .then((v) {
+      if (v != null && v.isNotEmpty && mounted) {
+        setState(() => _dismissedPromises = v.split(',').toSet());
+      }
+    }).catchError((_) {});
+        _stream = supabase
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('conversation_id', widget.conversationId)
@@ -1953,6 +1969,165 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     return 'لا توجد رسائل اليوم بعد — الملخص يُبنى تلقائياً مع أول رسالة.';
   }
 
+  // ---------- الصياغة بأسلوبك (المرحلة 9 ب — 0.23.0) ----------
+  /// آخر 200 رد أرسلتها هنا — المفكوك النصي حصراً، والتعلم كله محلي
+  StyleProfile? _myStyle() {
+    final mine = <String>[];
+    for (final m in _allMsgs) {
+      if (m['sender_id'] != _me) continue;
+      if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') continue;
+      final t = _textOf(m);
+      if (t == null || t.trim().isEmpty) continue;
+      mine.add(t);
+      if (mine.length >= StyleAssistService.learnLimit) break;
+    }
+    if (mine.length < 5) return null;
+    return StyleAssistService.learn(mine);
+  }
+
+  /// ورقة الصياغة: 3 صيغ مرتبة حسب نبرتك + الإفصاح الحرفي
+  void _showStyleSheet() {
+    final profile = _myStyle();
+    final drafts = StyleAssistService.drafts(_text.text, profile: profile);
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.surfaceAlt,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const ListTile(
+              leading: Icon(Icons.edit_note_rounded, color: WaslColors.violet),
+              title: Text('صياغة بأسلوبك',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+            for (final d in drafts)
+              ListTile(
+                leading: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: context.glass,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Center(
+                    child: Text(d.label,
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            color: d.label == 'رسمي'
+                                ? WaslColors.indigo
+                                : d.label == 'ودي'
+                                    ? WaslColors.teal
+                                    : WaslColors.violet)),
+                  ),
+                ),
+                title: Text(d.text, style: const TextStyle(height: 1.4)),
+                subtitle: d.hint.isEmpty
+                    ? const Text('اقتراح بداية — عدّله كما تحب')
+                    : null,
+                trailing: const Icon(Icons.arrow_downward_rounded, size: 18),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() => _text.text = d.text);
+                },
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: Text(StyleAssistService.disclosure,
+                  style: TextStyle(
+                      color: context.textFaint, fontSize: 11, height: 1.4)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ---------- التذكيرات الذكية (المرحلة 9 ب — 0.23.0) ----------
+  /// يُستدعى بعد بناء القائمة: مسح الوارد المفكوك لكشف المواعيد (محلي حصراً)
+  void _scanPromises(List<Map<String, dynamic>> all) {
+    if (!widget.canPost || widget.isSaved || widget.isChannel) return;
+    final incoming = <(String, String)>[];
+    for (final m in all) {
+      if (m['deleted_at'] != null) continue;
+      if (m['sender_id'] == _me) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      final t = _textOf(m);
+      if (t == null || E2eService.isEncrypted(t)) continue;
+      incoming.add((m['id'] as String, t));
+    }
+    final found = PromiseReminderService.scan(
+        incoming, DateTime.now(),
+        dismissed: _dismissedPromises);
+    if (found.length != _promises.length ||
+        (found.isNotEmpty && found.first.messageId != (_promises.isNotEmpty ? _promises.first.messageId : null))) {
+      if (mounted) setState(() => _promises = found);
+    }
+  }
+
+  /// استبعاد اقتراح تذكير — محفوظ محلياً حتى لا يعود نفس الاقتراح
+  Future<void> _dismissPromise(DetectedPromise p) async {
+    setState(() => _promises = _promises.where((x) => x.messageId != p.messageId).toList());
+    _dismissedPromises.add(p.messageId);
+    try {
+      await _secure.write(
+          key: 'wasl_promise_dismissed_${widget.conversationId}',
+          value: _dismissedPromises.take(50).join(','));
+    } catch (_) {}
+  }
+
+  /// تذكير محلي بنقرة: جدولة إشعار محلي في وقت الموعد المفهوم
+  Future<void> _schedulePromise(DetectedPromise p) async {
+    final fireAt = PromiseReminderService.resolveDate(p, DateTime.now());
+    if (fireAt == null) {
+      _snack('تعذّر تحديد وقت دقيق من الرسالة — لا جدولة مصطنعة');
+      await _dismissPromise(p);
+      return;
+    }
+    final err = await PushService.scheduleLocalReminder(
+      title: 'تذكير من وصل — ${widget.title}',
+      body: 'الموعد: ${p.describe()} — من رسالة: «${p.text.length > 60 ? '${p.text.substring(0, 60)}…' : p.text}»',
+      fireAt: fireAt,
+    );
+    if (!mounted) return;
+    _snack(err ?? 'فُعّل التذكير المحلي: ${p.describe()}');
+    if (err == null) await _dismissPromise(p);
+  }
+
+  /// بطاقة اقتراح التذكير فوق المحرر
+  Widget? _promiseCard() {
+    if (_promises.isEmpty) return null;
+    final p = _promises.first;
+    return Material(
+      color: WaslColors.teal.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: Row(children: [
+          const Icon(Icons.alarm_add_rounded, size: 18, color: WaslColors.teal),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('يبدو أن هناك موعداً: ${p.describe()}',
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              Text(PromiseReminderService.disclosure,
+                  style: TextStyle(
+                      color: context.textFaint, fontSize: 10, height: 1.3)),
+            ]),
+          ),
+          TextButton(
+              onPressed: () => _schedulePromise(p),
+              child: const Text('تذكير')),
+          IconButton(
+              tooltip: 'تجاهل',
+              icon: const Icon(Icons.close_rounded, size: 16),
+              onPressed: () => _dismissPromise(p)),
+        ]),
+      ),
+    );
+  }
+
   /// تفريغ رسالة صوتية نصاً: موافقة صريحة ثم إرسال الصوت لـGemini عبر خادم وصل
   Future<void> _transcribeVoice(Map<String, dynamic> m) async {
     final id = m['id'] as String;
@@ -2600,6 +2775,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
               },
             ),
+          if (text != null)
+            ListTile(
+              leading: const Icon(Icons.travel_explore_rounded, color: WaslColors.teal),
+              title: Text(arabic ? 'ترجمة محلية (قاموسية — بلا شبكة)' : 'ترجمة محلية (بلا شبكة)'),
+              subtitle: const Text('على جهازك حصراً — تغطية قاموسية أساسية قد تكون ناقصة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                final r = LocalTranslateService.translate(text, toEnglish: arabic);
+                _snack(r.low
+                    ? 'الترجمة المحلية تغطية ضعيفة (${(r.coverage * 100).round()}%) — للترجمة الأعمق استخدم الترجمة السحابية'
+                    : 'ترجمة محلية بغطاء ${(r.coverage * 100).round()}%');
+                setState(() => _translations[m['id'] as String] =
+                    '🔁 محلياً: ${r.text}');
+              },
+            ),
           if (isVoice)
             ListTile(
               leading: const Icon(Icons.graphic_eq_rounded, color: WaslColors.teal),
@@ -3111,6 +3301,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 _scheduleTranslate(all);
                 _refreshSmartReplies(all);
                 unawaited(_ensureDailySummary(all));
+                _scanPromises(all);
                 // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
                 final items = AlbumService.group(msgs);
                 _allMsgs = all;
@@ -3254,14 +3445,26 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           SafeArea(
             top: false,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // الردود الذكية المحلية (المرحلة 5): شريحة ردود جاهزة على آخر رسالة وردت
-              if (_smartReplies.isNotEmpty && !_recording)
+              if (_promises.isNotEmpty) _promiseCard()!,
+              // الردود الذكية المحلية (المرحلة 5) + شريحة الصياغة بأسلوبك (9 ب)
+              if (!_recording)
                 SizedBox(
                   height: 44,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.edit_note_rounded,
+                            size: 16, color: WaslColors.violet),
+                        label: const Text('صياغة بأسلوبك',
+                            style: TextStyle(
+                                fontSize: 12.5, fontWeight: FontWeight.w700)),
+                        backgroundColor: context.glass,
+                        side: BorderSide(
+                            color: WaslColors.violet.withValues(alpha: 0.4)),
+                        onPressed: _showStyleSheet,
+                      ),
                       for (final r in _smartReplies)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 3),

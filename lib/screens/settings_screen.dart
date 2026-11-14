@@ -4,6 +4,7 @@ import '../config.dart';
 import '../services/app_icon_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/link_preview_service.dart';
+import '../services/on_device_model_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/smart_order_service.dart';
@@ -136,6 +137,7 @@ class SettingsScreen extends StatelessWidget {
           const _NotificationsTile(),
           const _LinkPreviewTile(),
           const _SmartOrderTile(),
+          const _OnDeviceModelTile(),
           const _AppIconTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
@@ -577,6 +579,98 @@ class _SmartOrderTile extends StatelessWidget {
                     : 'عاد الترتيب الأصلي')));
           }
         },
+      ),
+    );
+  }
+}
+
+/// بلاطة التقييم البحثي لنموذج لغة على الجهاز (المرحلة 9 ب — 0.23.0):
+/// تقرأ ذاكرة الجهاز محلياً وتعرض المرشح ومعايير القرار — بلا أي تنزيل.
+class _OnDeviceModelTile extends StatelessWidget {
+  const _OnDeviceModelTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.memory_rounded, color: WaslColors.violet),
+      title: const Text('تقييم نموذج على الجهاز (بحثي)'),
+      subtitle: const Text(OnDeviceModelService.disclosure),
+      onTap: () => _showEvaluation(context),
+    );
+  }
+
+  void _showEvaluation(BuildContext context) {
+    final ram = OnDeviceModelService.readTotalRamMb();
+    final v = OnDeviceModelService.verdict(ramMb: ram);
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: context.surfaceAlt,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.memory_rounded, color: WaslColors.violet),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('نموذج لغة على الجهاز — تقييم بحثي',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Text('ذاكرة جهازك المقروءة محلياً: ${ram == null ? 'غير متاحة على هذه المنصة' : '$ram م.ب'}',
+                style: const TextStyle(fontSize: 13.5)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: v.level == 'eligible'
+                    ? WaslColors.teal.withValues(alpha: 0.10)
+                    : context.glass,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(v.title,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                const SizedBox(height: 4),
+                Text(v.detail,
+                    style: const TextStyle(fontSize: 12.5, height: 1.5)),
+                if (v.recommended != null) ...[
+                  const SizedBox(height: 6),
+                  Text('الحجم التقديري: ${v.recommended!.sizeMb} م.ب — ${v.recommended!.notes}',
+                      style: const TextStyle(fontSize: 12, color: WaslColors.teal)),
+                ],
+              ]),
+            ),
+            const SizedBox(height: 12),
+            const Text('معايير القرار المكتوبة:',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 4),
+            for (final c in OnDeviceModelService.criteria)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('• ', style: TextStyle(fontSize: 12.5)),
+                  Expanded(child: Text(c, style: const TextStyle(fontSize: 12.5, height: 1.4))),
+                ]),
+              ),
+            const SizedBox(height: 10),
+            const Text('كَتالوج المرشحين (قياسات تصميمية لا وعود تنزيل):',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 4),
+            for (final m in OnDeviceModelService.catalog)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text('${m.label} — ${m.sizeMb} م.ب · يحتاج ذاكرة ≥ ${m.ramNeedMb} م.ب',
+                    style: const TextStyle(fontSize: 12.5)),
+              ),
+            const SizedBox(height: 12),
+            Text('لا يُنزَّل أي شيء تلقائياً ولا يُفرض على أحد — ربط محرك الاستدلال الفعلي بقرار الأداء المقاس على جهاز متوسط، موثق في docs/ON_DEVICE_LLM.md',
+                style: TextStyle(color: context.textFaint, fontSize: 11.5, height: 1.5)),
+          ]),
+        ),
       ),
     );
   }
