@@ -30,6 +30,7 @@ import '../services/export_service.dart';
 import '../services/forward_service.dart';
 import '../services/image_edit_service.dart';
 import '../services/link_preview_service.dart';
+import '../services/daily_summary_service.dart';
 import '../services/local_ai_service.dart';
 import '../services/saved_service.dart';
 import '../services/smart_search_service.dart';
@@ -197,6 +198,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   /// الردود الذكية المحلية (محسوبة من آخر رسالة وردت)
   List<String> _smartReplies = const [];
   String? _repliesFor;
+
+  /// الملخص اليومي المحلي (المرحلة 9 أ — 0.22.0): يُبنى عند أول فتح في اليوم
+  /// ويُخزن في المخزن الآمن على الجهاز حصراً — بلا أي شبكة
+  final DailySummaryStore _dailyStore = DailySummaryStore();
+  bool _dailyTried = false;
 
   // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
   // نص فك التشفير لكل نص مشفّر: ciphertext -> النص الصريح (يتغيّر النص المشفّر عند التعديل)
@@ -1884,6 +1890,69 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
+  // ---------- الملخص اليومي المحلي (المرحلة 9 أ — 0.22.0) ----------
+  /// يُستدعى بعد بناء القائمة مرة واحدة في الفتح: يقرأ ملخص اليوم من المخزن
+  /// الآمن، وإن لم يوجد يبنى من رسائل اليوم المفكوكة ويُخزن — صمت تام عند أي فشل.
+  Future<void> _ensureDailySummary(List<Map<String, dynamic>> all) async {
+    if (_dailyTried || widget.isSaved || all.isEmpty) return;
+    final now = DateTime.now();
+    final dayStart = DateTime(now.year, now.month, now.day);
+    // لا يُخزَّن ملخص ناقص: ننتظر اكتمال فك نصوص اليوم (تُعاد المحاولة بالبناء التالي)
+    for (final m in all.reversed) {
+      final created =
+          DateTime.tryParse((m['created_at'] ?? '') as String)?.toLocal();
+      if (created == null || created.isBefore(dayStart)) continue;
+      if (m['deleted_at'] != null) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      final raw = (m['content'] ?? '') as String;
+      if (E2eService.isEncrypted(raw) && !_plain.containsKey(raw)) return;
+    }
+    _dailyTried = true;
+    try {
+      if (await _dailyStore.load(widget.conversationId, now) != null) return;
+      final text = _buildDailySummaryFrom(all);
+      if (text != null) await _dailyStore.save(widget.conversationId, text, now);
+    } catch (_) {
+      // الفشل يهبط: القائمة تعمل والملخص الفوري في قائمة وصل AI يعمل على أي حال
+    }
+  }
+
+  /// بناء ملخص اليوم من رسائل اليوم المفكوكة — null إن لم توجد رسائل اليوم
+  String? _buildDailySummaryFrom(List<Map<String, dynamic>> all) {
+    final now = DateTime.now();
+    final dayStart = DateTime(now.year, now.month, now.day);
+    final lines = <DailyLine>[];
+    for (final m in all.reversed) {
+      final created =
+          DateTime.tryParse((m['created_at'] ?? '') as String)?.toLocal();
+      if (created == null || created.isBefore(dayStart)) continue;
+      if (m['deleted_at'] != null) continue;
+      final who = m['sender_id'] == _me ? 'أنت' : (_names[m['sender_id']] ?? 'عضو');
+      final type = (m['type'] ?? 'text') as String;
+      if (type == 'image' || type == 'voice' || type == 'video' || type == 'file') {
+        lines.add(DailyLine(who: who, text: '[وسائط]', isMedia: true));
+        continue;
+      }
+      final plain = _textOf(m);
+      if (plain == null || plain.trim().isEmpty) continue;
+      lines.add(DailyLine(who: who, text: plain));
+    }
+    return DailySummaryService.build(lines, now);
+  }
+
+  /// ملخص اليوم للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً
+  Future<String> _dailySummary() async {
+    final now = DateTime.now();
+    final stored = await _dailyStore.load(widget.conversationId, now);
+    if (stored != null) return stored;
+    final text = _buildDailySummaryFrom(_allMsgs);
+    if (text != null) {
+      unawaited(_dailyStore.save(widget.conversationId, text, now));
+      return text;
+    }
+    return 'لا توجد رسائل اليوم بعد — الملخص يُبنى تلقائياً مع أول رسالة.';
+  }
+
   /// تفريغ رسالة صوتية نصاً: موافقة صريحة ثم إرسال الصوت لـGemini عبر خادم وصل
   Future<void> _transcribeVoice(Map<String, dynamic> m) async {
     final id = m['id'] as String;
@@ -1935,6 +2004,16 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.calendar_today_rounded, color: WaslColors.indigo),
+              title: const Text('ملخص اليوم'),
+              subtitle: const Text(
+                  'يُبنى عند أول فتح في اليوم ويُخزن على جهازك — بلا أي شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ملخص اليوم — على جهازك', _dailySummary());
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.bolt_rounded, color: WaslColors.teal),
               title: const Text('ملخص محلي فوري'),
@@ -3031,6 +3110,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 _scheduleDecrypt(all);
                 _scheduleTranslate(all);
                 _refreshSmartReplies(all);
+                unawaited(_ensureDailySummary(all));
                 // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
                 final items = AlbumService.group(msgs);
                 _allMsgs = all;

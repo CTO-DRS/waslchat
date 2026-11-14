@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../services/e2e_service.dart';
+import '../services/semantic_search_service.dart';
 import '../services/smart_search_service.dart';
 import '../services/unified_search_service.dart';
 import '../theme.dart';
@@ -222,6 +223,20 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
   Widget build(BuildContext context) {
     final q = _ctrl.text.trim();
     final hits = q.isEmpty ? const <UnifiedHit>[] : UnifiedSearchService.rank(_docs, q);
+    // الصلة الدلالية (المرحلة 9 أ): محادثات ذات صلة بالمعنى القريب والمرادفات
+    // تُحسب على جهازك حصراً — تُستبعد المحادثات الممثلة معجمياً أصلاً لعدم التكرار
+    final lexConvs = hits.map((h) => h.doc.conversationId).toSet();
+    final semantic = q.isEmpty
+        ? const <SemanticHit>[]
+        : SemanticSearchService.rankConversations(
+            _docs
+                .map((d) => SemanticDoc(
+                    conversationId: d.conversationId,
+                    text: d.text,
+                    createdAtIso: d.createdAtIso))
+                .toList(),
+            q,
+          ).where((s) => !lexConvs.contains(s.conversationId)).toList();
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -261,12 +276,21 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
               Expanded(
                 child: q.isEmpty
                     ? _hintView()
-                    : hits.isEmpty
+                    : (hits.isEmpty && semantic.isEmpty)
                         ? _emptyView(q)
                         : ListView.builder(
                             padding: const EdgeInsets.only(bottom: 40),
-                            itemCount: hits.length,
+                            // نتائج معجمية + (ترويسة قسم دلالي + صفوفه) عند وجوده
+                            itemCount: hits.length +
+                                (semantic.isNotEmpty ? semantic.length + 1 : 0),
                             itemBuilder: (context, i) {
+                              if (i >= hits.length && semantic.isNotEmpty) {
+                                if (i == hits.length) {
+                                  return _semanticHeader();
+                                }
+                                return _semanticRow(
+                                    semantic[i - hits.length - 1]);
+                              }
                               final h = hits[i];
                               final d = h.doc;
                               final row = MotionStagger(
@@ -326,7 +350,7 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
                             },
                           ),
               ),
-              // الإفصاح الصادق أسفل الشاشة دائماً
+              // الإفصاح الصادق أسفل الشاشة دائماً — والبند الدلالي يُضاف عند ظهوره
               Material(
                 color: context.glass,
                 child: Padding(
@@ -338,6 +362,9 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
                     Expanded(
                       child: Text(
                         UnifiedSearchService.disclosure +
+                            (semantic.isNotEmpty
+                                ? ' · ${SemanticSearchService.disclosure}'
+                                : '') +
                             (_fetchedAt == null
                                 ? ''
                                 : ' · الجلب ${_timeOf(_fetchedAt!.toIso8601String())}'),
@@ -349,6 +376,77 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
                 ),
               ),
             ]),
+    );
+  }
+
+  /// ترويسة قسم «ذات الصلة دلالياً»
+  Widget _semanticHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      child: Row(children: [
+        Icon(Icons.auto_fix_high_rounded, size: 16, color: WaslColors.violet),
+        const SizedBox(width: 8),
+        Text('ذات صلة دلالياً',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text('حسب المعنى القريب والمرادفات — على جهازك',
+              style: TextStyle(color: context.textFaint, fontSize: 11)),
+        ),
+      ]),
+    );
+  }
+
+  /// صف محادثة ذات صلة دلالياً: أفضل رسالة فيها معاينةً ونسبة الصلة
+  Widget _semanticRow(SemanticHit s) {
+    final c = _conv[s.conversationId];
+    final isGroup = c?['is_group'] == true;
+    final title = c == null ? 'محادثة' : _titleOf(c);
+    return ListTile(
+      leading: CircleAvatar(
+        radius: 22,
+        backgroundColor: context.glass,
+        child: Icon(
+          isGroup ? Icons.groups_2 : Icons.person_outline_rounded,
+          size: 20,
+          color: isGroup ? WaslColors.teal : WaslColors.indigo,
+        ),
+      ),
+      title: Row(children: [
+        Flexible(
+          child: Text(title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+        const SizedBox(width: 6),
+        Text('${(s.score * 100).round()}%',
+            style: TextStyle(color: WaslColors.violet, fontSize: 11)),
+      ]),
+      subtitle: Text(
+        s.bestText.length > 120 ? '${s.bestText.substring(0, 120)}…' : s.bestText,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: context.textSecondary, fontSize: 13.5),
+      ),
+      onTap: () {
+        if (c == null) return;
+        final isGroup2 = c['is_group'] == true;
+        final isBot = !isGroup2 && c['is_bot'] == true;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(
+              conversationId: s.conversationId,
+              title: title,
+              isGroup: isGroup2,
+              otherId: c['other_id'] as String?,
+              isBot: isBot,
+              encrypted: isGroup2 || !isBot,
+            ),
+          ),
+        );
+      },
     );
   }
 
