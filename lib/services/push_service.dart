@@ -5,12 +5,14 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../app_keys.dart';
 import '../config.dart';
 import '../firebase_options.dart';
 import '../theme.dart';
+import 'quick_action_service.dart';
 
 /// الإشعارات عبر Firebase Cloud Messaging (اختيارية: إن لم يُعدّ Firebase تُتجاهل).
 /// منذ 0.7.3:
@@ -18,17 +20,37 @@ import '../theme.dart';
 /// - لافتة داخلية أنيقة عند وصول رسالة والتطبيق مفتوح،
 /// - مفتاح تشغيل/إيقاف عام في الإعدادات يحذف رمز الجهاز فور الإيقاف،
 /// - طلب صلاحيات تفصيلي (تنبيه + شارة + صوت) لأندرويد 13+ وiOS.
+/// منذ 0.20.0 (المرحلة 8): إجراءات الإشعار — رد سريع وإيموجي وتمييز مقروء
+/// من شريط الإشعار نفسه: الخادم يرسل رسائل المحادثات لأندرويد «بيانات فقط»
+/// والتطبيق يعرضها بإشعار محلي يحمل الإجراءات الممتدة — أي فشل في العرض
+/// أو الإجراء يهبط للسلوك السابق (فتح التطبيق أو صمت) بلا استثناء.
 class PushService {
   static bool _ready = false;
   static bool _foregroundSet = false;
   static bool _tokenListenerSet = false;
   static bool _prefLoaded = false;
+  static bool _localNotifReady = false;
+  static bool _bgHandlerSet = false;
 
   static const _prefKey = 'notifications_enabled';
   static const _storage = FlutterSecureStorage();
 
+  /// معرّفات إجراءات أندرويد الممتدة (نفسها في العرض والمعالجة)
+  static const actionReply = 'wa_reply';
+  static const actionReact = 'wa_react';
+  static const actionMark = 'wa_mark';
+
+  /// إيموجي التفاعل السريع من الشريط
+  static const quickEmoji = '❤️';
+
+  /// المحادثة المعروضة حالياً على الشاشة: لا إشعار محلي لها (اللافتة تكفي)
+  static String? visibleConversation;
+
   /// مفتاح الإشعارات العام (الإعدادات <- الإشعارات)، الافتراضي: مفعّل
   static final ValueNotifier<bool> enabled = ValueNotifier<bool>(true);
+
+  static final FlutterLocalNotificationsPlugin _local =
+      FlutterLocalNotificationsPlugin();
 
   static Future<void> _loadPref() async {
     if (_prefLoaded) return;
@@ -48,9 +70,146 @@ class PushService {
       _ready = true;
       await _setupChannels();
       _listenForeground();
+      _setupBackgroundHandler();
+      await _initLocalNotifications();
     } catch (e) {
       debugPrint('Push disabled: $e');
     }
+  }
+
+  /// معالج الخلفية (عملية معزولة عند قتل التطبيق): يعتمد بيانات الرسالة
+  /// حصراً (العنوان والنص معهما) — لا يحتاج قاعدة البيانات ليُعرض.
+  @pragma('vm:entry-point')
+  static Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
+    final data = message.data;
+    if (data['type'] == 'call') return; // المكالمات يعرضها النظام كما هي
+    final conv = data['conversation_id'] as String?;
+    if (conv == null) return;
+    await PushService.showLocalNotification(
+      title: data['title'] as String? ?? 'وصل شات',
+      body: data['body'] as String? ?? 'رسالة جديدة',
+      conversationId: conv,
+      messageId: data['message_id'] as String?,
+    );
+  }
+
+  /// يهيئ الإشعارات المحلية بإجراءاتها الممتدة (أندرويد فقط)
+  static Future<void> _initLocalNotifications() async {
+    if (defaultTargetPlatform != TargetPlatform.android || _localNotifReady) return;
+    try {
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      await _local.initialize(
+        settings: const InitializationSettings(android: androidInit),
+        onDidReceiveNotificationResponse: _onNotificationResponse,
+        onDidReceiveBackgroundNotificationResponse: notificationBackgroundResponse,
+      );
+      _localNotifReady = true;
+    } catch (e) {
+      debugPrint('Local notifications disabled: $e');
+    }
+  }
+
+  /// معالج الاستجابة في الخلفية (عملية معزولة): تهيئة ثم تنفيذ بالأفضل الجهد
+  @pragma('vm:entry-point')
+  static Future<void> notificationBackgroundResponse(NotificationResponse r) async {
+    final action = QuickActionService.parse(r.payload);
+    if (action == null) return;
+    if (r.actionId == actionReply) {
+      final text = r.input?.isNotEmpty == true ? r.input! : null;
+      if (text == null || text.trim().isEmpty) return;
+      if (!await QuickActionService.ensureBackend()) return;
+      await QuickActionService.reply(action.conversationId, text);
+      return;
+    }
+    if (r.actionId == actionMark) {
+      if (!await QuickActionService.ensureBackend()) return;
+      await QuickActionService.markRead(action.conversationId);
+      return;
+    }
+    if (r.actionId == actionReact && action.messageId != null) {
+      if (!await QuickActionService.ensureBackend()) return;
+      await QuickActionService.react(action.conversationId, action.messageId!, quickEmoji);
+      return;
+    }
+  }
+
+  /// معالج الاستجابة في المقدمة (نفس الترتيب)
+  static Future<void> _onNotificationResponse(NotificationResponse r) async {
+    final action = QuickActionService.parse(r.payload);
+    if (action == null) return;
+    if (r.actionId == actionReply) {
+      final text = r.input?.trim();
+      if (text == null || text.isEmpty) return;
+      if (await QuickActionService.reply(action.conversationId, text)) {
+        _snackLocal('أُرسل ردك');
+      } else {
+        _snackLocal('تعذّر إرسال الرد — افتح التطبيق ثم أعد المحاولة');
+      }
+      return;
+    }
+    if (r.actionId == actionMark) {
+      _snackLocal(await QuickActionService.markRead(action.conversationId)
+          ? 'تميّز المحادثة كمقروءة'
+          : 'تعذّر التنفيذ — افتح التطبيق');
+      return;
+    }
+    if (r.actionId == actionReact && action.messageId != null) {
+      _snackLocal(await QuickActionService.react(
+                  action.conversationId, action.messageId!, quickEmoji)
+          ? 'أُرسل التفاعل'
+          : 'تعذّر إرسال التفاعل');
+    }
+  }
+
+  static void _snackLocal(String msg) {
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return;
+    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// عرض إشعار محلي بإجراءات أندرويد الممتدة (رد/تفاعل/مقروء)
+  static Future<void> showLocalNotification({
+    required String title,
+    required String body,
+    required String conversationId,
+    String? messageId,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android || !_localNotifReady) return;
+    final payload = QuickActionService.encodeOpen(conversationId, messageId: messageId);
+    final details = AndroidNotificationDetails(
+      'messages', // نفس قناة «الرسائل» الأصلية بأهمية عالية
+      'الرسائل',
+      channelDescription: 'تنبيهات الرسائل الجديدة في محادثاتك',
+      importance: Importance.high,
+      priority: Priority.high,
+      groupKey: conversationId,
+      setAsGroupSummary: false,
+      category: AndroidNotificationCategory.message,
+      actions: [
+        AndroidNotificationAction(actionReply, 'رد',
+            inputs: [const AndroidNotificationActionInput(label: 'اكتب رداً…')],
+            allowGeneratedReplies: false,
+            showsUserInterface: false),
+        AndroidNotificationAction(actionReact, quickEmoji, showsUserInterface: false),
+        AndroidNotificationAction(actionMark, 'مقروء', showsUserInterface: false),
+      ],
+    );
+    try {
+      await _local.show(
+        id: conversationId.hashCode.abs(),
+        title: title,
+        body: body,
+        notificationDetails: NotificationDetails(android: details),
+        payload: payload,
+      );
+    } catch (_) {}
+  }
+
+  /// تسجيل مستمع رسائل الخلفية مرة واحدة (بيانات المحادثات فقط)
+  static void _setupBackgroundHandler() {
+    if (_bgHandlerSet || defaultTargetPlatform != TargetPlatform.android) return;
+    _bgHandlerSet = true;
+    FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
   }
 
   /// قنوات الإشعارات على أندرويد: تنشأ أصلياً عبر MethodChannel (wasl/notify)
@@ -89,11 +248,31 @@ class PushService {
 
   /// مستمع رسائل الخلفية الأمامية (التطبيق مفتوح): نعرض لافتة داخلية
   /// بدل الاعتماد على صمت النظام، والنقر عليها يغلقها فقط.
+  /// منذ 0.20.0: رسالة المحادثة (بيانات فقط) تُعرض أيضاً بإشعار محلي
+  /// بإجراءاته — إلا إن كانت المحادثة معروضة حالياً أمام المستخدم.
   static void _listenForeground() {
     if (_foregroundSet) return;
     _foregroundSet = true;
     FirebaseMessaging.onMessage.listen((message) {
+      final data = message.data;
       final n = message.notification;
+      final conv = data['conversation_id'] as String?;
+      if (conv != null && data['type'] != 'call') {
+        // رسالة محادثة (بيانات فقط من الخادم)
+        if (conv == visibleConversation) return;
+        unawaited(showLocalNotification(
+          title: data['title'] as String? ?? 'وصل شات',
+          body: data['body'] as String? ?? 'رسالة جديدة',
+          conversationId: conv,
+          messageId: data['message_id'] as String?,
+        ));
+        final title = data['title'] as String?;
+        if (title != null || n != null) {
+          _showInAppBanner(title ?? 'وصل شات',
+              (data['body'] as String?) ?? n?.body ?? 'رسالة جديدة');
+        }
+        return;
+      }
       if (n == null) return;
       _showInAppBanner(n.title ?? 'وصل شات', n.body ?? 'رسالة جديدة');
     });

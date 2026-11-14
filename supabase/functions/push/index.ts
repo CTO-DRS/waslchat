@@ -109,18 +109,31 @@ async function notifyMessage(id: string): Promise<Response> {
         body: JSON.stringify({
           message: {
             token,
-            notification: { title, body },
-            data: { conversation_id: m.conversation_id },
+            // منذ 0.20.0: رسائل المحادثات لأندرويد «بيانات فقط» — التطبيق يعرضها
+            // بإشعار محلي يحمل الإجراءات الممتدة (رد سريع/تفاعل/تمييز مقروء).
+            // العنوان والنص يمران في data ليعرضهما العزل الخلفي بلا قاعدة بيانات.
+            data: {
+              conversation_id: m.conversation_id,
+              message_id: id,
+              title,
+              body,
+            },
             android: {
               priority: "high",
-              // تجميع إشعارات المحادثة الواحدة بدل تراكمها،
-              // والتوجيه إلى قناة «الرسائل» التي يجهزها التطبيق بأهمية عالية
+              // تجميع إشعارات المحادثة الواحدة بدل تراكمها (العرض المحلي في
+              // التطبيق يجمّع بمفتاح المحادثة نفسه وينوب عن قناة «الرسائل»)
               collapse_key: m.conversation_id,
-              notification: { channel_id: "messages", tag: m.conversation_id },
             },
             apns: {
               headers: { "apns-collapse-id": m.conversation_id },
-              payload: { aps: { sound: "default", "thread-id": String(m.conversation_id) } },
+              // iOS يبقى بإشعار النظام كما كان (حتى إصدار iOS الرسمي)
+              payload: {
+                aps: {
+                  alert: { title, body },
+                  sound: "default",
+                  "thread-id": String(m.conversation_id),
+                },
+              },
             },
           },
         }),

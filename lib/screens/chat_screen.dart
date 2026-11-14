@@ -12,17 +12,21 @@ import 'package:open_filex/open_filex.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/ai_service.dart';
+import '../services/album_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/block_service.dart';
 import '../services/call_logic.dart';
 import '../services/call_service.dart';
 import '../services/channel_stats_service.dart';
 import '../services/e2e_service.dart';
+import '../services/export_service.dart';
 import '../services/forward_service.dart';
+import '../services/image_edit_service.dart';
 import '../services/local_ai_service.dart';
 import '../services/saved_service.dart';
 import '../services/smart_search_service.dart';
@@ -30,15 +34,18 @@ import '../services/webio/web_files.dart';
 import '../services/media_service.dart';
 import '../services/moderation_service.dart';
 import '../services/presence_service.dart';
+import '../services/push_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/motion.dart';
 import '../widgets/report_dialog.dart';
+import 'album_preview_screen.dart';
 import 'call_screen.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
+import 'image_editor_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import 'voice_room_screen.dart';
@@ -135,6 +142,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   bool _recording = false;
   bool _uploading = false;
+
+  /// مسح المحادثة الشخصي (0.20.0 — ترحيل 031): الرسائل قبله مخفية عني حصراً
+  DateTime? _clearedAt;
+
+  /// آخر نسخة كاملة من الرسائل (للتصدير النصي من قائمة ⋮)
+  List<Map<String, dynamic>> _allMsgs = const [];
 
   /// مفتاح «عرض مرة واحدة» في ورقة المرفقات — يسري على الصورة/الفيديو التالي
   bool _viewOnce = false;
@@ -330,6 +343,105 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     } catch (_) {}
   }
 
+  /// طابع مسح المحادثة الشخصي (ترحيل 031): الرسائل قبله تُخفى عني حصراً
+  Future<void> _loadClearedAt() async {
+    try {
+      final row = await supabase
+          .from('conversation_participants')
+          .select('cleared_at')
+          .eq('conversation_id', widget.conversationId)
+          .eq('user_id', _me)
+          .maybeSingle();
+      if (!mounted || row == null) return;
+      final v = row['cleared_at'];
+      if (v is String) setState(() => _clearedAt = DateTime.parse(v));
+    } catch (_) {}
+  }
+
+  /// مسح المحادثة بتأكيد مزدوج — المسح يخفي الرسائل عنك حصراً
+  /// (صفوف الرسائل المشتركة لا تُحذف أبداً)، ويحدّث معاينة القائمة
+  /// وعدّاد غير المقروء عبر my_chats المحدثة.
+  Future<void> _clearConversation() async {
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('مسح المحادثة؟'),
+        content: const Text(
+            'ستُخفى كل رسائل هذه المحادثة عنك أنت فقط، ولا تُحذف عن أي عضو آخر، '
+            'ولا تُحذف من الخادم إطلاقاً. ولا يمكن التراجع عن المسح.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('متابعة')),
+        ],
+      ),
+    );
+    if (first != true || !mounted) return;
+    final second = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('تأكيد أخير'),
+        content: Text('مسح «$_title» عنك أنت فقط نهائياً؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('مسح نهائياً')),
+        ],
+      ),
+    );
+    if (second != true || !mounted) return;
+    try {
+      await supabase.rpc('clear_chat', params: {'p_conv': widget.conversationId});
+      // إخفاء فوري محلي ثم تحديث من الخادم
+      setState(() => _clearedAt = DateTime.now().toUtc());
+    } catch (_) {
+      _snack('تعذّر المسح — تأكد من تشغيل ترحيل 031 على الخادم');
+    }
+  }
+
+  /// تصدير المحادثة نصاً — كل النصوص من المفكوك على جهازك، والملف لا يغادر
+  /// جهازك إلا بمشاركتك أنت (تقرير الشفافية: مسار محلي صريح)
+  Future<void> _exportConversation() async {
+    final msgs = _allMsgs;
+    if (msgs.isEmpty) {
+      _snack('لا رسائل لتصديرها');
+      return;
+    }
+    // انتظار فك النصوص المشفرة المعلقة (أقصى انتظار معقول)
+    for (var i = 0; i < 20 && _plain.length < 1; i++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    final now = DateTime.now();
+    final text = ExportService.buildText(
+      title: _title,
+      msgs: msgs,
+      senderOf: (id) => _senderName(id),
+      textOf: (m) => _textOf(m),
+      myId: _me,
+      now: now,
+      appVersion: AppConfig.appVersion,
+    );
+    final name = ExportService.fileName(_title, now);
+    try {
+      if (kIsWeb) {
+        webDownload(Uint8List.fromList(utf8.encode(text)), name, 'text/plain; charset=utf-8');
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/$name');
+      await f.writeAsString(text, flush: true);
+      await SharePlus.instance.share(ShareParams(
+          files: [XFile(f.path, mimeType: 'text/plain')],
+          subject: 'تصدير محادثة وصل شات'));
+    } catch (_) {
+      _snack('تعذّر تصدير المحادثة');
+    }
+  }
+
   // يكتب الآن + علامات القراءة
   late final RealtimeChannel _room;
   StreamSubscription<List<Map<String, dynamic>>>? _partsSub;
@@ -354,6 +466,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     unawaited(_refreshVerified());
     unawaited(_loadMuteState());
     unawaited(_loadAutoTranslatePref());
+    unawaited(_loadClearedAt());
+    PushService.visibleConversation = widget.conversationId;
     ScreenshotService.flagOf(widget.conversationId).then((v) {
       if (!mounted || !v) return;
       setState(() => _noScreenshots = true);
@@ -634,6 +748,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   void dispose() {
     ScreenshotService.routeObserver.unsubscribe(this);
     ScreenshotService.setSecure(false);
+    if (PushService.visibleConversation == widget.conversationId) {
+      PushService.visibleConversation = null;
+    }
     _ticker?.cancel();
     _typingSweep?.cancel();
     _partsSub?.cancel();
@@ -883,6 +1000,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     int? durationMs,
     Map<String, dynamic>? meta,
     bool viewOnce = false,
+    String? groupId,
   }) async {
     setState(() => _uploading = true);
     try {
@@ -930,6 +1048,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         'media_url': path,
         'duration_ms': durationMs,
         if (viewOnce) 'view_once': true,
+        if (groupId != null) 'media_group_id': groupId,
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
       if (mounted) setState(() {
@@ -947,19 +1066,59 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   // ---------- الصور ----------
+
+  /// صورة واحدة (معرض أو كاميرا): تمر عبر محرر الصورة المحلي قبل الإرسال —
+  /// «تخطي» في المحرر يعيد نفس البايتات الأصلية.
   Future<void> _pickImage(ImageSource source) async {
     final x = await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 80);
     if (x == null) return;
-    final bytes = await x.readAsBytes();
-    var ext = x.name.contains('.') ? x.name.split('.').last.toLowerCase() : 'jpg';
-    if (ext == 'jpg') ext = 'jpeg';
+    var bytes = await x.readAsBytes();
+    final edited = await ImageEditorScreen.open(context, bytes, fileName: x.name);
+    if (edited == null) return; // المستخدم رفض الإرسال من المحرر
+    bytes = edited;
+    final (ext, mime) = ImageEditService.contentTypeOf(bytes);
     await _sendMedia(
       type: 'image',
       bytes: bytes,
       ext: ext,
-      contentType: 'image/$ext',
+      contentType: mime,
       viewOnce: _viewOnce,
     );
+  }
+
+  /// الألبوم المتعدد (0.20.0): حتى 10 صور بمعاينة متسلسلة ثم إرسال
+  /// مشفر قطعة قطعة بمعرّف مجموعة واحد يجمّع العرض عند الجميع
+  Future<void> _pickAlbum() async {
+    final picked = await _picker.pickMultiImage(
+        limit: AlbumService.maxItems, maxWidth: 1600, imageQuality: 80);
+    if (picked.isEmpty) return;
+    final chosen = await AlbumPreviewScreen.open(context, picked);
+    if (chosen == null || chosen.isEmpty || !mounted) return;
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    final gid = AlbumService.newGroupId();
+    setState(() => _uploading = true);
+    try {
+      for (final f in chosen) {
+        if (!mounted) return;
+        try {
+          final bytes = await f.readAsBytes();
+          await _sendMedia(
+            type: 'image',
+            bytes: bytes,
+            ext: 'jpeg',
+            contentType: 'image/jpeg',
+            groupId: gid,
+          );
+        } catch (_) {
+          // قطعة فاشلة لا تكسر البقية
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
   }
 
   static const _maxBytes = 24 * 1024 * 1024;
@@ -1087,6 +1246,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             onTap: () {
               Navigator.pop(ctx);
               _pickImage(ImageSource.gallery);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_album_outlined, color: WaslColors.indigo),
+            title: const Text('ألبوم صور'),
+            subtitle: const Text('حتى 10 صور برسالة واحدة — معاينة متسلسلة'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickAlbum();
             },
           ),
           if (!kIsWeb)
@@ -1251,6 +1419,82 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       if (secured) await ScreenshotService.setSecure(wasSecure);
       if (mounted) setState(() => _uploading = false);
     }
+  }
+
+  /// فقاعة الألبوم المتعدد (0.20.0): شبكة صور متتالية بمربع واحد،
+  /// اسم المرسل فوقها والوقت تحتها — الضغط على أي صورة يفتحها بملء الشاشة
+  /// والضغط المطول يفتح إجراءات أول قطعة.
+  Widget _albumTile(List<Map<String, dynamic>> item) {
+    final first = item.first;
+    final mine = first['sender_id'] == _me;
+    final sender = _names[first['sender_id']];
+    final width = MediaQuery.of(context).size.width * 0.75;
+    final tile = (width - 6) / 3;
+    final firstTime = _motionSeen.add('album_${first['id']}');
+    Widget bubble = GestureDetector(
+      onLongPress: () => _messageActions(first),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+        constraints: BoxConstraints(maxWidth: width),
+        decoration: BoxDecoration(
+          gradient: mine ? WaslColors.gradient : null,
+          color: mine ? null : context.bubbleOther,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.isGroup && !mine && sender != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(sender,
+                    style: const TextStyle(
+                        color: WaslColors.teal,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
+              ),
+            Wrap(
+              spacing: 3,
+              runSpacing: 3,
+              children: [
+                for (final m in item)
+                  SizedBox(
+                    width: tile,
+                    height: tile,
+                    child: ImageBubble(
+                        loader: () => _mediaBytes(m['media_url'] as String),
+                        width: tile),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('${item.length} وسائط',
+                  style: TextStyle(
+                      color: mine ? Colors.white60 : context.textTertiary,
+                      fontSize: 11)),
+              const SizedBox(width: 6),
+              Text(_time(first['created_at'] as String),
+                  style: TextStyle(
+                      color: mine ? Colors.white70 : context.textSecondary,
+                      fontSize: 11)),
+              if (mine) ...[const SizedBox(width: 4), _ticks(item.last)],
+            ]),
+          ],
+        ),
+      ),
+    );
+    if (firstTime) {
+      bubble = MotionBubble(child: bubble, mine: mine);
+    }
+    return Align(
+      alignment: mine
+          ? AlignmentDirectional.centerEnd
+          : AlignmentDirectional.centerStart,
+      child: bubble,
+    );
   }
 
   Widget _body(Map<String, dynamic> m) {
@@ -2374,6 +2618,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
               if (v == 'screenshots') _toggleNoScreenshots();
               if (v == 'autotranslate') _toggleAutoTranslate();
+              if (v == 'export') _exportConversation();
+              if (v == 'clear') _clearConversation();
             },
             itemBuilder: (_) => [
               PopupMenuItem(
@@ -2406,6 +2652,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               const PopupMenuItem(
                 value: 'screenshots',
                 child: Text('منع/السماح بلقطات الشاشة'),
+              ),
+              const PopupMenuItem(
+                value: 'export',
+                child: Text('تصدير المحادثة نصاً'),
+              ),
+              const PopupMenuItem(
+                value: 'clear',
+                child: Text('مسح المحادثة عندي'),
               ),
             ],
           ),
@@ -2487,7 +2741,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 final now = DateTime.now();
                 final all = snap.data!.reversed.where((m) {
                   final e = m['expires_at'] as String?;
-                  return e == null || DateTime.parse(e).isAfter(now);
+                  if (e != null && !DateTime.parse(e).isAfter(now)) return false;
+                  // المسح الشخصي (0.20.0): الرسائل قبله مخفية عني حصراً
+                  final c = _clearedAt;
+                  if (c != null) {
+                    final t = DateTime.tryParse(m['created_at'] as String? ?? '');
+                    if (t != null && !t.isAfter(c)) return false;
+                  }
+                  return true;
                 }).toList();
                 _byId = {for (final m in all) m['id'] as String: m};
                 final q = _query;
@@ -2529,12 +2790,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                 _scheduleDecrypt(all);
                 _scheduleTranslate(all);
                 _refreshSmartReplies(all);
+                // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
+                final items = AlbumService.group(msgs);
+                _allMsgs = all;
                 return ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),
-                  itemCount: msgs.length,
+                  itemCount: items.length,
                   itemBuilder: (context, i) {
-                    final m = msgs[i];
+                    final item = items[i];
+                    if (item.length > 1) return _albumTile(item);
+                    final m = item.first;
                     final mine = m['sender_id'] == _me;
                     final sender = _names[m['sender_id']];
                     final replyId = m['reply_to'] as String?;
