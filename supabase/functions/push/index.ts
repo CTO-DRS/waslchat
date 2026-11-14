@@ -65,8 +65,8 @@ async function notifyMessage(id: string): Promise<Response> {
 
   const [{ data: sender }, { data: conv }, { data: members }] = await Promise.all([
     db.from("profiles").select("username, display_name").eq("id", m.sender_id).single(),
-    db.from("conversations").select("is_group, title").eq("id", m.conversation_id).single(),
-    db.from("conversation_participants").select("user_id, muted_until")
+    db.from("conversations").select("is_group, title, kind").eq("id", m.conversation_id).single(),
+    db.from("conversation_participants").select("user_id, muted_until, bell")
       .eq("conversation_id", m.conversation_id).neq("user_id", m.sender_id),
   ]);
 
@@ -74,7 +74,15 @@ async function notifyMessage(id: string): Promise<Response> {
   const now = Date.now();
   const isMuted = (u: string | null) =>
     !!u && (u === "infinity" || new Date(u).getTime() > now);
-  const ids = (members ?? []).filter((r) => !isMuted(r.muted_until)).map((r) => r.user_id);
+  // جرس القنوات (0.21.0 — ترحيل 032): يطبّق حصراً على القنوات المستقلة —
+  // mute: لا بيانات تصل أصلاً (صمت حقيقي)، pinned: المنشورات المثبتة فقط.
+  const isChannel = conv?.kind === "channel";
+  const bellBlocked = (bell: string | null) =>
+    isChannel && (bell === "mute" || (bell === "pinned" && m.pinned !== true));
+  const ids = (members ?? [])
+    .filter((r) => !isMuted(r.muted_until))
+    .filter((r) => !bellBlocked(r.bell))
+    .map((r) => r.user_id);
   if (!ids.length) return new Response("no recipients");
 
   const { data: tokens } = await db.from("device_tokens").select("token").in("user_id", ids);

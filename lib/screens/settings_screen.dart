@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/app_icon_service.dart';
 import '../services/app_lock_service.dart';
+import '../services/link_preview_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
@@ -131,6 +133,8 @@ class SettingsScreen extends StatelessWidget {
           const _WallpaperTile(),
           const _AppLockTile(),
           const _NotificationsTile(),
+          const _LinkPreviewTile(),
+          const _AppIconTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('تسجيل الخروج'),
@@ -508,6 +512,122 @@ class _NotificationsTile extends StatelessWidget {
         value: on,
         onChanged: (v) => PushService.setEnabled(v),
       ),
+    );
+  }
+}
+
+/// بلاطة معاينة الروابط (0.21.0): مفتاح تعطيل عام + الإفصاح الصادق الحرفي
+/// عن ما يمر عبر الخادم — مكتوب هنا لن يقرأه إلا من يريد.
+class _LinkPreviewTile extends StatelessWidget {
+  const _LinkPreviewTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: LinkPreviewService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: Icon(Icons.link_rounded,
+            color: on ? WaslColors.teal : context.textFaint),
+        title: const Text('معاينة الروابط'),
+        subtitle: Text(on
+            ? 'العنوان والصورة المصغرة للروابط العامة. إفصاح: الرابط يمر عبر '
+                'خادم وصل عند توليد المعاينة فقط، ولا يُخزّن عنده إطلاقاً — '
+                'والنتيجة تُحفظ على جهازك 24 ساعة ثم تُحذف'
+            : 'المعاينة موقفة — لا يمر أي رابط عبر أي مكان'),
+        value: on,
+        onChanged: (v) async {
+          await LinkPreviewService.setEnabled(v);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(v
+                    ? 'فُعّلت معاينة الروابط'
+                    : 'أُوقفت المعاينة ومُسح الكاش المحلي')));
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة أيقونة التطبيق (0.21.0): البديل المتدرج أو الكلاسيكية —
+/// التبديل يعيد إطلاق أيقونة المُشغّل على أندرويد (activity-alias).
+class _AppIconTile extends StatefulWidget {
+  const _AppIconTile();
+
+  @override
+  State<_AppIconTile> createState() => _AppIconTileState();
+}
+
+class _AppIconTileState extends State<_AppIconTile> {
+  String _current = 'classic';
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppIconService.current().then((v) {
+      if (mounted) setState(() => _current = v);
+    });
+  }
+
+  Future<void> _pick(String v) async {
+    if (v == _current || _busy) return;
+    setState(() => _busy = true);
+    final ok = await AppIconService.set(v);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (ok) _current = v;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'تم تغيير أيقونة التطبيق'
+            : 'تعذّر التغيير على هذا الجهاز')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.grid_view_rounded, color: WaslColors.violet),
+      title: const Text('أيقونة التطبيق'),
+      subtitle: Text(_busy
+          ? 'جارٍ التغيير…'
+          : _current == 'gradient'
+              ? 'النمط الحالي: المتدرجة'
+              : 'النمط الحالي: الكلاسيكية'),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: _busy
+          ? null
+          : () => showModalBottomSheet<String>(
+                context: context,
+                backgroundColor: context.surfaceAlt,
+                shape: const RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(24))),
+                builder: (ctx) => SafeArea(
+                  child: Wrap(children: [
+                    const ListTile(
+                        title: Text('أيقونة التطبيق',
+                            style: TextStyle(fontWeight: FontWeight.w800))),
+                    for (final (v, label) in const [
+                      ('classic', 'الكلاسيكية — الخضراء المعتمدة'),
+                      ('gradient', 'المتدرجة — بديل ألوان وصل'),
+                    ])
+                      ListTile(
+                        leading: Icon(
+                            _current == v
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: WaslColors.teal),
+                        title: Text(label),
+                        onTap: () {
+                          Navigator.pop(ctx, v);
+                          _pick(v);
+                        },
+                      ),
+                  ]),
+                ),
+              ),
     );
   }
 }

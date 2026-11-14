@@ -30,16 +30,53 @@
               android:resource="@style/NormalTheme"
               />
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="app.waslchat" android:host="login-callback"/>
             </intent-filter>
         </activity>
+        <!-- أيقونة المشغّل (0.21.0): الإطلاق عبر لقبين — الكلاسيكية مفعّلة
+             افتراضياً والمتدرجة البديلة معطّلة، والتبديل عبر wasl/appicon
+             (setComponentEnabledSetting). النشاط نفسه بلا فلتر MAIN/LAUNCHER
+             حتى لا تظهر ثلاث أيقونات في نفس الوقت. -->
+        <activity-alias
+            android:name=".MainActivityClassic"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="وصل شات"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".MainActivityGradient"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="وصل شات"
+            android:icon="@mipmap/ic_launcher_gradient">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <!-- ويدجت «آخر المحادثات» (0.21.0): يقرأ آخر 3 محادثات من التخزين
+             المحلي الذي يكتبه التطبيق عبر home_widget — لا خدمة خلفية ولا
+             شبكة: تحديث عند فتح التطبيق حصراً -->
+        <receiver
+            android:name=".WaslChatWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wasl_widget_info"/>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

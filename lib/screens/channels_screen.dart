@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config.dart';
+import '../services/channel_bell_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
@@ -81,6 +82,84 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     _load();
   }
 
+  /// جرس القناة (0.21.0): حوار الأوضاع الثلاثة — الحفظ عبر RPC والقراءة
+  /// من my_channels (العمود الجديد بعد ترحيل 032؛ بلا ترحيل تعذر الحفظ
+  /// ويبقى السلوك الحالي كما هو).
+  Future<void> _showBellSheet(Map<String, dynamic> c) async {
+    final current = ChannelBellService.normalize(c['bell'] as String?);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Wrap(children: [
+          ListTile(title: Text('إشعارات ${c['title'] as String}',
+              style: const TextStyle(fontWeight: FontWeight.w800))),
+          for (final (v, icon, label) in const [
+            ('all', Icons.notifications_active_outlined, 'كل المنشورات'),
+            ('pinned', Icons.push_pin_outlined, 'المنشورات المثبتة فقط'),
+            ('mute', Icons.notifications_off_outlined, 'صمت — لا إشعارات'),
+          ])
+            ListTile(
+              leading: Icon(icon, color: current == v ? WaslColors.teal : null),
+              title: Text(label),
+              trailing: current == v
+                  ? const Icon(Icons.check_rounded, size: 18, color: WaslColors.teal)
+                  : null,
+              onTap: () async {
+                Navigator.pop(ctx);
+                try {
+                  await ChannelBellService.set(c['conversation_id'] as String, v);
+                  if (mounted) {
+                    _snack(v == 'mute'
+                        ? 'صمتت هذه القناة — لن تصلك بياناتها أصلاً'
+                        : v == 'pinned'
+                            ? 'ستنبّهك المنشورات المثبتة فقط'
+                            : 'ستنبهك كل منشورات القناة');
+                    await _load();
+                  }
+                } catch (_) {
+                  if (mounted) _snack('تعذّر الحفظ — تأكد من تشغيل الترحيل 032');
+                }
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// أيقونة الجرس على صف قناة بحالته (تفضيل الإشعار المعروض)
+  Widget _bellIcon(String? bell) {
+    final b = ChannelBellService.normalize(bell);
+    return Icon(
+      b == 'mute'
+          ? Icons.notifications_off_outlined
+          : b == 'pinned'
+              ? Icons.push_pin_outlined
+              : Icons.notifications_active_outlined,
+      size: 18,
+      color: b == 'all'
+          ? context.textFaint
+          : b == 'pinned'
+              ? WaslColors.teal
+              : context.textFaint,
+    );
+  }
+
+  /// تبديل سريع للجرس من القائمة الطويلة (صمت/تشغيل) — أما التفاصيل فورقة _showBellSheet
+  Future<void> _setBellQuick(Map<String, dynamic> c, String pref) async {
+    try {
+      await ChannelBellService.set(c['conversation_id'] as String, pref);
+      if (mounted) {
+        _snack(pref == 'mute' ? 'صمتت القناة' : 'أُشغلت إشعارات القناة');
+        await _load();
+      }
+    } catch (_) {
+      if (mounted) _snack('تعذّر الحفظ — تأكد من تشغيل الترحيل 032');
+    }
+  }
+
   Future<void> _open(Map<String, dynamic> c) async {
     final role = c['role'] as String? ?? 'member';
     await Navigator.push(
@@ -132,6 +211,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                   ..._mine.map((c) {
                     final unread = (c['unread'] as num?)?.toInt() ?? 0;
                     final owner = c['role'] == 'owner';
+                    final bell = ChannelBellService.normalize(c['bell'] as String?);
                     return ListTile(
                       leading: _icon(),
                       title: Row(children: [
@@ -147,8 +227,20 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(shortTime(c['last_at'] as String?),
-                              style: TextStyle(color: context.textFaint, fontSize: 12)),
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            // جرس القناة (0.21.0): حالة الإشعار المعروضة + النقر يبدّلها
+                            InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => _showBellSheet(c),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: _bellIcon(bell),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(shortTime(c['last_at'] as String?),
+                                style: TextStyle(color: context.textFaint, fontSize: 12)),
+                          ]),
                           const SizedBox(height: 4),
                           UnreadBadge(unread),
                         ],
@@ -160,14 +252,30 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                                 context: context,
                                 backgroundColor: context.surfaceAlt,
                                 builder: (ctx) => SafeArea(
-                                  child: ListTile(
-                                    leading: const Icon(Icons.logout, color: Colors.redAccent),
-                                    title: const Text('إلغاء المتابعة'),
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      _unfollow(c);
-                                    },
-                                  ),
+                                  child: Wrap(children: [
+                                    ListTile(
+                                      leading: Icon(
+                                          ChannelBellService.icon(bell) == 'off'
+                                              ? Icons.notifications_active_outlined
+                                              : Icons.notifications_off_outlined,
+                                          color: WaslColors.indigo),
+                                      title: Text(ChannelBellService.label(bell) == 'صمت'
+                                          ? 'تشغيل إشعارات القناة'
+                                          : 'صمت القناة'),
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        _setBellQuick(c, ChannelBellService.label(bell) == 'صمت' ? 'all' : 'mute');
+                                      },
+                                    ),
+                                    ListTile(
+                                      leading: const Icon(Icons.logout, color: Colors.redAccent),
+                                      title: const Text('إلغاء المتابعة'),
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        _unfollow(c);
+                                      },
+                                    ),
+                                  ]),
                                 ),
                               ),
                     );

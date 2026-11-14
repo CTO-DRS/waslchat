@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 0.20.0+51
+version: 0.21.0+52
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -36,6 +36,12 @@ dependencies:
   flutter_local_notifications: 19.4.2
   share_plus: ^12.0.2
   image: ^4.12.0
+  # المرحلة 8 ب (0.21.0): القراءة الصوتية للرسائل عربياً على الجهاز
+  flutter_tts: ^4.2.5
+  # ويدجت «آخر المحادثات» — يكتب بيانات لخدمة أندرويد الأصلية
+  home_widget: 0.10.0
+  # القفز الدقيق إلى رسالة معينة (معرض الوسائط يفتح المحادثة على الوسيط)
+  scrollable_positioned_list: 0.3.8
 
 dev_dependencies:
   flutter_test:
