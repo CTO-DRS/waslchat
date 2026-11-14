@@ -4,9 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// ضع هنا بيانات مشروعك من Supabase:
 /// Project Settings > API > Project URL و anon public key
 class AppConfig {
-  /// إصدار هذا البناء — يُحدّث مع كل إصدار (وليس تلقائياً)
-  static const appVersion = '0.25.0';
-  static const appBuild = 54;
+  /// إصدار هذا البناء — يُحدّث مع كل إصدار (وليس تلقائياً).
+  /// **يجب أن يطابق pubspec.yaml حرفياً** — اختبار version_sync_test يفحص
+  /// التطابق عند كل بناء فأي انزياح يكسر الاختبارات (فشل 0.26/0.27 المكتشف).
+  static const appVersion = '0.28.0';
+  static const appBuild = 59;
 
   /// رابط الموقع الرسمي (يُستخدم لروابط الدعوة وصفحات الويب)
   static const siteUrl = 'https://waslchat.app';
@@ -32,6 +34,17 @@ class AppConfig {
     // {'urls': 'turn:your-server.example.com:3478?transport=udp',
     //  'username': 'owner-fills', 'credential': 'owner-fills'},
   ];
+
+  /// مفتاح VAPID العام لإشعارات المتصفح (Web Push — المرحلة 12).
+  /// مفتاح ECDSA P-256 بصيغة raw (65 بايت) بترميز base64url — الزوج الكامل
+  /// في secrets/vapid_*.txt بالمستودع الخاص، والمفتاح الخاص يُضبط سراً
+  /// لدالة push (WEB_PUSH_VAPID_PRIVATE_KEY) وفق RUNBOOK.
+  /// نص فارغ = إشعارات المتصفح غير مُعدّة، والواجهة تعلن ذلك بصدق.
+  static const webPushVapidPublicKey =
+      'BADInn-mhqqZWdNBBHNYsmjkX103yHW7kowEWUXJb-oOETkmTqFH5nDh4iRrz3cyDhCEUtUgtg1jw2gYXUCI-DA';
+
+  /// مسار الويب الكامل (تطابق scope في web/manifest.json)
+  static const webScopePath = '/web/';
 }
 
 SupabaseClient get supabase => Supabase.instance.client;

@@ -9,7 +9,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'app_keys.dart';
 import 'services/app_lock_service.dart';
+import 'services/desktop_notify_service.dart';
 import 'services/link_preview_service.dart';
+import 'services/pwa_service.dart';
+import 'services/web_push_service.dart';
 import 'theme.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
@@ -28,6 +31,12 @@ Future<void> main() async {
   );
   await PushService.init();
   await LinkPreviewService.init(); // معاينة الروابط (0.21.0): المفتاح والكاش المحلي
+  // المرحلة 12 (0.28.0): انتشار المنصات — إشعارات سطح المكتب الأساسية
+  // (تتفرغ بذاتها على الجوال والويب) وتجارب PWA وإشعارات المتصفح على الويب
+  // (التنفيذات البديلة بلا عملية على المنصات الأصلية)
+  await DesktopNotifyService.init();
+  PwaService.init();
+  WebPushService.init();
   _initCrashlytics();
   runApp(const WaslApp());
 }

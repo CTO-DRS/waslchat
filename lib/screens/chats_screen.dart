@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import '../services/desktop_notify_service.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
 import '../services/saved_service.dart';
@@ -57,14 +58,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
     _load();
     _loadStatuses();
     _loadSaved();
-    // تحديث القائمة فور وصول أي رسالة جديدة
+    // تحديث القائمة فور وصول أي رسالة جديدة + إشعار سطح المكتب
+    // (المرحلة 12: بلا FCM على المكتب — الحكم هنا فلا إشعار وهو مفتوح
+    // أو المحادثة معروضة أو رسالتك أنت)
     _channel = supabase
         .channel('chat-list')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'messages',
-          callback: (_) => _load(),
+          callback: (payload) {
+            DesktopNotifyService.onMessageInserted(
+                Map<String, dynamic>.from(payload.newRecord));
+            _load();
+          },
         )
         .subscribe();
   }

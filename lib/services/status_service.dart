@@ -6,6 +6,7 @@ import 'package:cryptography/cryptography.dart';
 
 import '../config.dart';
 import 'e2e_service.dart';
+import 'media_limits.dart';
 import 'media_service.dart';
 
 /// الحالات/القصص المشفّرة (24 ساعة) — المرحلة 1
@@ -28,7 +29,7 @@ class StatusService {
 
   /// حدود فيديو الحالة (المرحلة 11 ب — 0.27.0): 12 م.ب و 15 ثانية —
   /// حدّان معلنان في الواجهة نفسها، والبايتات هي الحارس الصارم دائماً.
-  static const maxVideoBytes = 12 * 1024 * 1024;
+  static const maxVideoBytes = MediaLimits.maxStatusVideoBytes;
   static const maxVideoSeconds = 15;
 
   static final Map<String, SecretKey> _keyCache = {};
@@ -64,7 +65,7 @@ class StatusService {
 
   /// نشر حالة صورة (تُشفَّر بايتاتها ثم تُرفع بامتداد .enc.bin)
   static Future<void> publishImage(Uint8List bytes, {String? replyTo}) async {
-    if (bytes.isEmpty || bytes.length > 24 * 1024 * 1024) {
+    if (bytes.isEmpty || bytes.length > MediaLimits.maxStatusBytes) {
       throw Exception('bad status image');
     }
     await _publish(kind: 'image', imageBytes: bytes, replyTo: replyTo);
