@@ -39,6 +39,7 @@ import '../services/saved_service.dart';
 import '../services/smart_search_service.dart';
 import '../services/voice_read_service.dart';
 import '../services/webio/web_files.dart';
+import '../services/media_limits.dart';
 import '../services/media_service.dart';
 import '../services/moderation_service.dart';
 import '../services/presence_service.dart';
@@ -1358,7 +1359,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
-  static const _maxBytes = 24 * 1024 * 1024;
+  static const _maxBytes = MediaLimits.maxMediaBytes;
 
   Future<void> _pickVideo() async {
     final x = await _picker.pickVideo(
@@ -1366,7 +1367,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     if (x == null) return;
     final size = await x.length();
     if (size > _maxBytes) {
-      _snack('الفيديو أكبر من 24 ميغابايت');
+      _snack('الفيديو أكبر من ${MediaLimits.maxMediaText}');
       return;
     }
     final bytes = await x.readAsBytes();
@@ -1386,7 +1387,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final f = r?.files.single;
     if (f == null) return;
     if (f.size > _maxBytes || f.bytes == null) {
-      _snack(f.bytes == null ? 'تعذّر قراءة الملف' : 'الملف أكبر من 24 ميغابايت');
+      _snack(f.bytes == null
+          ? 'تعذّر قراءة الملف'
+          : 'الملف أكبر من ${MediaLimits.maxMediaText}');
       return;
     }
     final ext = (f.extension ?? 'bin').toLowerCase();
@@ -1506,7 +1509,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           ListTile(
             leading: const Icon(Icons.movie_outlined, color: WaslColors.violet),
             title: const Text('فيديو'),
-            subtitle: const Text('حتى 24 ميغابايت'),
+            subtitle: const Text('حتى ${MediaLimits.maxMediaText}'),
             onTap: () {
               Navigator.pop(ctx);
               _pickVideo();
@@ -1515,7 +1518,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           ListTile(
             leading: const Icon(Icons.insert_drive_file_outlined, color: Colors.amber),
             title: const Text('ملف'),
-            subtitle: const Text('PDF، مستندات، وغيرها حتى 24 ميغابايت'),
+            subtitle: const Text('PDF، مستندات، وغيرها حتى ${MediaLimits.maxMediaText}'),
             onTap: () {
               Navigator.pop(ctx);
               _pickFile();

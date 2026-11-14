@@ -1,14 +1,19 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../services/app_icon_service.dart';
 import '../services/app_lock_service.dart';
+import '../services/desktop_notify_service.dart';
 import '../services/link_preview_service.dart';
 import '../services/on_device_model_service.dart';
+import '../services/platform_name.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
+import '../services/pwa_service.dart';
 import '../services/smart_order_service.dart';
 import '../services/update_service.dart';
+import '../services/web_push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
@@ -144,6 +149,11 @@ class SettingsScreen extends StatelessWidget {
           const _WallpaperTile(),
           const _AppLockTile(),
           const _NotificationsTile(),
+          if (!kIsWeb &&
+              DesktopNotifyRules.platformSupported(
+                  kIsWeb: false, ioLabel: devicePlatformLabel()))
+            const _DesktopNotifyTile(),
+          if (kIsWeb) ...const [_WebPushTile(), _PwaTile()],
           const _LinkPreviewTile(),
           const _SmartOrderTile(),
           const _OnDeviceModelTile(),
@@ -524,6 +534,98 @@ class _NotificationsTile extends StatelessWidget {
             : 'التنبيهات موقوفة — لن يصلك أي إشعار حتى تفعّلها'),
         value: on,
         onChanged: (v) => PushService.setEnabled(v),
+      ),
+    );
+  }
+}
+
+/// إشعارات سطح المكتب (المرحلة 12): مفتاح على المنصات المكتبية حصراً —
+/// إشعار محلي عند وصول رسالة والتطبيق ليس في المقدمة، من قناة Realtime
+/// نفسها بلا أي خدمة خارجية جديدة.
+class _DesktopNotifyTile extends StatelessWidget {
+  const _DesktopNotifyTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesktopNotifyService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: Icon(Icons.desktop_windows_outlined,
+            color: on ? WaslColors.teal : context.textFaint),
+        title: const Text('إشعارات سطح المكتب'),
+        subtitle: Text(on
+            ? 'إشعار محلي عند رسالة جديدة والتطبيق ليس في المقدمة — '
+                'بلا خادم جديد، من قناة الرسائل نفسها'
+            : 'الإشعارات موقوفة — التطبيق في المقدمة يكفي ولا إشعار خارجي'),
+        value: on,
+        onChanged: (v) => DesktopNotifyService.setEnabled(v),
+      ),
+    );
+  }
+}
+
+/// إشعارات المتصفح (المرحلة 12): Web Push مستقل عن Firebase — النقر
+/// يطلب الصلاحية ويسجّل الاشتراك على جهازك، والنص يعلن الحالة بصدق
+/// بما فيها «بانتظار تفعيل الخادم» قبل خطوات المالك.
+class _WebPushTile extends StatelessWidget {
+  const _WebPushTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: WebPushService.status,
+      builder: (context, st, _) => ListTile(
+        leading: const Icon(Icons.phonelink_ring_rounded, color: WaslColors.indigo),
+        title: const Text('إشعارات المتصفح'),
+        subtitle: Text(st),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: () async {
+          final ok = await WebPushService.enable();
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(ok
+                    ? 'سُجّل اشتراك هذا المتصفح للإشعارات'
+                    : WebPushService.status.value)));
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة الويب التقدمي (المرحلة 12): زر تثبيت يظهر حين يقدّمه المتصفح
+/// وتقرير Service Worker الصادق — بلا ادعاء بعمل كامل دون اتصال.
+class _PwaTile extends StatelessWidget {
+  const _PwaTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: PwaService.installable,
+      builder: (context, can, _) => ValueListenableBuilder<String>(
+        valueListenable: PwaService.workerStatus,
+        builder: (context, ws, __) => ListTile(
+          leading: const Icon(Icons.add_to_home_screen_rounded,
+              color: WaslColors.violet),
+          title: const Text('تثبيت التطبيق على الويب'),
+          subtitle: Text(can
+              ? 'ثبّته نافذة مستقلة بأيقونته — $ws'
+              : PwaService.standalone.value
+                  ? 'مثبّت أصلاً — يعمل نافذة مستقلة · $ws'
+                  : 'زر التثبيت يظهر حين يقدّمه المتصفح · $ws'),
+          trailing: can
+              ? const Icon(Icons.download_for_offline_outlined)
+              : null,
+          onTap: can
+              ? () async {
+                  final r = await PwaService.install();
+                  if (context.mounted && r == 'accepted') {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('ثُبّت وصل شات على جهازك')));
+                  }
+                }
+              : null,
+        ),
       ),
     );
   }
