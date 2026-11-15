@@ -171,13 +171,19 @@ class PushService {
   }
 
   /// عرض إشعار محلي بإجراءات أندرويد الممتدة (رد/تفاعل/مقروء)
+  /// إصلاح 1.0.1: معالج الخلفية يعمل في عزل معزول تكون فيه هذه الحالة غير
+  /// مهيأة (ثابتة لكل عزل) — كانت الإشعارات تُسقط بصمت عند مقتل التطبيق.
+  /// التهيئة الذاتية هنا بنفس نمط scheduleLocalReminder القائم — يدوية
+  /// وغير مكلفة (تهيئة مهيأة تُعاد فوراً بحارسها) وتصلح العزلين معاً.
   static Future<void> showLocalNotification({
     required String title,
     required String body,
     required String conversationId,
     String? messageId,
   }) async {
-    if (defaultTargetPlatform != TargetPlatform.android || !_localNotifReady) return;
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_localNotifReady) await _initLocalNotifications();
+    if (!_localNotifReady) return;
     final payload = QuickActionService.encodeOpen(conversationId, messageId: messageId);
     final details = AndroidNotificationDetails(
       'messages', // نفس قناة «الرسائل» الأصلية بأهمية عالية
@@ -221,9 +227,11 @@ class PushService {
     required bool video,
     required String conversationId,
   }) async {
-    if (defaultTargetPlatform != TargetPlatform.android || !_localNotifReady) {
-      return;
-    }
+    // إصلاح 1.0.1: تهيئة ذاتية للعزل المعزول — المسار نفسه الذي يشغّل
+    // هذه الدالة عند الرن من الخلفية قد يكون عزلاً غير مهيأ
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_localNotifReady) await _initLocalNotifications();
+    if (!_localNotifReady) return;
     const details = AndroidNotificationDetails(
       CallAlert.channelId,
       CallAlert.channelName,
@@ -253,9 +261,9 @@ class PushService {
 
   /// إسكات رن المكالمة الواردة بأي نهاية لها — صمت صادق لا بواقي
   static Future<void> cancelIncomingCallNotification() async {
-    if (defaultTargetPlatform != TargetPlatform.android || !_localNotifReady) {
-      return;
-    }
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_localNotifReady) await _initLocalNotifications();
+    if (!_localNotifReady) return;
     try {
       final id = _lastCallNotifId;
       _lastCallNotifId = null;
