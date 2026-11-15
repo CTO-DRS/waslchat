@@ -1,10 +1,13 @@
 name: Build desktop
 # المرحلة 12 (0.28.0): أول إصدار سطح مكتب رسمي — بناء عند كل إصدار مميز
-# بوسم v* (مثل v0.28.0) أو يدوياً من تبويب Actions، ثم **نشر ثلاث حزم
-# في Releases بجوار APK** من القناة الآلية نفسها. المجلدات الأصلية
-# (windows/linux/macos) تُولَّد في الـCI بـ flutter create كي لا تثقل المستودع.
+# بوسم v* (مثل v0.28.0) أو يدوياً من تبويب Actions، ثم نشر الحزم في Releases
+# بجوار APK من القناة الآلية نفسها. المجلدات الأصلية (windows/linux/macos)
+# تُولَّد في الـCI بـ flutter create كي لا تثقل المستودع.
 # الصدق: حزمة ماك غير موقّعة (بلا developer ID) — الفتح يتطلب تجاوز Gatekeeper
 # يدوياً أول مرة، وهذا معلن في ملاحظات الإصدار.
+# المرحلة 12 ب (0.29.0): مهمة iOS تجريبية — بناء --no-codesign ونشر أرشيف
+# Runner.app غير موقّع (تثبيته يحتاج توقيع المالك — RUNBOOK §9)، ومجلد ios
+# كامل أصلاً في المستودع (تفويضات وشاشة إطلاق وأيقونات وصلاحيات عربية).
 on:
   push:
     tags: ['v*']
@@ -116,6 +119,45 @@ jobs:
           else
             gh release create "$TAG" "$PKG" --title "وصل شات $VERSION" --notes "حزم سطح المكتب لإصدار $VERSION — $NOTE"
             echo "created $TAG"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # المرحلة 12 ب (0.29.0): بناء iOS تجريبي غير موقّع — دليل تجهيز المنصة:
+  # (تفويضات وصلاحيات عربية وأيقونات وشاشة إطلاق كاملة في ios/ أصلاً)
+  # التثبيت على جهاز حقيقي يحتاج توقيع المالك (حساب 99$ — RUNBOOK §9).
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.9
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned iOS build
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          # ditto الصيغة الصحيحة لأرشفة .app مع symlinks كما في ماك
+          ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app "wasl_chat_${VERSION}_ios_unsigned.zip"
+          echo "PKG=wasl_chat_${VERSION}_ios_unsigned.zip" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasl_chat_ios_unsigned
+          path: build/ios/iphoneos/Runner.app
+          if-no-files-found: error
+      - name: Publish to release
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          TAG="v$VERSION"
+          NOTE="بناء iOS تجريبي غير موقّع (تجهيز 0.29.0) — التثبيت يحتاج توقيعك الخاص أو TestFlight بحساب Apple Developer — الخطوات كاملة في RUNBOOK §9"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$PKG" --clobber
+            echo "updated $TAG with $PKG"
+          else
+            gh release create "$TAG" "$PKG" --title "وصل شات $VERSION" --notes "$NOTE"
           fi
         env:
           GH_TOKEN: ${{ github.token }}

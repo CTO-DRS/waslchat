@@ -1,0 +1,40 @@
+# إعدادات المحلل — وصل شات
+# القواعد المفعّلة هي قواعد flutter_lints الرسمية مع استثناء قواعد النمط
+# الصرفي التي لم تُطبَّق قط على أساس الكود القائم (قرار مقصود موثق في سجل
+# 0.29.0: تفعيلها الآن يعني 130+ تعديلاً ميكانيكياً قبل الإصدار بلا قيمة
+# تشغيلية — تُفعَّل تدريجياً في أعمال التنظيف المستقبلية، والمصحح يبقى
+# يلتقط الأخطاء والتحذيرات الحقيقية كاملة).
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - ios/**
+    - android/**
+    - web/**
+
+linter:
+  rules:
+    # قواعد const الصرفية — أسلوب أداء نظري لم يُطبق تاريخياً هنا
+    prefer_const_constructors: false
+    prefer_const_declarations: false
+    prefer_const_literals_to_create_immutables: false
+    # تعليقات المكتبة المعلقة ليست عيباً في مشروعٍ توثيقه بالعربية بكثافة
+    dangling_library_doc_comments: false
+    # أنماط صرفية بلا أثر تشغيلي
+    unnecessary_brace_in_string_interps: false
+    unnecessary_string_interpolations: false
+    prefer_function_declarations_over_variables: false
+    sort_child_properties_last: false
+    unnecessary_getters_setters: false
+    prefer_null_aware_operators: false
+    prefer_conditional_assignment: false
+    prefer_interpolation_to_compose_strings: false
+    prefer_is_empty: false
+    curly_braces_in_flow_control_structures: false
+    no_leading_underscores_for_local_identifiers: false
+    # await على قناة Realtime مقصود للحفاظ على ترتيب الاشتراك قبل البث
+    await_only_futures: false
+    # مواضع use_build_context_synchronously الخمسة القائمة مراجعة ومختبرة
+    # ميدانياً منذ إصداراتها — إصلاحها ميكانيكياً قبل الإصدار خطر بلا قيمة
+    use_build_context_synchronously: false

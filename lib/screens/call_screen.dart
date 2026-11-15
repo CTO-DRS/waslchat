@@ -14,6 +14,8 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../services/call_logic.dart';
 import '../services/call_quality_service.dart';
 import '../services/call_service.dart';
+import '../services/l10n.dart';
+import '../services/locale_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -198,7 +200,9 @@ class _CallScreenState extends State<CallScreen> {
                     Icon(CallQualityView.icon(q), size: 14,
                         color: CallQualityView.color(q)),
                     const SizedBox(width: 5),
-                    Text(CallQualityView.label(q),
+                    Text(
+                        l10nT('call_quality_${q.name}',
+                            LocaleService.lang.value),
                         style: TextStyle(
                             color: CallQualityView.color(q),
                             fontSize: 11.5, fontWeight: FontWeight.w700)),

@@ -594,6 +594,46 @@ class _BotDetailsSheetState extends State<_BotDetailsSheet> {
             ),
           ]),
           const SizedBox(height: 10),
+          // لوحة إحصاءات البوت (0.29.0): ما يمكن قراءته فعلاً بلا اختراع
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              leading: const Icon(Icons.insert_chart_outlined_rounded,
+                  color: WaslColors.indigo),
+              tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+              title: const Text('إحصاءات البوت',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              children: [
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: BotService.chats(b['id'] as String),
+                  builder: (context, snap) {
+                    final chats = snap.data?.length ?? 0;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _statRow(context, 'العمر',
+                            BotStatsView.ageText(b['created_at'] as String?, DateTime.now())),
+                        _statRow(context, 'الحالة',
+                            b['is_active'] == true ? 'نشط' : 'معطّل'),
+                        _statRow(context, 'الويب هوك',
+                            BotStatsView.webhookLabel(b)),
+                        _statRow(context, 'المحادثات',
+                            BotStatsView.chatCountLabel(chats)),
+                        _statRow(context, 'نهاية الرمز', '…${b['token_tail'] ?? ''}'),
+                        const SizedBox(height: 6),
+                        Text(BotStatsView.disclosure,
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                height: 1.7,
+                                color: context.textFaint)),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.key_rounded, color: WaslColors.violet),
             title: const Text('تجديد رمز الواجهة'),
@@ -641,4 +681,18 @@ class _BotDetailsSheetState extends State<_BotDetailsSheet> {
       ),
     );
   }
+}
+
+/// صف إحصاء في لوحة البوت — تسمية يميناً وقيمة ثابتة الخط للأرقام
+Widget _statRow(BuildContext context, String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(children: [
+      SizedBox(width: 92, child: Text(label, style: const TextStyle(fontSize: 13.5))),
+      Expanded(
+        child: Text(value,
+            style: TextStyle(fontSize: 13.5, color: context.textSecondary)),
+      ),
+    ]),
+  );
 }

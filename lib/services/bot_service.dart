@@ -161,3 +161,51 @@ class BotService {
     return 'تعذّر تنفيذ العملية';
   }
 }
+
+/// لوحة إحصاءات البوت النقية (المرحلة 12 ب — 0.29.0): تعرض صاحب البوت ما
+/// يمكن قراءته فعلاً عن بوتيه — الحالة والويب هوك وعدد المحادثات المرتبطة
+/// وعمر البوت — بإفصاح صادق: جدول إحصاءات استخدام خادمي (عدد الرسائل المرسلة
+/// وما شابه) غير موجود حتى الآن ولا يُخترع له رقم — يُعرض عند توفره لاحقاً.
+class BotStatsView {
+  BotStatsView._();
+
+  /// عمر البوت بنص عربي مختصر: «اليوم»، «قبل 5 أيام»، «قبل 3 أسابيع»، «قبل 4 أشهر»
+  static String ageText(String? iso, DateTime now) {
+    final d = DateTime.tryParse(iso ?? '')?.toLocal();
+    if (d == null) return '—';
+    final days = now.difference(d).inDays;
+    if (days <= 0) return 'اليوم';
+    if (days == 1) return 'قبل يوم';
+    if (days < 7) return 'قبل $days أيام';
+    final weeks = days ~/ 7;
+    if (weeks < 5) {
+      return weeks == 1 ? 'قبل أسبوع' : 'قبل $weeks أسابيع';
+    }
+    final months = days ~/ 30;
+    if (months < 12) {
+      return months == 1 ? 'قبل شهر' : 'قبل $months أشهر';
+    }
+    final years = days ~/ 365;
+    return years == 1 ? 'قبل سنة' : 'قبل $years سنوات';
+  }
+
+  /// سطر حالة الويب هوك الصادق
+  static String webhookLabel(Map<String, dynamic> bot) {
+    final url = (bot['webhook_url'] ?? '') as String;
+    return url.isEmpty
+        ? 'غير موصول — الرسائل لا تُرسل لأي خادم'
+        : 'موصول — تصله الرسائل موقّعة HMAC';
+  }
+
+  /// سطر عدد المحادثات المرتبطة — صادق بالأعداد
+  static String chatCountLabel(int chats) {
+    if (chats == 0) return 'لا محادثات مرتبطة بعد';
+    if (chats == 1) return 'محادثة واحدة مرتبطة';
+    return '$chats محادثات مرتبطة';
+  }
+
+  /// إفصاح اللوحة الثابت — يظهر كما هو في الشاشة
+  static const disclosure =
+      'هذه اللوحة تعرض ما يمكن قراءته فعلاً عن بوتك من الخادم — بلا تخمين ولا أرقام مكتوظة. '
+      'إحصاءات الاستخدام التفصيلية (الرسائل المرسلة وردود الويب هوك) جدولها الخادمي متأجل وموثق في BOT_MODERATION_PATTERNS.md.';
+}

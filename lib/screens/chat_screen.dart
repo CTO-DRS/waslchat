@@ -26,6 +26,9 @@ import '../services/call_service.dart';
 import '../services/channel_bell_service.dart';
 import '../services/channel_stats_service.dart';
 import '../services/e2e_service.dart';
+import '../services/l10n.dart';
+import '../services/locale_service.dart';
+import '../services/metrics_service.dart';
 import '../services/export_service.dart';
 import '../services/forward_service.dart';
 import '../services/image_edit_service.dart';
@@ -1194,6 +1197,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       return;
     }
     try {
+      // المرحلة 12 ب (0.29.0): زمن تأكيد الخادم للإرسال — قياس محلي صادق
+      final t0 = DateTime.now();
       await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
@@ -1201,6 +1206,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         'content': payload,
         if (replyTo != null) 'reply_to': replyTo['id'],
       });
+      MetricsService.recordDelivery(
+          DateTime.now().difference(t0).inMilliseconds);
     } catch (e) {
       _snack(ModerationService.sendErrorHint(e) ??
           (BlockService.isBlockedError(e)
@@ -1273,6 +1280,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         contentType: upType,
       );
       final replyTo = _replyTo;
+      // المرحلة 12 ب (0.29.0): زمن تأكيد الخادم للوسائط أيضاً — قياس محلي صادق
+      final t0 = DateTime.now();
       final ins = await supabase.from('messages').insert({
         'conversation_id': widget.conversationId,
         'sender_id': _me,
@@ -1284,6 +1293,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         if (groupId != null) 'media_group_id': groupId,
         if (replyTo != null) 'reply_to': replyTo['id'],
       }).select('id').single();
+      MetricsService.recordDelivery(
+          DateTime.now().difference(t0).inMilliseconds);
       // رسائلي المرسلة: mk يُخزّن برسالة فوراً فتُقرأ وسائطي بعد أي تدوير جلسة
       if (dmRatchet) {
         await E2eService.rememberMediaKey(
@@ -3575,7 +3586,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                           maxLines: 5,
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _sendText(),
-                          decoration: const InputDecoration(hintText: 'اكتب رسالة...'),
+                          decoration: InputDecoration(
+                              hintText: l10nT('chats_type_message',
+                                  LocaleService.lang.value)),
                         ),
                 ),
                 const SizedBox(width: 8),
