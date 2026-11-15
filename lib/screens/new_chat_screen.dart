@@ -4,6 +4,8 @@ import '../config.dart';
 import '../services/block_service.dart';
 import '../services/e2e_service.dart';
 import '../services/invite_service.dart';
+import '../services/l10n.dart';
+import '../services/locale_service.dart';
 import '../services/username_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -159,7 +161,9 @@ class _NewChatScreenState extends State<NewChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('محادثة جديدة')),
+      appBar: AppBar(
+          title: Text(l10nT('chats_new', LocaleService.lang.value),
+              style: const TextStyle(fontWeight: FontWeight.w700))),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.all(12),
@@ -167,8 +171,9 @@ class _NewChatScreenState extends State<NewChatScreen> {
             controller: _query,
             autofocus: true,
             onChanged: _search,
-            decoration: const InputDecoration(
-                hintText: 'ابحث باسم المستخدم', prefixIcon: Icon(Icons.search)),
+            decoration: InputDecoration(
+                hintText: l10nT('chats_search_hint', LocaleService.lang.value),
+                prefixIcon: const Icon(Icons.search)),
           ),
         ),
         Padding(

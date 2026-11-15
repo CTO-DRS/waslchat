@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import '../services/call_service.dart';
 import '../services/device_security_service.dart';
+import '../services/l10n.dart';
+import '../services/locale_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/update_service.dart';
@@ -272,27 +274,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   indicatorColor: const Color(0x556366F1),
                   selectedIndex: _index,
                   onDestinationSelected: (i) => setState(() => _index = i),
-                  destinations: const [
+                  destinations: [
                     NavigationDestination(
                         icon: _NavBadge(icon: Icons.chat_bubble_outline),
                         selectedIcon: _NavBadge(icon: Icons.chat_bubble, selected: true),
-                        label: 'المحادثات'),
+                        label: l10nT('nav_chats', LocaleService.lang.value)),
                     NavigationDestination(
-                        icon: Icon(Icons.groups_2_outlined),
-                        selectedIcon: Icon(Icons.groups_2),
-                        label: 'المجتمعات'),
+                        icon: const Icon(Icons.groups_2_outlined),
+                        selectedIcon: const Icon(Icons.groups_2),
+                        label: l10nT('nav_communities', LocaleService.lang.value)),
                     NavigationDestination(
-                        icon: Icon(Icons.campaign_outlined),
-                        selectedIcon: Icon(Icons.campaign),
-                        label: 'القنوات'),
+                        icon: const Icon(Icons.campaign_outlined),
+                        selectedIcon: const Icon(Icons.campaign),
+                        label: l10nT('nav_channels', LocaleService.lang.value)),
                     NavigationDestination(
-                        icon: Icon(Icons.call_outlined),
-                        selectedIcon: Icon(Icons.call),
-                        label: 'المكالمات'),
+                        icon: const Icon(Icons.call_outlined),
+                        selectedIcon: const Icon(Icons.call),
+                        label: l10nT('nav_calls', LocaleService.lang.value)),
                     NavigationDestination(
-                        icon: Icon(Icons.settings_outlined),
-                        selectedIcon: Icon(Icons.settings),
-                        label: 'الإعدادات'),
+                        icon: const Icon(Icons.settings_outlined),
+                        selectedIcon: const Icon(Icons.settings),
+                        label: l10nT('nav_settings', LocaleService.lang.value)),
                   ],
                 ),
               ),

@@ -5,7 +5,10 @@ import '../config.dart';
 import '../services/app_icon_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/desktop_notify_service.dart';
+import '../services/l10n.dart';
 import '../services/link_preview_service.dart';
+import '../services/locale_service.dart';
+import '../services/metrics_service.dart';
 import '../services/on_device_model_service.dart';
 import '../services/platform_name.dart';
 import '../services/presence_service.dart';
@@ -158,6 +161,9 @@ class SettingsScreen extends StatelessWidget {
           const _SmartOrderTile(),
           const _OnDeviceModelTile(),
           const _AppIconTile(),
+          // المرحلة 12 ب (0.29.0): تعدد اللغات + مؤشرات الأداء على الجهاز
+          const _LanguageTile(),
+          const _MetricsTile(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('تسجيل الخروج'),
@@ -866,6 +872,148 @@ class _AppIconTileState extends State<_AppIconTile> {
                   ]),
                 ),
               ),
+    );
+  }
+}
+
+// ==================== المرحلة 12 ب (0.29.0) ====================
+
+/// بلاطة لغة التطبيق: العربية أم التصميم، وإنجليزية وفرنسية أساسية —
+/// التبديل لحظي واتجاه الواجهة يتبع اللغة، والإفصاح الصادق معروض.
+class _LanguageTile extends StatelessWidget {
+  const _LanguageTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: LocaleService.lang,
+      builder: (context, current, _) => ListTile(
+        leading: const Icon(Icons.translate_rounded, color: WaslColors.teal),
+        title: const Text('لغة التطبيق'),
+        subtitle: Text(l10nLanguageNames[current] ?? 'العربية'),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: () async {
+          final pick = await showModalBottomSheet<String>(
+            context: context,
+            backgroundColor: context.surfaceAlt,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+            builder: (ctx) => SafeArea(
+              child: Wrap(children: [
+                const ListTile(
+                  title: Text('لغة التطبيق',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                for (final code in l10nSupported)
+                  ListTile(
+                    leading: Icon(
+                        LocaleService.lang.value == code
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: WaslColors.teal),
+                    title: Text(l10nLanguageNames[code] ?? code),
+                    onTap: () => Navigator.pop(ctx, code),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: Text(
+                    l10nT('settings_language_note', LocaleService.lang.value),
+                    style: TextStyle(
+                        fontSize: 12, color: context.textFaint, height: 1.6),
+                  ),
+                ),
+              ]),
+            ),
+          );
+          if (pick != null) await LocaleService.set(pick);
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة مؤشرات الأداء (0.29.0): أرقام حقيقية مقاسة على جهازك حصراً —
+/// فتح بارد وتأكيد خادم وعدّ أخطاء، بمنهجية مكتوبة معروضة وإعادة تعيين.
+class _MetricsTile extends StatelessWidget {
+  const _MetricsTile();
+
+  static String _fmt(int ms) => ms >= 1000
+      ? '${(ms / 1000).toStringAsFixed(1)} ثانية'
+      : '$ms مللي ثانية';
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.speed_rounded, color: WaslColors.indigo),
+      title: const Text('مؤشرات الأداء على جهازك'),
+      subtitle: const Text(
+          'زمن الفتح البارد وزمن تأكيد الخادم — مقيسة محلياً ولا تُرفع لأي مكان'),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: () => _showMetrics(context),
+    );
+  }
+
+  void _showMetrics(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: ValueListenableBuilder<int>(
+          valueListenable: MetricsService.version,
+          builder: (context, __, ___) {
+            final s = MetricsService.snapshot;
+            final row = (String label, String value) => Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                  child: Row(children: [
+                    Expanded(child: Text(label)),
+                    Text(value,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: [FontFeature.tabularFigures()])),
+                  ]),
+                );
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(
+                padding: EdgeInsets.all(14),
+                child: Text('مؤشرات الأداء على جهازك',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              ),
+              row('الفتح البارد (أحدث)', _fmt(s.coldLastMs)),
+              row('الفتح البارد (متوسط ${s.coldCount} عينة)', _fmt(s.coldAvgMs)),
+              row('تأكيد الخادم (متوسط ${s.deliverCount} عينة)',
+                  _fmt(s.deliverAvgMs)),
+              row('تأكيد الخادم (أعلى 95%)', _fmt(s.deliverP95Ms)),
+              row('أخطاء محلية عبرت معالجات Flutter', '${s.errors}'),
+              row('عدد مرات فتح التطبيق', '${s.opens}'),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Text(
+                  'المنهجية الصادقة: الفتح البارد من أول سطر في التشغيل إلى نهاية رسم أول إطار، '
+                  'وزمن «تأكيد الخادم» هو دورة طلب الإدراج واستجابته وليس زمن وصول الرسالة للطرف الآخر، '
+                  'والأخطاء هي عدّ ما عبر معالجات الخطأ في جهازك (ليست معدل أعطال Crashlytics الذي يقرؤه المالك من وحدة التحكم). '
+                  'كل الأرقام تخزن محلياً في جهازك ولا يُرفع أي منها لأي خادم.',
+                  style: TextStyle(fontSize: 11.5, height: 1.7),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 16),
+                child: TextButton.icon(
+                  icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                  label: const Text('إعادة تعيين المؤشرات'),
+                  onPressed: () async {
+                    await MetricsService.reset();
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                ),
+              ),
+            ]);
+          },
+        ),
+      ),
     );
   }
 }

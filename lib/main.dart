@@ -11,6 +11,8 @@ import 'app_keys.dart';
 import 'services/app_lock_service.dart';
 import 'services/desktop_notify_service.dart';
 import 'services/link_preview_service.dart';
+import 'services/locale_service.dart';
+import 'services/metrics_service.dart';
 import 'services/pwa_service.dart';
 import 'services/web_push_service.dart';
 import 'theme.dart';
@@ -22,9 +24,13 @@ import 'widgets/lock_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // المرحلة 12 ب (0.29.0): قياس الفتح البارد — من أول سطر إلى أول إطار مرسوم
+  final coldStart0 = DateTime.now();
   await ThemeService.load();
   await FontScaleService.load();
   await WallpaperService.load();
+  await LocaleService.load();
+  await MetricsService.init();
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.supabaseAnonKey,
@@ -39,23 +45,38 @@ Future<void> main() async {
   WebPushService.init();
   _initCrashlytics();
   runApp(const WaslApp());
+  // أول إطار مرسوم = نهاية الفتح البارد (قياس محلي لا يغادر الجهاز)
+  WidgetsBinding.instance.endOfFrame.then((_) {
+    MetricsService.recordColdStart(
+        DateTime.now().difference(coldStart0).inMilliseconds);
+  });
 }
 
 /// تقارير الأعطال إلى Firebase Crashlytics (أندرويد فقط).
 /// PushService.init يهيّئ Firebase قبله؛ إن فشلت التهيئة (لا خدمات Google) نتجاهل بهدوء.
 void _initCrashlytics() {
-  if (kIsWeb) return;
+  // المرحلة 12 ب (0.29.0): عدّ الأخطاء محلياً أولاً — مقياس صادق على الجهاز
+  // يعمل بلا Firebase ولا شبكة، ثم تقرير Crashlytics لأندرويد كما هو.
+  final crashlytics = kIsWeb ? null : _safeCrashlytics();
+  FlutterError.onError = (details) {
+    MetricsService.recordError();
+    if (crashlytics != null) FlutterError.presentError(details);
+    crashlytics?.recordFlutterFatalError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    MetricsService.recordError();
+    crashlytics?.recordError(error, stack, fatal: true);
+    return true;
+  };
+}
+
+/// Crashlytics بعد تهيئة Firebase — null على الويب أو عند فشل التهيئة
+/// (تقارير الأعطال اختيارية ولا تمنع تشغيل التطبيق — السلوك القائم كما هو)
+FirebaseCrashlytics? _safeCrashlytics() {
   try {
-    FlutterError.onError = (details) {
-      FlutterError.presentError(details);
-      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-    };
-    PlatformDispatcher.instance.onError = (error, stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-      return true;
-    };
+    return FirebaseCrashlytics.instance;
   } catch (_) {
-    // Firebase غير مهيّأ — تقارير الأعطال اختيارية ولا يمنع تشغيل التطبيق
+    return null;
   }
 }
 
@@ -66,16 +87,22 @@ class WaslApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeService.mode,
-      builder: (context, mode, _) => ValueListenableBuilder<double>(
-        valueListenable: FontScaleService.scale,
-        builder: (context, fontScale, _) => MaterialApp(
+      builder: (context, mode, _) => ValueListenableBuilder<String>(
+        valueListenable: LocaleService.lang,
+        builder: (context, _, __) => ValueListenableBuilder<double>(
+          valueListenable: FontScaleService.scale,
+          builder: (context, fontScale, _) => MaterialApp(
         title: 'وصل شات',
         debugShowCheckedModeBanner: false,
         theme: WaslTheme.light,
         darkTheme: WaslTheme.dark,
         themeMode: mode,
-        locale: const Locale('ar'),
-        supportedLocales: const [Locale('ar'), Locale('en')],
+        locale: LocaleService.locale,
+        supportedLocales: const [
+          Locale('ar'),
+          Locale('en'),
+          Locale('fr'),
+        ],
         localizationsDelegates: const [
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
@@ -91,6 +118,7 @@ class WaslApp extends StatelessWidget {
           ),
           child: child ?? const SizedBox.shrink(),
         ),
+      ),
       ),
       ),
     );
