@@ -709,6 +709,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                       ),
                     ),
                     IconButton(
+                        tooltip: 'إغلاق المعاينة',
                         icon: const Icon(Icons.close, color: Colors.white),
                         onPressed: () => Navigator.pop(context, _changed)),
                   ]),

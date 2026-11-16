@@ -1,3 +1,5 @@
+import 'dart:async';
+
 /// شاشة سجل المكالمات (المرحلة 6 — 0.17.0) — تبويب «المكالمات» الرئيسي.
 ///
 /// سجل صادق: صادرة/واردة/فائتة/مرفوضة/ملغاة/فشلت، والمدة للمكتملة منها،
@@ -5,10 +7,10 @@
 /// من الخادم بعد 90 يوماً. الضغط على أي سطر يعيد الاتصال بنفس الشخص
 /// وبنوع المكالمة نفسه.
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/call_logic.dart';
+import '../services/realtime_hub_service.dart';
 import '../services/call_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -26,34 +28,28 @@ class _CallsHistoryScreenState extends State<CallsHistoryScreen> {
   bool _loading = true;
   List<CallRecord> _calls = [];
   final Map<String, (String, String?)> _peers = {}; // id → (الاسم، الصورة)
-  RealtimeChannel? _channel;
+  StreamSubscription<Map<String, dynamic>>? _hubSub1;
+  StreamSubscription<Map<String, dynamic>>? _hubSub2;
 
   @override
   void initState() {
     super.initState();
     _load();
-    _channel = supabase
-        .channel('call-history')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'calls',
-          callback: (_) => _load(),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'calls',
-          callback: (_) => _load(),
-        )
-        .subscribe();
+    // 1.2.0: الإصغاء عبر مركز Realtime الواحد — بلا قناة لكل زيارة:
+    // إدراج أو تحديث مكالمة يعيد تحميل السجل، والمفتاح مالك واحد
+    if (RealtimeHubService.registry.attach('calls-history')) {
+      _hubSub1 = RealtimeHubService.callInserted.listen((_) => _load());
+      _hubSub2 = RealtimeHubService.callUpdated.listen((_) => _load());
+    }
   }
 
   @override
   void dispose() {
-    final ch = _channel;
-    _channel = null;
-    if (ch != null) supabase.removeChannel(ch);
+    _hubSub1?.cancel();
+    _hubSub2?.cancel();
+    _hubSub1 = null;
+    _hubSub2 = null;
+    RealtimeHubService.registry.detach('calls-history');
     super.dispose();
   }
 

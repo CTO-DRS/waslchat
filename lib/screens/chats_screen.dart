@@ -1,12 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/desktop_notify_service.dart';
 import '../services/e2e_service.dart';
 import '../services/presence_service.dart';
+import '../services/realtime_hub_service.dart';
 import '../services/saved_service.dart';
 import '../services/smart_order_service.dart';
 import '../services/widget_data_service.dart';
@@ -32,7 +32,7 @@ class ChatsScreen extends StatefulWidget {
 class _ChatsScreenState extends State<ChatsScreen> {
   List<Map<String, dynamic>> _chats = [];
   bool _loading = true;
-  RealtimeChannel? _channel;
+  StreamSubscription<Map<String, dynamic>>? _hubSub;
   // فك تشفير سطر المعاينة (المحادثات الخاصة): النص المشفّر -> الصريح
   final Map<String, String> _previews = {};
 
@@ -61,25 +61,22 @@ class _ChatsScreenState extends State<ChatsScreen> {
     // تحديث القائمة فور وصول أي رسالة جديدة + إشعار سطح المكتب
     // (المرحلة 12: بلا FCM على المكتب — الحكم هنا فلا إشعار وهو مفتوح
     // أو المحادثة معروضة أو رسالتك أنت)
-    _channel = supabase
-        .channel('chat-list')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'messages',
-          callback: (payload) {
-            DesktopNotifyService.onMessageInserted(
-                Map<String, dynamic>.from(payload.newRecord));
-            _load();
-          },
-        )
-        .subscribe();
+    // 1.2.0: الإصغاء عبر مركز Realtime الواحد — بلا قناة لكل زيارة:
+    // الزيارة لا تنضم للخادم إطلاقاً، والمالك مفتاح واحد فالتسريب يُرفض
+    if (RealtimeHubService.registry.attach('chats-list')) {
+      _hubSub = RealtimeHubService.messagesInserted.listen((row) {
+        DesktopNotifyService.onMessageInserted(row);
+        _load();
+      });
+    }
   }
 
   @override
   void dispose() {
     SmartOrderService.enabled.removeListener(_onSmartOrderChanged);
-    if (_channel != null) supabase.removeChannel(_channel!);
+    _hubSub?.cancel();
+    _hubSub = null;
+    RealtimeHubService.registry.detach('chats-list');
     super.dispose();
   }
 

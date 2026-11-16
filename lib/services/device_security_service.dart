@@ -1,9 +1,7 @@
 import 'dart:async';
 
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../config.dart';
 import 'e2e_service.dart';
+import 'realtime_hub_service.dart';
 
 /// أمن الأجهزة المرتبطة — إزالة جهاز كاملة (المرحلة 10 — 0.24.0).
 ///
@@ -24,7 +22,8 @@ import 'e2e_service.dart';
 class DeviceSecurityService {
   DeviceSecurityService._();
 
-  static RealtimeChannel? _channel;
+  /// الإصغاء اللحظي عبر مركز Realtime الواحد (1.2.0) — بلا قناة مستقلة
+  static StreamSubscription<Map<String, dynamic>>? _hubSub;
   static Timer? _reconcileTimer;
   static bool _busy = false;
 
@@ -52,41 +51,31 @@ class DeviceSecurityService {
         return d != null && !liveDevices.contains(d);
       }).toList();
 
-  /// تسجيل الإصغاء اللحظي + مطابقة أولى + دورية. صامتة دائماً (ناريَ ونسيان).
+  /// تسجيل الإصغاء اللحظي + مطابقة أولى + دورية. صامتة دائماً (نارِيَ ونسيان).
+  /// الإصغاء عبر مركز Realtime الواحد (1.2.0) — بلا قناة مستقلة ولا انضمام
+  /// جديد للخادم، والمفتاح مالك واحد فالتسجيل المكرر يُرفض (تقليم التسريب)
   static Future<void> attach() async {
-    if (_channel != null) return;
-    try {
-      _channel = supabase
-          .channel('wasl-device-security')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.delete,
-            schema: 'public',
-            table: 'devices',
-            callback: (payload) {
-              final id = payload.oldRecord['id'];
-              if (id is String && id.isNotEmpty) {
-                unawaited(E2eService.dropDeviceSessions({id}));
-              }
-            },
-          )
-          .subscribe();
-      unawaited(reconcile());
-      _reconcileTimer =
-          Timer.periodic(const Duration(minutes: 10), (_) => reconcile());
-    } catch (_) {}
+    if (_hubSub != null) return;
+    await RealtimeHubService.start(); // قناة واحدة — إعادة الاستدعاء لا شيء
+    if (!RealtimeHubService.registry.attach('device-security')) return;
+    _hubSub = RealtimeHubService.devicesRemoved.listen((row) {
+      final id = row['id'];
+      if (id is String && id.isNotEmpty) {
+        unawaited(E2eService.dropDeviceSessions({id}));
+      }
+    });
+    unawaited(reconcile());
+    _reconcileTimer =
+        Timer.periodic(const Duration(minutes: 10), (_) => reconcile());
   }
 
   /// إلغاء الإصغاء (عند الخروج من الحساب)
   static Future<void> detach() async {
     _reconcileTimer?.cancel();
     _reconcileTimer = null;
-    final ch = _channel;
-    _channel = null;
-    if (ch != null) {
-      try {
-        await supabase.removeChannel(ch);
-      } catch (_) {}
-    }
+    await _hubSub?.cancel();
+    _hubSub = null;
+    RealtimeHubService.registry.detach('device-security');
   }
 
   /// مطابقة الجلسات المخزنة مع الأجهزة الحية (شبكة أمان البث اللحظي)

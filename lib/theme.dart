@@ -15,8 +15,8 @@ class WaslColors {
   static const lightGlass = Color(0x146366F1); // نيلة خفيفة تعمل على الفاتح
   static const ink = Color(0xFF1A2033); // نص أساسي على الفاتح
   static const ink2 = Color(0xFF5A6478); // نص ثانوي على الفاتح
-  static const ink3 = Color(0xFF7A8399); // نص خافت على الفاتح
-  static const ink4 = Color(0xFF9AA3B5); // نص شبه معطل على الفاتح
+  static const ink3 = Color(0xFF6B7590); // نص خافت على الفاتح — WCAG AA نص كبير ≥3:1 (صُدّل 1.2.0)
+  static const ink4 = Color(0xFF7D87A0); // نص شبه معطل على الفاتح — WCAG AA كبير ≥3:1 (صُدّل 1.2.0)
   static const lightBubble = Color(0xFFE7EBF5); // فقاعة الطرف الآخر على الفاتح
 
   static const gradient = LinearGradient(

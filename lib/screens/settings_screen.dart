@@ -15,6 +15,7 @@ import '../services/offline_queue_service.dart';
 import '../services/on_device_model_service.dart';
 import '../services/platform_name.dart';
 import '../services/presence_service.dart';
+import '../services/realtime_hub_service.dart';
 import '../services/push_service.dart';
 import '../services/pwa_service.dart';
 import '../services/smart_order_service.dart';
@@ -1014,6 +1015,11 @@ class _MetricsTile extends StatelessWidget {
                     '${MediaCacheService.lru.hits} / ${MediaCacheService.lru.misses}'),
                 row('إخلاءات بالسقف', '${MediaCacheService.lru.evictions}'),
                 row('محفوظات الطابور بلا شبكة', '${OfflineQueueService.count.value}'),
+                const Divider(height: 20, indent: 20, endIndent: 20),
+                row('قناة Realtime الواحدة (1.2.0)',
+                    RealtimeHubService.isLive ? 'حية' : 'غير حية الآن'),
+                row(RealtimeHubService.registry.statsLabel(),
+                    '${RealtimeHubService.registry.attachCount('call-watch') + RealtimeHubService.registry.attachCount('device-security') + RealtimeHubService.registry.attachCount('chats-list') + RealtimeHubService.registry.attachCount('calls-history')} إلحاقاً'),
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
                   child: Align(
