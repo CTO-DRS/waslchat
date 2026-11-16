@@ -72,6 +72,17 @@ enum VerifyScanResult {
 ///   HKDF بمسار info مستقل 'wasl-x3dh-pq-v1' — الطرف بلا مفاتيح كمومية
 ///   (تطبيق قديم) يبقى على المسار الكلاسيكي حرفياً ولا يتأثر.
 ///
+/// المرحلة 15 أ — الأمان العميق (1.5.0+67، ترحيل 037): توقيع المفاتيح الأولية
+/// Ed25519 — إغلاق البند الوحيد المفتوح في التقوية (E2EE_PLAN §9، البند المخطط
+/// أول مرحلة 15 في GRAND_PLAN_2). كل جهاز يملك زوج توقيع Ed25519 نقي (حزمة
+/// cryptography نفسها — صفر اعتماديات جديدة) يُنشر عامه في
+/// devices.signing_public_key ويوقّع به كل مفتاح أولي يرفعه (المادة الموقَّعة:
+/// 'wasl-prekey-sig-v1' + المفتاح الأولي + الكمومي المرافق)، والمبادر يتحقق
+/// التوقيع قبل قبول المفتاح المسحوب — فشل التحقق يعني عبثاً وسيطياً فيُهمل
+/// الجهاز بلا هبوط كلاسيكي، وغياب التوقيع (تطبيق قديم) يبقى على التوافق السابق
+/// حرفياً. ونشر مفتاح التوقيع حدث مُلحَّص بشفافية المفاتيح (النوع الخامس
+/// signing_publish — دالة الإلحاح المطورة في 037).
+///
 /// المرحلة 2 — المجموعات الخاصة:
 /// - مفتاح مجموعة عشوائي 32B يثبّته مؤسس المجموعة أول مرة (دالة RPC بقفل استشاري
 ///   تمنع تثبيت مفتاحين متنافسين)، ويُغلَّف لكل عضو بـ HKDF(X25519(المُغلّف↔العضو)).
@@ -989,6 +1000,8 @@ class E2eService {
 
   static const _deviceIdKey = 'e2e_device_id';
   static const _devicePrivKey = 'e2e_device_priv_v1';
+  // توقيع المفاتيح الأولية (المرحلة 15 أ — 1.5.0): زوج Ed25519 لكل جهاز
+  static const _deviceSignPrivKey = 'e2e_device_sign_priv_v1';
   static const _r3Prefix = 'e2e_r3_';
 
   /// حجم مخزون المفاتيح الأولية غير المستهلكة لكل جهاز
@@ -999,6 +1012,7 @@ class E2eService {
 
   static String? _deviceId;
   static SimpleKeyPair? _devicePair;
+  static SimpleKeyPair? _deviceSignPair;
   static final Map<String, V3MultiSession> _v3Cache = {};
   static final Map<String, (List<DeviceRow>, DateTime)> _devicesCache = {};
   static final Map<String, (int, DateTime)> _peerVerCache = {};
@@ -1068,6 +1082,59 @@ class E2eService {
         value: base64Encode(await made.extractPrivateKeyBytes()));
     _deviceId = nid;
     _devicePair = made;
+    // توقيع المفاتيح الأولية (المرحلة 15 أ): هوية جديدة = زوج توقيع جديد كلياً
+    _deviceSignPair = null;
+    await _storage.delete(key: _deviceSignPrivKey);
+    await _loadSigningPair();
+  }
+
+  /// زوج توقيع Ed25519 لهذا الجهاز — تحميل من المخزن الآمن أو توليد وتخزين.
+  /// الجهاز المسجل قبل 1.5.0 يولد زوجه عند أول تحديث ثم يثبت للأبد،
+  /// والخاص (البذرة) لا يغادر المخزن الآمن إطلاقاً.
+  static Future<SimpleKeyPair> _loadSigningPair() async {
+    final cached = _deviceSignPair;
+    if (cached != null) return cached;
+    final seedB64 = await _storage.read(key: _deviceSignPrivKey);
+    if (seedB64 != null && seedB64.isNotEmpty) {
+      try {
+        final pair =
+            await RatchetCrypto.signingKeyPairFromSeed(base64Decode(seedB64));
+        _deviceSignPair = pair;
+        return pair;
+      } catch (_) {}
+    }
+    final pair = await RatchetCrypto.signingNewPair();
+    await _storage.write(
+        key: _deviceSignPrivKey,
+        value: base64Encode(await pair.extractPrivateKeyBytes()));
+    _deviceSignPair = pair;
+    return pair;
+  }
+
+  /// مفتاح التوقيع العام لهذا الجهاز (b64) — يُنشر في devices.signing_public_key
+  static Future<String?> mySigningPubB64() async {
+    try {
+      final p = await _loadSigningPair();
+      return base64Encode((await p.extractPublicKey()).bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// تحقق نقي من توقيع مفتاح أولي بجهاز الطرف — منشور للاختبار وإعادة الاستخدام.
+  /// أي إدخال معطوب (b64 تالف) يعيد false بلا استثناءات: فشل قرار لا استثناء.
+  static Future<bool> verifyPrekeySignature({
+    required String signingPubB64,
+    required String signatureB64,
+    required String prekeyPubB64,
+    String? pqPubB64,
+  }) async {
+    try {
+      return await RatchetCrypto.verifyB64(signingPubB64, signatureB64,
+          RatchetCrypto.prekeySigningPayload(prekeyPubB64, pqPubB64));
+    } catch (_) {
+      return false;
+    }
   }
 
   static String _deviceName() {
@@ -1085,7 +1152,7 @@ class E2eService {
       var (id, pair) = await _loadDevice();
       final row = await supabase
           .from('devices')
-          .select('id, revoked_at')
+          .select('id, revoked_at, signing_public_key')
           .eq('id', id)
           .maybeSingle();
       if (row == null || row['revoked_at'] != null) {
@@ -1094,6 +1161,14 @@ class E2eService {
       }
       final pub = base64Encode((await pair.extractPublicKey()).bytes);
       final devFp = await fingerprint(base64Decode(pub));
+      // مفتاح التوقيع العام (المرحلة 15 أ — توقيع المفاتيح الأولية):
+      // يُنشر مع التسجيل الجديد، ويُنشر للأجهزة القديمة المسجلة قبل 1.5.0
+      // عند أول تحديث (نشر صامت لمفتاح عام فقط — لا يمس أي مفتاح قائم)
+      final signPub = await mySigningPubB64();
+      String? signFp;
+      if (signPub != null) {
+        signFp = await fingerprint(base64Decode(signPub));
+      }
       if (row == null || row['revoked_at'] != null) {
         await supabase.from('devices').upsert({
           'id': id,
@@ -1102,14 +1177,29 @@ class E2eService {
           'platform': devicePlatformLabel(),
           'identity_public_key': pub,
           'key_fp': devFp,
+          if (signPub != null) 'signing_public_key': signPub,
         });
         // شفافية المفاتيح: تسجيل الجهاز حدث مُلحَّص (الظهور الدوري لا يسجل)
         unawaited(KeyTransparencyService.log(
             kind: 'device_register', fingerprint: devFp, deviceId: id));
+        // ونشر مفتاح التوقيع حدث مُلحَّص مستقل (النوع الخامس — 037)
+        if (signFp != null) {
+          unawaited(KeyTransparencyService.log(
+              kind: 'signing_publish', fingerprint: signFp, deviceId: id));
+        }
       } else {
         await supabase.from('devices').update({
           'last_seen_at': DateTime.now().toUtc().toIso8601String(),
         }).eq('id', id);
+        // جهاز قديم بلا مفتاح توقيع منشور — نشره لمرة واحدة عند الترقية
+        final hasSign = (row['signing_public_key'] as String?) ?? '';
+        if (signPub != null && hasSign.isEmpty) {
+          await supabase
+              .from('devices')
+              .update({'signing_public_key': signPub}).eq('id', id);
+          unawaited(KeyTransparencyService.log(
+              kind: 'signing_publish', fingerprint: signFp ?? '', deviceId: id));
+        }
       }
       _devicesCache.remove(uid);
       // رفع علم القدرة v3 (لا ننزل به أبداً — الأجهزة المسجلة تدعم v3)
@@ -1158,18 +1248,26 @@ class E2eService {
       if (toMake.isNotEmpty) {
         // نولّد الأزواج محلياً (X25519 لكل مفتاح أولي + ML-KEM-768 مرافق له —
         // المرحلة 10: بدء جلسات ما بعد الكم الهجين) ثم نرفعها ونعرف الخاص
-        // بمعرّف الخادم عبر مطابقة العام
+        // بمعرّف الخادم عبر مطابقة العام — وكل مفتاح يُوقَّع Ed25519 بمفتاح
+        // توقيع الجهاز (المرحلة 15 أ) فلا يستبدله وسيط خادمي بصمت
+        final signPair = await _loadSigningPair();
         final pairs = <SimpleKeyPair>[];
         final pqPrivs = <List<int>>[];
         for (final row in toMake) {
           final p = await RatchetCrypto.newKeyPair();
           pairs.add(p);
-          row['public_key'] = base64Encode((await p.extractPublicKey()).bytes);
+          final pubB64 = base64Encode((await p.extractPublicKey()).bytes);
+          row['public_key'] = pubB64;
           final pq = RatchetCrypto.pqGenerate();
           if (pq != null) {
             row['pq_public_key'] = base64Encode(pq.$1);
+            row['signature'] = await RatchetCrypto.signB64(
+                signPair,
+                RatchetCrypto.prekeySigningPayload(pubB64, base64Encode(pq.$1)));
             pqPrivs.add(pq.$2);
           } else {
+            row['signature'] = await RatchetCrypto.signB64(
+                signPair, RatchetCrypto.prekeySigningPayload(pubB64, null));
             pqPrivs.add(const []);
           }
         }
@@ -1254,7 +1352,8 @@ class E2eService {
     try {
       final rows = await supabase
           .from('devices')
-          .select('id, name, platform, identity_public_key, key_fp, last_seen_at')
+          .select(
+              'id, name, platform, identity_public_key, key_fp, last_seen_at, signing_public_key')
           .eq('user_id', userId)
           .filter('revoked_at', 'is', null)
           .order('created_at');
@@ -1270,6 +1369,7 @@ class E2eService {
           pub: pub,
           lastSeen: DateTime.tryParse((r['last_seen_at'] as String?) ?? '') ??
               DateTime.now(),
+          signingPub: (r['signing_public_key'] as String?) ?? '',
         ));
       }
     } catch (_) {}
@@ -1321,6 +1421,25 @@ class E2eService {
     final pkB64 = (row['o_public_key'] ?? row['public_key']) as String?;
     final pqPubB64 = (row['o_pq_public_key'] ?? row['pq_public_key']) as String?;
     if (keyId == null || pkB64 == null) return null;
+    // توقيع المفاتيح الأولية (المرحلة 15 أ — 1.5.0، ترحيل 037): إن نشر جهاز
+    // الطرف مفتاح توقيع عام والتوقيع حاضر في السحب فالتحقق إلزامي قبل القبول —
+    // فشله يعني عبثاً وسيطياً فيُهمل هذا الجهاز في هذه الرسالة بلا هبوط
+    // كلاسيكي (استخدام مفتاح أولي معبوث أسوأ من فشل جلسة). غياب التوقيع أو
+    // مفتاح التوقيع (تطبيق الطرف قديم) يبقى على التوافق السابق حرفياً.
+    final sigB64 = (row['o_signature'] ?? row['signature']) as String?;
+    final peerSignPub = peerDev.signingPub;
+    if (sigB64 != null &&
+        sigB64.isNotEmpty &&
+        peerSignPub != null &&
+        peerSignPub.isNotEmpty) {
+      final ok = await E2eService.verifyPrekeySignature(
+        signingPubB64: peerSignPub,
+        signatureB64: sigB64,
+        prekeyPubB64: pkB64,
+        pqPubB64: pqPubB64,
+      );
+      if (!ok) return null;
+    }
     final myDevPubB64 = base64Encode((await myPair.extractPublicKey()).bytes);
     final ek = await RatchetCrypto.newKeyPair();
     // الهجين الكلاسيكي + الكمومي: إن نشر الطرف مفتاح ML-KEM نغلف سرّاً كمومياً
@@ -2065,6 +2184,7 @@ class DeviceRow {
     required this.fp,
     required this.pub,
     required this.lastSeen,
+    this.signingPub,
   });
 
   final String id; // معرف الجهاز (uuid يولده التطبيق)
@@ -2073,6 +2193,7 @@ class DeviceRow {
   final String fp; // بصمة المفتاح العام (16 hex)
   final String pub; // المفتاح العام (X25519 — ليس سراً)
   final DateTime lastSeen;
+  final String? signingPub; // مفتاح التوقيع العام Ed25519 (1.5.0 — ليس سراً)
 }
 
 /// حالة مفاتيح التشفير على هذا الجهاز

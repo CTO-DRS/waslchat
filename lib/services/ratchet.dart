@@ -7,8 +7,10 @@ import 'package:pqcrypto/pqcrypto.dart';
 /// السرية الأمامية للمحادثات الخاصة — النواة النقية (بلا Flutter ولا Supabase).
 ///
 /// التصميم وفق مواصفة Double Ratchet (Marlinspike–Perrin) مع تبادل X3DH بثلاث
-/// خطوات DH (بلا مفتاح توقيع مسبق — المفتاح الأولي العشوائي نفسه هو مفتاح
-/// التدوير الأول، وانتحال الهوية يُكشف برمز الأمان وتوثيق QR المنفذ في 0.7.5):
+/// خطوات DH — والمفاتيح الأولية **موقّعة Ed25519** منذ 1.5.0 (المرحلة 15 أ):
+/// كل جهاز يملك زوج توقيع ينشر عامه ويوقّع مفاتيحه الأولية به، والمبادر يتحقق
+/// قبل القبول — فلا استبدال صامت للمفاتيح من وسيط خادمي (وانتحال الهوية كله
+/// يبقى يُكشف برمز الأمان وتوثيق QR المنفذ في 0.7.5):
 ///
 ///   DH1 = X25519(هوية المبادر، هوية الطرف)
 ///   DH2 = X25519(المؤقت، هوية الطرف)
@@ -84,6 +86,63 @@ class RatchetCrypto {
       return ss;
     } catch (_) {
       return null;
+    }
+  }
+
+  // ---------- توقيع المفاتيح الأولية Ed25519 (المرحلة 15 أ — 1.5.0، ترحيل 037) ----------
+  //
+  // إغلاق البند الوحيد المفتوح في التقوية (E2EE_PLAN §9): كل جهاز يملك زوج
+  // توقيع Ed25519 (نقي Dart عبر حزمة cryptography نفسها — صفر اعتماديات
+  // جديدة) ينشر عامه في devices.signing_public_key ويوقّع به كل مفتاح أولي
+  // يرفعه إلى مخزونه، والطرف المبادر يتحقق التوقيع قبل قبول المفتاح — فلا
+  // استبدال صامت للمفاتيح الأولية من وسيط خادمي. التوقيع 64 بايت والمفتاح
+  // العام 32 بايت.
+
+  static final Ed25519 _ed25519 = Ed25519();
+  static const prekeySigDomain = 'wasl-prekey-sig-v1';
+
+  /// زوج توقيع Ed25519 جديد لجهاز — الخاص لا يغادر المخزن الآمن.
+  static Future<SimpleKeyPair> signingNewPair() => _ed25519.newKeyPair();
+
+  /// استعادة زوج التوقيع من البذرة المخزنة (32 بايت).
+  static Future<SimpleKeyPair> signingKeyPairFromSeed(List<int> seed) =>
+      _ed25519.newKeyPairFromSeed(seed);
+
+  /// المادة الموقَّعة: بادئة نطاق صارمة + المفتاح الأولي + الكمومي المرافق
+  /// (إن وُجد) — كل غياب أو اختلاف بايت واحد يكسر التحقق.
+  static Uint8List prekeySigningPayload(String prekeyPubB64, String? pqPubB64) {
+    final out = BytesBuilder();
+    out.add(utf8.encode(prekeySigDomain));
+    out.add(base64Decode(prekeyPubB64));
+    if (pqPubB64 != null && pqPubB64.isNotEmpty) {
+      out.add(base64Decode(pqPubB64));
+    }
+    return out.toBytes();
+  }
+
+  /// توقيع المادة بزوج توقيع الجهاز — نص b64 (88 حرفاً).
+  static Future<String> signB64(SimpleKeyPair pair, List<int> data) async {
+    final sig = await _ed25519.sign(data, keyPair: pair);
+    return base64Encode(sig.bytes);
+  }
+
+  /// تحقق التوقيع بمفتاح توقيع الجهاز العام — أي إدخال معطوب يعيد false
+  /// (لا استثناءات تتصاعد: فشل التحقق قرار لا استثناء).
+  static Future<bool> verifyB64(
+      String pubB64, String sigB64, List<int> data) async {
+    try {
+      return await _ed25519.verify(
+        data,
+        signature: Signature(
+          base64Decode(sigB64),
+          publicKey: SimplePublicKey(
+            base64Decode(pubB64),
+            type: KeyPairType.ed25519,
+          ),
+        ),
+      );
+    } catch (_) {
+      return false;
     }
   }
 

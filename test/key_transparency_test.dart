@@ -105,7 +105,7 @@ void main() {
     expect(at, 1);
   });
 
-  test('التسميات العربية للأربعة معروفة — والغير معروف يمر صادقاً كما هو', () {
+  test('التسميات العربية للخمسة معروفة — والغير معروف يمر صادقاً كما هو', () {
     expect(KeyTransparencyService.kindLabel('identity_publish'), 'نشر مفتاح الحساب');
     expect(KeyTransparencyService.kindLabel('device_register'), 'تسجيل جهاز');
     expect(KeyTransparencyService.kindLabel('device_remove'), 'إزالة جهاز');
@@ -113,10 +113,19 @@ void main() {
     expect(KeyTransparencyService.kindLabel('weird_kind'), 'weird_kind');
     expect(KeyTransparencyService.kindDetail('device_remove'),
         contains('مخزون مفاتيحه'));
-    // الأنواع الأربعة حصراً — مطابقة قيد الترحيل
+    // الأنواع الخمسة حصراً — مطابقة قيد الترحيل (signing_publish الخامس أُضاف
+    // بترحيل 037 — المرحلة 15 أ: نشر مفتاح توقيع الجهاز حدث مُلحَّص)
     expect(
         KeyTransparencyService.kinds,
-        ['identity_publish', 'device_register', 'device_remove', 'key_reset']);
+        [
+          'identity_publish',
+          'device_register',
+          'device_remove',
+          'key_reset',
+          'signing_publish',
+        ]);
+    expect(KeyTransparencyService.kindLabel('signing_publish'),
+        'نشر مفتاح توقيع جهاز');
   });
 
   test('fromRow: الصف السليم يُقرأ والناقص حقله الجوهرية يُرفض بلا استثناء', () {

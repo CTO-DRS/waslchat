@@ -74,12 +74,14 @@ class KeyTransparencyService {
 
   static final Sha256 _sha = Sha256();
 
-  /// الأنواع الأربعة المعروفة — التطابق حرفي مع قيد الترحيل
+  /// الأنواع الخمسة المعروفة — التطابق حرفي مع قيد الترحيل
+  /// (signing_publish الخامس أُضاف بترحيل 037 — المرحلة 15 أ)
   static const kinds = [
     'identity_publish',
     'device_register',
     'device_remove',
     'key_reset',
+    'signing_publish',
   ];
 
   /// التجزئة القياسية لصف — نقية ومطابقة للدالة الخادمية بايتاً بايتاً
@@ -126,6 +128,8 @@ class KeyTransparencyService {
         return 'إزالة جهاز';
       case 'key_reset':
         return 'مفتاح جديد كلياً';
+      case 'signing_publish':
+        return 'نشر مفتاح توقيع جهاز';
       default:
         return kind;
     }
@@ -142,6 +146,8 @@ class KeyTransparencyService {
         return 'أُزيل جهاز وحُذف مخزون مفاتيحه من الخادم فوراً';
       case 'key_reset':
         return 'هوية جديدة كلياً بلا استعادة — الرسائل القديمة لن تُقرأ';
+      case 'signing_publish':
+        return 'مفتاح توقيع Ed25519 نُشر للجهاز — مفاتيحه الأولية موقّعة بيه (037)';
       default:
         return 'حدث مفاتيح';
     }
