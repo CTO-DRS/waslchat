@@ -5,10 +5,13 @@ import '../config.dart';
 import '../services/app_icon_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/desktop_notify_service.dart';
+import '../services/jank_service.dart';
 import '../services/l10n.dart';
 import '../services/link_preview_service.dart';
 import '../services/locale_service.dart';
+import '../services/media_service.dart';
 import '../services/metrics_service.dart';
+import '../services/offline_queue_service.dart';
 import '../services/on_device_model_service.dart';
 import '../services/platform_name.dart';
 import '../services/presence_service.dart';
@@ -960,10 +963,18 @@ class _MetricsTile extends StatelessWidget {
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
-        child: ValueListenableBuilder<int>(
-          valueListenable: MetricsService.version,
-          builder: (context, __, ___) {
+        // المرحلة 13 أ (1.1.0): ثلاثة مصادر أرقام تتحدث لحظياً —
+        // المؤشرات القائمة والسقوط الإطاري الجديد وذاكرة الوسائط المضبوطة
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            MetricsService.version,
+            JankService.version,
+            MediaCacheService.version,
+            OfflineQueueService.count,
+          ]),
+          builder: (context, ___) {
             final s = MetricsService.snapshot;
+            final j = JankService.store;
             final row = (String label, String value) => Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
@@ -975,42 +986,93 @@ class _MetricsTile extends StatelessWidget {
                             fontFeatures: [FontFeature.tabularFigures()])),
                   ]),
                 );
-            return Column(mainAxisSize: MainAxisSize.min, children: [
-              const Padding(
-                padding: EdgeInsets.all(14),
-                child: Text('مؤشرات الأداء على جهازك',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-              ),
-              row('الفتح البارد (أحدث)', _fmt(s.coldLastMs)),
-              row('الفتح البارد (متوسط ${s.coldCount} عينة)', _fmt(s.coldAvgMs)),
-              row('تأكيد الخادم (متوسط ${s.deliverCount} عينة)',
-                  _fmt(s.deliverAvgMs)),
-              row('تأكيد الخادم (أعلى 95%)', _fmt(s.deliverP95Ms)),
-              row('أخطاء محلية عبرت معالجات Flutter', '${s.errors}'),
-              row('عدد مرات فتح التطبيق', '${s.opens}'),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Text(
-                  'المنهجية الصادقة: الفتح البارد من أول سطر في التشغيل إلى نهاية رسم أول إطار، '
-                  'وزمن «تأكيد الخادم» هو دورة طلب الإدراج واستجابته وليس زمن وصول الرسالة للطرف الآخر، '
-                  'والأخطاء هي عدّ ما عبر معالجات الخطأ في جهازك (ليست معدل أعطال Crashlytics الذي يقرؤه المالك من وحدة التحكم). '
-                  'كل الأرقام تخزن محلياً في جهازك ولا يُرفع أي منها لأي خادم.',
-                  style: TextStyle(fontSize: 11.5, height: 1.7),
+            return SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: Text('مؤشرات الأداء على جهازك',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 6, 20, 16),
-                child: TextButton.icon(
-                  icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                  label: const Text('إعادة تعيين المؤشرات'),
-                  onPressed: () async {
-                    await MetricsService.reset();
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
+                row('الفتح البارد (أحدث)', _fmt(s.coldLastMs)),
+                row('الفتح البارد (متوسط ${s.coldCount} عينة)', _fmt(s.coldAvgMs)),
+                row('تأكيد الخادم (متوسط ${s.deliverCount} عينة)',
+                    _fmt(s.deliverAvgMs)),
+                row('تأكيد الخادم (أعلى 95%)', _fmt(s.deliverP95Ms)),
+                row('أخطاء محلية عبرت معالجات Flutter', '${s.errors}'),
+                row('عدد مرات فتح التطبيق', '${s.opens}'),
+                const Divider(height: 20, indent: 20, endIndent: 20),
+                row('نسبة الإطارات المتعثرة (آخر ${j.frames.length} إطار)',
+                    '${j.jankRatioPercent()}%'),
+                row('متوسط زمن الإطار (بناء + رستر)', _fmt(j.avgMs())),
+                row('الإطارات أعلى 95%', _fmt(j.percentile(0.95))),
+                row('أثقل إطار في النافذة', _fmt(j.worstMs())),
+                const Divider(height: 20, indent: 20, endIndent: 20),
+                row('ذاكرة روابط الوسائط (الأحدث يبقى)',
+                    '${MediaCacheService.lru.length}/${MediaCacheService.cap}'),
+                row('إصابات الذاكرة / إخفاقها',
+                    '${MediaCacheService.lru.hits} / ${MediaCacheService.lru.misses}'),
+                row('إخلاءات بالسقف', '${MediaCacheService.lru.evictions}'),
+                row('محفوظات الطابور بلا شبكة', '${OfflineQueueService.count.value}'),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text('سقف ذاكرة روابط الوسائط — الأحدث استعمالاً يبقى والأقدم يُخلى، والمسح لا يمس أصولك على الخادم أبداً:',
+                        style: TextStyle(fontSize: 12.5)),
+                  ),
                 ),
-              ),
-            ]);
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(children: [
+                    for (final cap in MediaCacheService.allowedCaps) ...[
+                      ChoiceChip(
+                        label: Text('$cap'),
+                        selected: MediaCacheService.cap == cap,
+                        onSelected: (_) => MediaCacheService.setCap(cap),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    const Spacer(),
+                    TextButton.icon(
+                      icon: const Icon(Icons.cleaning_services_rounded, size: 16),
+                      label: const Text('مسح الذاكرة'),
+                      onPressed: () => MediaCacheService.clear(),
+                    ),
+                  ]),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Text(
+                    'المنهجية الصادقة: الفتح البارد من أول سطر في التشغيل إلى نهاية رسم أول إطار، '
+                    'وزمن «تأكيد الخادم» هو دورة طلب الإدراج واستجابته وليس زمن وصول الرسالة للطرف الآخر، '
+                    'والأخطاء هي عدّ ما عبر معالجات الخطأ في جهازك (ليست معدل أعطال Crashlytics الذي يقرؤه المالك من وحدة التحكم). '
+                    'الإطار المتعثر هو ما تجاوز 32 مللي ثانية (أبطأ من نصف معدل 60fps) وزمنه مجموع البناء والرستر، '
+                    'وذاكرة الوسائط تخزن روابط موقعة مؤقتة فقط لا بايتات ملفات. '
+                    'كل الأرقام تخزن محلياً في جهازك ولا يُرفع أي منها لأي خادم.',
+                    style: TextStyle(fontSize: 11.5, height: 1.7),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 16),
+                  child: Wrap(spacing: 6, children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                      label: const Text('إعادة تعيين المؤشرات'),
+                      onPressed: () async {
+                        await MetricsService.reset();
+                        await JankService.reset();
+                      },
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text('إغلاق'),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ]),
+                ),
+              ]),
+            );
           },
         ),
       ),

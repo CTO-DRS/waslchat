@@ -36,6 +36,7 @@ import '../services/link_preview_service.dart';
 import '../services/daily_summary_service.dart';
 import '../services/local_ai_service.dart';
 import '../services/local_translate_service.dart';
+import '../services/offline_queue_service.dart';
 import '../services/promise_reminder_service.dart';
 import '../services/style_assist_service.dart';
 import '../services/saved_service.dart';
@@ -1209,10 +1210,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       MetricsService.recordDelivery(
           DateTime.now().difference(t0).inMilliseconds);
     } catch (e) {
-      _snack(ModerationService.sendErrorHint(e) ??
-          (BlockService.isBlockedError(e)
-              ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
-              : 'تعذّر إرسال الرسالة'));
+      // المرحلة 13 أ (1.1.0): الحظر والكتم والسياسة لا يعاد المحاولة فيه —
+      // وما عداها (انقطاع الشبكة وأشباهه) يدخل الطابور ويرسل تلقائياً بالترتيب
+      final hint = ModerationService.sendErrorHint(e);
+      if (hint != null || BlockService.isBlockedError(e)) {
+        _snack(hint ?? 'لا يمكن الإرسال — الحظر مفعّل بينكما');
+      } else {
+        final q = await OfflineQueueService.enqueueText(
+          conversationId: widget.conversationId,
+          content: payload,
+          replyTo: replyTo?['id'] as String?,
+        );
+        _snack(q
+            ? 'انقطع الاتصال — حُفظت رسالتك على جهازك وستُرسل تلقائياً عند عودته'
+            : 'تعذّر إرسال الرسالة — طابور عدم الاتصال ممتلئ');
+      }
     }
   }
 
@@ -1227,17 +1239,20 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     String? groupId,
   }) async {
     setState(() => _uploading = true);
+    // المرحلة 13 أ (1.1.0): تعريفات خارج try كي يبنيها الطابور عند الفشل
+    final replyTo = _replyTo;
+    var content = '';
+    var metaMap = meta == null
+        ? <String, dynamic>{
+            if (durationMs != null) 'duration': durationMs,
+          }
+        : Map<String, dynamic>.from(meta);
+    var payload = bytes;
+    var upExt = ext;
+    var upType = contentType;
+    var dmRatchet = false;
+    String? uploadedPath;
     try {
-      var content = '';
-      var metaMap = meta == null
-          ? <String, dynamic>{
-              if (durationMs != null) 'duration': durationMs,
-            }
-          : Map<String, dynamic>.from(meta);
-      var payload = bytes;
-      var upExt = ext;
-      var upType = contentType;
-      var dmRatchet = false;
       if (_e2e) {
         // المرحلة 10 (0.24.0): الوسائط في الخاص على الجلسة المتدرجة — كل وسيط
         // بمفتاح محتوى عشوائي خاص به (mk) يُغلَّف داخل ميتا الرسالة المشفرة
@@ -1279,7 +1294,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         ext: upExt,
         contentType: upType,
       );
-      final replyTo = _replyTo;
+      uploadedPath = path;
       // المرحلة 12 ب (0.29.0): زمن تأكيد الخادم للوسائط أيضاً — قياس محلي صادق
       final t0 = DateTime.now();
       final ins = await supabase.from('messages').insert({
@@ -1305,10 +1320,31 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         _viewOnce = false;
       });
     } catch (e) {
-      _snack(ModerationService.sendErrorHint(e) ??
-          (BlockService.isBlockedError(e)
-              ? 'لا يمكن الإرسال — الحظر مفعّل بينكما'
-              : 'تعذّر رفع الملف'));
+      // المرحلة 13 أ (1.1.0): الحظر والكتم والسياسة لا يعاد المحاولة فيه —
+      // وما عداها يدخل الطابور (الوسيط الذي رُفع يُعاد استعمال مساره لا
+      // يُرفع ثانية) فيرسل تلقائياً بالترتيب عند عودة الشبكة
+      final hint = ModerationService.sendErrorHint(e);
+      if (hint != null || BlockService.isBlockedError(e)) {
+        _snack(hint ?? 'لا يمكن الإرسال — الحظر مفعّل بينكما');
+      } else {
+        final q = await OfflineQueueService.enqueueMedia(
+          conversationId: widget.conversationId,
+          bytes: payload,
+          type: type,
+          content: content,
+          ext: upExt,
+          contentType: upType,
+          uploadPath: uploadedPath,
+          durationMs: durationMs,
+          viewOnce: viewOnce,
+          groupId: groupId,
+          replyTo: replyTo?['id'] as String?,
+          rememberKey: dmRatchet ? jsonEncode(metaMap) : null,
+        );
+        _snack(q
+            ? 'انقطع الاتصال — حُفظت الرسالة على جهازك وستُرسل تلقائياً عند عودته'
+            : 'تعذّر رفع الملف — طابور عدم الاتصال ممتلئ');
+      }
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -3555,6 +3591,54 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                     ],
                   ),
                 ),
+              // المرحلة 13 أ (1.1.0): شريط الطابور الصادق — ما حُفظ على جهازك
+              // بانتظار الشبكة معروض بعدد وحقيقة إرسال آلي مرتّب، بلا ادعاء
+              ValueListenableBuilder<int>(
+                valueListenable: OfflineQueueService.count,
+                builder: (context, n, _) {
+                  if (n == 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.orange.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(children: [
+                        ValueListenableBuilder<bool>(
+                          valueListenable: OfflineQueueService.draining,
+                          builder: (context, busy, __) => Icon(
+                            busy
+                                ? Icons.cloud_sync_rounded
+                                : Icons.cloud_off_rounded,
+                            size: 16,
+                            color: Colors.orange.shade700,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: OfflineQueueService.draining,
+                            builder: (context, busy, __) => Text(
+                              busy
+                                  ? 'جارٍ إرسال $n محفوظة بالترتيب…'
+                                  : '$n رسالة محفوظة على جهازك بانتظار الشبكة — تُرسل تلقائياً عند عودته بالترتيب نفسه',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Colors.orange.shade700),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  );
+                },
+              ),
               Padding(
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
               child: Row(children: [
