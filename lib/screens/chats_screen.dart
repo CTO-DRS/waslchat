@@ -16,6 +16,7 @@ import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/motion.dart';
 import 'ai_screen.dart';
+import 'ask_wasl_screen.dart';
 import 'chat_screen.dart';
 import 'create_group_screen.dart';
 import 'new_chat_screen.dart';
@@ -402,6 +403,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
         title: Text(_showArchived ? 'المؤرشفة' : 'المحادثات',
             style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
         actions: [
+          IconButton(
+            tooltip: 'اسأل وصل — أرشيفك يجيبك محلياً',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const AskWaslScreen())),
+            icon: const Icon(Icons.question_answer_rounded),
+          ),
           IconButton(
             tooltip: 'بحث موحد في كل المحادثات',
             onPressed: () => Navigator.push(context,

@@ -34,6 +34,7 @@ import '../services/forward_service.dart';
 import '../services/image_edit_service.dart';
 import '../services/link_preview_service.dart';
 import '../services/daily_summary_service.dart';
+import '../services/weekly_summary_service.dart';
 import '../services/local_ai_service.dart';
 import '../services/local_translate_service.dart';
 import '../services/offline_queue_service.dart';
@@ -56,6 +57,7 @@ import '../widgets/media_bubbles.dart';
 import '../widgets/motion.dart';
 import '../widgets/report_dialog.dart';
 import 'album_preview_screen.dart';
+import 'ask_wasl_screen.dart';
 import 'call_screen.dart';
 import 'contact_screen.dart';
 import 'group_info_screen.dart';
@@ -211,6 +213,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   /// ويُخزن في المخزن الآمن على الجهاز حصراً — بلا أي شبكة
   final DailySummaryStore _dailyStore = DailySummaryStore();
   bool _dailyTried = false;
+  final WeeklySummaryStore _weeklyStore = WeeklySummaryStore();
 
   /// التذكيرات الذكية (المرحلة 9 ب — 0.23.0): مواعيد مكتشفة من الوارد
   /// ومُستبعداها المحفوظان على جهازك — نعرض أحدث كشف فقط
@@ -1998,6 +2001,79 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
   }
 
+  // ---------- الترجمة إلى لغات أخرى (المرحلة 14 أ — 1.3.0) ----------
+  /// منتقي اللغة السحابية: الإنجليزية والفرنسية والتركية والأردية والعربية —
+  /// نفس مسار الخادم (Gemini) بموافقة المستخدم القائمة على الترجمة السحابية.
+  Future<String?> _pickLanguage(String text) async {
+    final script = LocalTranslateService.detectScript(text);
+    final suggested = script == 'ar' ? 'en' : 'ar';
+    return showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('ترجمة إلى…'),
+        children: [
+          for (final e in const <(String, String, bool)>[
+            ('en', 'الإنجليزية', false),
+            ('fr', 'الفرنسية', true),
+            ('tr', 'التركية', true),
+            ('ur', 'الأردية', true),
+            ('ar', 'العربية', false),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, e.$1),
+              child: Row(children: [
+                Text(e.$2,
+                    style: TextStyle(
+                        fontWeight: e.$1 == suggested
+                            ? FontWeight.w800
+                            : FontWeight.w400)),
+                if (e.$1 == suggested)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(start: 6),
+                    child: Text('— مقترحة (كشف الكتابة على جهازك)',
+                        style: TextStyle(
+                            fontSize: 11.5, color: context.textTertiary)),
+                  ),
+                if (e.$3)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(start: 6),
+                    child: Text('(جديدة — تتطلب تحديث دالة الخادم)',
+                        style: TextStyle(
+                            fontSize: 11, color: context.textTertiary)),
+                  ),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// ترجمة رسالة إلى اللغة المختارة مع حارس صادق: إن عاد الرد بلغة لا تطابق
+  /// الطلب (خادم لم يُحدَّث بعد) تعلن الواجهة ذلك بدل عرض ترجمة خاطئة بصمت.
+  Future<void> _translateToOtherLanguage(String messageId, String text) async {
+    final target = await _pickLanguage(text);
+    if (target == null || !mounted) return;
+    if (target == 'ar' || target == 'en') {
+      _showAiResult('الترجمة', AiService.translate(text, target));
+      return;
+    }
+    _translating.add(messageId);
+    try {
+      final t = await AiService.translate(text, target);
+      if (!mounted) return;
+      if (!LocalTranslateService.resultMatchesTarget(t, target)) {
+        _snack('الخادم لم يُحدَّث لهذه اللغة بعد — يلزم نشر تحديث دالة ai '
+            '(مذكور في دفتر المهام). الترجمة إلى العربية والإنجليزية تعمل كالعادة');
+        return;
+      }
+      setState(() => _translations[messageId] = '🌐 $target: $t');
+    } catch (_) {
+      if (mounted) _snack('تعذرت الترجمة السحابية الآن — تحقق من الاتصال');
+    } finally {
+      _translating.remove(messageId);
+    }
+  }
+
   // ---------- الملخص اليومي المحلي (المرحلة 9 أ — 0.22.0) ----------
   /// يُستدعى بعد بناء القائمة مرة واحدة في الفتح: يقرأ ملخص اليوم من المخزن
   /// الآمن، وإن لم يوجد يبنى من رسائل اليوم المفكوكة ويُخزن — صمت تام عند أي فشل.
@@ -2059,6 +2135,46 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       return text;
     }
     return 'لا توجد رسائل اليوم بعد — الملخص يُبنى تلقائياً مع أول رسالة.';
+  }
+
+  // ---------- الملخص الأسبوعي المحلي (المرحلة 14 أ — 1.3.0) ----------
+  /// بناء ملخص الأسبوع (نافذة متدحرجة 7 أيام) من الرسائل المفكوكة — null
+  /// إن لم توجد رسائل نصية داخل النافذة — بلا أي شبكة كالملخص اليومي.
+  String? _buildWeeklySummaryFrom(List<Map<String, dynamic>> all) {
+    final now = DateTime.now();
+    final weekStart = now.subtract(const Duration(days: 7));
+    final lines = <WeeklyLine>[];
+    for (final m in all) {
+      final created =
+          DateTime.tryParse((m['created_at'] ?? '') as String)?.toLocal();
+      if (created == null || created.isBefore(weekStart) || created.isAfter(now)) {
+        continue;
+      }
+      if (m['deleted_at'] != null) continue;
+      final who = m['sender_id'] == _me ? 'أنت' : (_names[m['sender_id']] ?? 'عضو');
+      final type = (m['type'] ?? 'text') as String;
+      if (type == 'image' || type == 'voice' || type == 'video' || type == 'file') {
+        lines.add(WeeklyLine(who: who, text: '[وسائط]', createdAt: created, isMedia: true));
+        continue;
+      }
+      final plain = _textOf(m);
+      if (plain == null || plain.trim().isEmpty) continue;
+      lines.add(WeeklyLine(who: who, text: plain, createdAt: created));
+    }
+    return WeeklySummaryService.build(lines, now);
+  }
+
+  /// ملخص الأسبوع للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً.
+  Future<String> _weeklySummary() async {
+    final now = DateTime.now();
+    final stored = await _weeklyStore.load(widget.conversationId, now);
+    if (stored != null) return stored;
+    final text = _buildWeeklySummaryFrom(_allMsgs);
+    if (text != null) {
+      unawaited(_weeklyStore.save(widget.conversationId, text, now));
+      return text;
+    }
+    return 'لا توجد رسائل نصية كافية هذا الأسبوع بعد — الملخص يُبنى من رسائلك المفكوكة على جهازك.';
   }
 
   // ---------- الصياغة بأسلوبك (المرحلة 9 ب — 0.23.0) ----------
@@ -2272,6 +2388,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(
+              leading: const Icon(Icons.question_answer_rounded, color: WaslColors.teal),
+              title: const Text('اسأل وصل — من أرشيفك'),
+              subtitle: const Text(
+                  'يجيب من رسائلك المفكوكة على جهازك حصراً — بلا شبكة ولا ادعاء'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const AskWaslScreen()));
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.calendar_today_rounded, color: WaslColors.indigo),
               title: const Text('ملخص اليوم'),
               subtitle: const Text(
@@ -2279,6 +2406,16 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               onTap: () {
                 Navigator.pop(ctx);
                 _showAiResult('ملخص اليوم — على جهازك', _dailySummary());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.date_range_rounded, color: WaslColors.indigo),
+              title: const Text('ملخص الأسبوع'),
+              subtitle: const Text(
+                  'نافذة متدحرجة 7 أيام — يُبنى ويُخزن على جهازك — بلا أي شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ملخص الأسبوع — على جهازك', _weeklySummary());
               },
             ),
             ListTile(
@@ -2870,12 +3007,28 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             ),
           if (text != null)
             ListTile(
-              leading: const Icon(Icons.travel_explore_rounded, color: WaslColors.teal),
-              title: Text(arabic ? 'ترجمة محلية (قاموسية — بلا شبكة)' : 'ترجمة محلية (بلا شبكة)'),
-              subtitle: const Text('على جهازك حصراً — تغطية قاموسية أساسية قد تكون ناقصة'),
+              leading: const Icon(Icons.language_rounded, color: WaslColors.violet),
+              title: const Text('ترجمة إلى لغة أخرى…'),
+              subtitle: const Text(
+                  'سحابياً عبر خادم وصل بموافقتك القائمة — والنتيجة تُفحص محلياً أن لغتها طابقت طلبك'),
               onTap: () {
                 Navigator.pop(ctx);
-                final r = LocalTranslateService.translate(text, toEnglish: arabic);
+                _translateToOtherLanguage(m['id'] as String, text);
+              },
+            ),
+          if (text != null)
+            ListTile(
+              leading: const Icon(Icons.travel_explore_rounded, color: WaslColors.teal),
+              title: Text(
+                  LocalTranslateService.detectScript(text) == 'ar'
+                      ? 'ترجمة محلية إلى الإنجليزية (قاموسية — بلا شبكة)'
+                      : 'ترجمة محلية إلى العربية (قاموسية — بلا شبكة)'),
+              subtitle: const Text('كشف الكتابة تلقائياً على جهازك — تغطية قاموسية أساسية قد تكون ناقصة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                final r = LocalTranslateService.translate(
+                    text,
+                    toEnglish: LocalTranslateService.detectScript(text) == 'ar');
                 _snack(r.low
                     ? 'الترجمة المحلية تغطية ضعيفة (${(r.coverage * 100).round()}%) — للترجمة الأعمق استخدم الترجمة السحابية'
                     : 'ترجمة محلية بغطاء ${(r.coverage * 100).round()}%');

@@ -56,6 +56,38 @@ class LocalTranslateService {
     'لا أعرف': "I don't know",
     'لا مشكلة': 'No problem',
     'بعد قليل': 'In a little while',
+    // المرحلة 14 أ (1.3.0): توسعة الكتالوج — تحيات ومواعيد وأرقام وتعبيرات
+    // متكررة في المراسلة العربية
+    'سلام عليكم': 'Peace be upon you',
+    'وعليكم السلام': 'Peace be upon you too',
+    'أهلا وسهلا': 'Welcome',
+    'مساء النور': 'Good evening to you too',
+    'إن شاء الله': 'God willing',
+    'ما شاء الله': 'What God has willed',
+    'بحمد الله': 'By Gods grace',
+    'كل عام وأنتم بخير': 'May you be well every year',
+    'رمضان كريم': 'Ramadan Kareem',
+    'عيد سعيد': 'Happy Eid',
+    'ألف مبروك': 'Congratulations',
+    'مبارك عليك': 'Congratulations on this',
+    'أنتظر ردك': 'Awaiting your reply',
+    'أخبرني عند الوصول': 'Tell me when you arrive',
+    'لا تنسى': "Don't forget",
+    'في أقرب وقت': 'As soon as possible',
+    'على مهلك': 'Take your time',
+    'سوف أتأخر': "I'll be late",
+    'أنا مشغول الآن': "I'm busy now",
+    'أنا في السوق': "I'm at the market",
+    'أنا واصلت': "I've arrived",
+    'أين أنت الآن': 'Where are you now',
+    'اتصل بي': 'Call me',
+    'أرسل لي الموقع': 'Send me the location',
+    'كم الساعة': 'What time is it',
+    'في أي ساعة': 'At what hour',
+    'بعد ساعة': 'In an hour',
+    'الأسبوع القادم': 'Next week',
+    'نهاية الأسبوع': 'Weekend',
+    'أوافقك الرأي': 'I agree with you',
   };
 
   /// كلمات مفردة شائعة — الطريق العربي مطبَّع، والإنجليزي بحروف صغيرة.
@@ -81,6 +113,27 @@ class LocalTranslateService {
     'بلد': 'Country', 'لغة': 'Language', 'عربي': 'Arabic', 'انجليزي': 'English',
     'مع': 'With', 'قبل': 'Before', 'بعد': 'After', 'هنا': 'Here',
     'هناك': 'There',
+    // المرحلة 14 أ (1.3.0): أرقام ومواعيد وتعبيرات مراسلة شائعة
+    'واحد': 'One', 'اثنان': 'Two', 'ثلاثة': 'Three', 'أربعة': 'Four',
+    'خمسة': 'Five', 'ستة': 'Six', 'سبعة': 'Seven', 'ثمانية': 'Eight',
+    'تسعة': 'Nine', 'عشرة': 'Ten', 'مئة': 'Hundred', 'الف': 'Thousand',
+    'نصف': 'Half', 'ربع': 'Quarter',
+    'أول': 'First', 'ثاني': 'Second',
+    'صباح': 'Morning', 'مساء': 'Evening', 'ظهر': 'Noon',
+    'عصر': 'Afternoon', 'ليل': 'Night', 'ليلة': 'Night',
+    'أسبوع': 'Week', 'شهر': 'Month', 'سنة': 'Year', 'عام': 'Year',
+    'دقائق': 'Minutes', 'ثانية': 'Second', 'غدا': 'Tomorrow',
+    'جمعة': 'Friday', 'سبت': 'Saturday', 'احد': 'Sunday',
+    'اكيد': 'Sure', 'طيب': 'Okay', 'خلاص': 'Done', 'زين': 'Nice',
+    'حاضر': 'Okay', 'ممكن': 'Can', 'جاهز': 'Ready', 'مشغول': 'Busy',
+    'متأخر': 'Late', 'وصلت': 'Arrived', 'قريب': 'Near', 'بعيد': 'Far',
+    'انتظر': 'Wait', 'رد': 'Reply', 'أرسل': 'Send',
+    'عندي': 'I have', 'أحتاج': 'I need', 'أريد': 'I want',
+    'مهم': 'Important', 'عاجل': 'Urgent', 'موعد': 'Appointment',
+    'ميعاد': 'Appointment', 'تأكيد': 'Confirmation', 'تعديل': 'Edit',
+    'تنبيه': 'Reminder', 'تذكير': 'Reminder', 'هدية': 'Gift',
+    'دعوة': 'Invitation', 'حفل': 'Party', 'زواج': 'Wedding',
+    'عيد': 'Eid', 'رمضان': 'Ramadan', 'صلاة': 'Prayer', 'مسجد': 'Mosque',
   };
 
   /// عربي ← إنجليزي: مفاتيح مطبَّعة.
@@ -240,5 +293,49 @@ class LocalTranslateService {
       translatedTokens: translated,
       totalTokens: total,
     );
+  }
+
+  // ---------- كشف الكتابة (المرحلة 14 أ — 1.3.0) ----------
+
+  /// كشف كتابة النص المعروض صادقاً على مستوى الحروف حصراً: «ar» إذا غلبت
+  /// الحروف العربية على اللاتينية، «latin» إذا غلبت اللاتينية، و«other» إن
+  /// لم توجد حروف كافية (أرقام ورموز وإيموجي) — كشف كتابة لا لغة أعمق من
+  /// حروفها، والواجهة تعلن ذلك ولا تدّعي فهم تركيب.
+  static String detectScript(String text) {
+    var ar = 0;
+    var la = 0;
+    for (final r in text.runes) {
+      if ((r >= 0x0600 && r <= 0x06FF) || (r >= 0x0750 && r <= 0x077F)) {
+        ar++;
+      } else if ((r >= 0x0041 && r <= 0x005A) ||
+          (r >= 0x0061 && r <= 0x007A)) {
+        la++;
+      }
+    }
+    if (ar == 0 && la == 0) return 'other';
+    return ar >= la ? 'ar' : 'latin';
+  }
+
+  /// حارس صادق للغات السحابية الجديدة (1.3.0): هل رد الخادم طابق اللغة
+  /// المطلوبة فعلاً؟ en/fr/tr يُنتظر أنها لاتينية، والأردية تُنتظر حروفاً
+  /// أردية مميزة (ے ٹ ڈ ڑ ں ہ ھ پ چ گ ژ ۂ) — إن عاد النص عربياً خالياً من
+  /// المميزات الأردية فالخادم القديم لم يُحدَّث بعد، فتعلم الواجهة ذلك بدل
+  /// عرض ترجمة خاطئة بصمت. المساران القائمان (ar/en كما كانت) لا يمسّهما الحارس.
+  static bool resultMatchesTarget(String result, String target) {
+    switch (target) {
+      case 'en':
+      case 'fr':
+      case 'tr':
+        return detectScript(result) == 'latin';
+      case 'ur':
+        if (!RegExp('[\u0600-\u06FF\u0750-\u077F]').hasMatch(result)) {
+          return false;
+        }
+        const marks = 'ےٹڈڑںہھپچگژۂ';
+        return result.runes
+            .any((r) => marks.contains(String.fromCharCode(r)));
+      default:
+        return true; // عربي/إنجليزي — المسار القائم كما هو
+    }
   }
 }

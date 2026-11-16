@@ -85,4 +85,71 @@ void main() {
       expect(r.low, isTrue);
     });
   });
+
+  // المرحلة 14 أ (1.3.0): كتالوج موسّع وكشف الكتابة وحارس اللغة السحابية
+  group('الكتابة الموسعة (1.3.0)', () {
+    test('تحيات وتعبيرات جديدة تترجم كاملة', () {
+      expect(LocalTranslateService.translate('إن شاء الله', toEnglish: true).text,
+          'God willing');
+      expect(LocalTranslateService.translate('كم الساعة', toEnglish: true).text,
+          'What time is it');
+      expect(LocalTranslateService.translate('الأسبوع القادم', toEnglish: true).text,
+          'Next week');
+      expect(LocalTranslateService.translate('كل عام وأنتم بخير', toEnglish: true).text,
+          contains('May you be well'));
+    });
+
+    test('أرقام ومواعيد جديدة في الطريقين', () {
+      expect(LocalTranslateService.translate('خمسة', toEnglish: true).text, 'Five');
+      expect(LocalTranslateService.translate('Five', toEnglish: false).text, 'خمسة');
+      expect(LocalTranslateService.translate('صباح', toEnglish: true).text, 'Morning');
+      expect(LocalTranslateService.translate(' رمضان كريم ', toEnglish: true).text,
+          'Ramadan Kareem');
+    });
+
+    test('عبارات جديدة تعود من الإنجليزية عربياً', () {
+      final r = LocalTranslateService.translate('God willing', toEnglish: false);
+      expect(r.text, 'إن شاء الله');
+      expect(r.coverage, 1.0);
+    });
+  });
+
+  group('كشف الكتابة (1.3.0)', () {
+    test('عربي غالب يعود ar واللاتيني الغالب يعود latin — والتعادل يميل للعربية', () {
+      expect(LocalTranslateService.detectScript('مرحبا كيف حالك'), 'ar');
+      expect(LocalTranslateService.detectScript('Hello world'), 'latin');
+      expect(LocalTranslateService.detectScript('مرحبا hello'), 'ar'); // تعادل → عربي
+      expect(LocalTranslateService.detectScript('hello world مرحبا'), 'latin');
+    });
+
+    test('أرقام ورموز بلا حروف تعود other بصدق', () {
+      expect(LocalTranslateService.detectScript('12345 !!! ??'), 'other');
+      expect(LocalTranslateService.detectScript(''), 'other');
+    });
+
+    test('التشكيل لا يكسر الكشف العربي', () {
+      expect(LocalTranslateService.detectScript('مُرْحَبًا'), 'ar');
+    });
+  });
+
+  group('حارس اللغة السحابية (1.3.0)', () {
+    test('رد لاتيني لطلب لاتيني يقبل، وعربي يرفض بصدق', () {
+      expect(LocalTranslateService.resultMatchesTarget('Bonjour mes amis', 'fr'), isTrue);
+      expect(LocalTranslateService.resultMatchesTarget('مرحبا بك', 'fr'), isFalse);
+      expect(LocalTranslateService.resultMatchesTarget('Hello there', 'en'), isTrue);
+      expect(LocalTranslateService.resultMatchesTarget('مرحبا بك', 'en'), isFalse);
+      expect(LocalTranslateService.resultMatchesTarget('Merhaba dünya', 'tr'), isTrue);
+    });
+
+    test('الأردية تُقبل بحروفها المميزة وترفض عربية خالية منها', () {
+      expect(LocalTranslateService.resultMatchesTarget('میں ٹھیک ہوں', 'ur'), isTrue);
+      expect(LocalTranslateService.resultMatchesTarget('أنا بخير الحمد لله', 'ur'), isFalse);
+    });
+
+    test('المساران القائمان ar/فرنسي غير معروف لا يُمسّان', () {
+      expect(LocalTranslateService.resultMatchesTarget('أي نص', 'ar'), isTrue);
+      expect(LocalTranslateService.resultMatchesTarget('أي نص', 'de'), isTrue);
+      expect(LocalTranslateService.resultMatchesTarget('any text', 'es'), isTrue);
+    });
+  });
 }
