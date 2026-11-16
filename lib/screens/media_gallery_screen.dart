@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../config.dart';
 import '../services/e2e_service.dart';
 import '../services/media_gallery_service.dart';
+import '../services/media_search_service.dart';
 import '../services/media_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -173,6 +174,43 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
   }
 
   List<MediaItem> get _filtered => MediaGalleryService.filter(_items, _tab);
+
+  // ---- البحث الصادق (المرحلة 14 ب — 1.4.0): ميتاداتا محلية حصراً ----
+  String _query = '';
+  int _datePreset = 0; // 0 الكل، 1 24 ساعة، 2 أسبوع، 3 شهر
+  int _sizePreset = 0; // 0 الكل، 1 <1 م.ب، 2 1–10 م.ب، 3 >10 م.ب
+  static const _datePresets = ['الكل', '24 ساعة', 'أسبوع', 'شهر'];
+  static const _sizePresets = ['الحجم: الكل', 'أقل من 1 م.ب', '1–10 م.ب', 'أكبر من 10 م.ب'];
+  static const _sizeBounds = [(null, null), (null, 1024 * 1024), (1024 * 1024, 10 * 1024 * 1024), (10 * 1024 * 1024, null)];
+
+  List<MediaSearchHit> get _searchHits {
+    final now = DateTime.now();
+    DateTime? from;
+    switch (_datePreset) {
+      case 1:
+        from = now.subtract(const Duration(hours: 24));
+        break;
+      case 2:
+        from = now.subtract(const Duration(days: 7));
+        break;
+      case 3:
+        from = now.subtract(const Duration(days: 30));
+        break;
+    }
+    final (minS, maxS) = _sizeBounds[_sizePreset];
+    return MediaSearchService.search(
+      sources: [(widget.title, _filtered)],
+      query: MediaSearchQuery(
+        text: _query.trim().isEmpty ? null : _query,
+        from: from,
+        minSizeBytes: minS,
+        maxSizeBytes: maxS,
+      ),
+    );
+  }
+
+  bool get _searching =>
+      _query.trim().isNotEmpty || _datePreset != 0 || _sizePreset != 0;
   Map<String, int> get _counts => MediaGalleryService.counts(_items);
 
   void _openInChat(MediaItem item) {
@@ -196,13 +234,71 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filtered;
+    final hits = _searchHits;
     return Scaffold(
       appBar: AppBar(
         title: Text('وسائط ${widget.title}',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
       ),
       body: Column(children: [
+        // البحث الصادق — في ميتاداتا نملكها محلياً حصراً (1.4.0)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          child: TextField(
+            onChanged: (v) => setState(() => _query = v),
+            decoration: InputDecoration(
+              isDense: true,
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              suffixIcon: _searching
+                  ? IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: () => setState(() {
+                        _query = '';
+                        _datePreset = 0;
+                        _sizePreset = 0;
+                      }),
+                    )
+                  : null,
+              hintText: 'بحث بالاسم أو التعليق — ميتاداتا محلية حصراً',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ),
+        // فلاتر التاريخ والحجم
+        SizedBox(
+          height: 40,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            children: [
+              for (var i = 0; i < _datePresets.length; i++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: ChoiceChip(
+                    label: Text(_datePresets[i], style: const TextStyle(fontSize: 12)),
+                    selected: _datePreset == i,
+                    onSelected: (_) => setState(() => _datePreset = i),
+                    selectedColor: WaslColors.teal,
+                    labelStyle: TextStyle(
+                        color: _datePreset == i ? Colors.white : context.textSecondary),
+                  ),
+                ),
+              const VerticalDivider(width: 8),
+              for (var i = 0; i < _sizePresets.length; i++)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: ChoiceChip(
+                    label: Text(_sizePresets[i], style: const TextStyle(fontSize: 12)),
+                    selected: _sizePreset == i,
+                    onSelected: (_) => setState(() => _sizePreset = i),
+                    selectedColor: WaslColors.indigo,
+                    labelStyle: TextStyle(
+                        color: _sizePreset == i ? Colors.white : context.textSecondary),
+                  ),
+                ),
+            ],
+          ),
+        ),
         // شريط الفلترة بأعداد كل نوع
         SizedBox(
           height: 46,
@@ -237,7 +333,7 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
                         subtitle: 'اضغط للمحاولة مجدداً',
                       ),
                     ])
-                  : filtered.isEmpty
+                  : hits.isEmpty && !_searching
                       ? ListView(padding: const EdgeInsets.all(24), children: [
                           const GlassEmptyState(
                             icon: Icons.photo_library_outlined,
@@ -246,26 +342,54 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
                                 'الصور والفيديو والملفات والصوتيات المتبادلة هنا ستظهر في شبكة واحدة',
                           ),
                         ])
-                      : RefreshIndicator(
-                          onRefresh: _load,
-                          child: GridView.builder(
-                            padding: const EdgeInsets.fromLTRB(10, 4, 10, 120),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
-                              mainAxisSpacing: 4,
-                              crossAxisSpacing: 4,
+                      : Column(children: [
+                          if (_searching)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
+                              child: Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: Text(
+                                  hits.isEmpty
+                                      ? 'لا نتائج — البحث في ميتاداتا نملكها: الاسم والتعليق والنوع والحجم والتاريخ حصراً'
+                                      : '${hits.length} نتيجة — بحث في ميتاداتا محلية: الاسم والتعليق والنوع والحجم والتاريخ — لا رؤية لمحتوى الصورة',
+                                  style: const TextStyle(
+                                      fontSize: 11.5, height: 1.4),
+                                ),
+                              ),
                             ),
-                            itemCount: filtered.length,
-                            itemBuilder: (context, i) {
-                              final item = filtered[i];
-                              return MotionStagger(
-                                index: i.clamp(0, 12),
-                                child: _tile(item),
-                              );
-                            },
+                          Expanded(
+                            child: hits.isEmpty && _searching
+                                ? ListView(padding: const EdgeInsets.all(24), children: [
+                                    const GlassEmptyState(
+                                      icon: Icons.search_off_rounded,
+                                      title: 'لا نتائج مطابقة',
+                                      subtitle:
+                                          'جرّب كلمة أقصر أو وسّع نطاق التاريخ والحجم — البحث لا يرى محتوى الصور إطلاقاً',
+                                    ),
+                                  ])
+                                : RefreshIndicator(
+                                    onRefresh: _load,
+                                    child: GridView.builder(
+                                      padding:
+                                          const EdgeInsets.fromLTRB(10, 4, 10, 120),
+                                      gridDelegate:
+                                          const SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: 3,
+                                        mainAxisSpacing: 4,
+                                        crossAxisSpacing: 4,
+                                      ),
+                                      itemCount: hits.length,
+                                      itemBuilder: (context, i) {
+                                        final item = hits[i].item;
+                                        return MotionStagger(
+                                          index: i.clamp(0, 12),
+                                          child: _tile(item),
+                                        );
+                                      },
+                                    ),
+                                  ),
                           ),
-                        ),
+                        ]),
         ),
       ]),
     );

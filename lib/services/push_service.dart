@@ -286,6 +286,22 @@ class PushService {
     return null;
   }
 
+  /// معرّف الإشعار المحلي المحدد — دالة حتمية من لحظة الإطلاق، فالإلغاء
+  /// يعيد حساب المعرف نفسه بلا تخزين (المناسبات الهجرية 1.4.0 تعتمده).
+  static int localReminderId(DateTime fireAt) =>
+      fireAt.millisecondsSinceEpoch ~/ 1000 & 0x7FFFFFFF;
+
+  /// إلغاء تذكير محلي مجدول بلحظة إطلاقه — صامت دائماً: عدم وجود إشعار
+  /// بهذا المعرف لا خطأ ولا ادعاء، والإيقاف يمنع الجدولة القادمة.
+  static Future<void> cancelLocalReminder(DateTime fireAt) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    await _initLocalNotifications();
+    if (!_localNotifReady) return;
+    try {
+      await _local.cancel(localReminderId(fireAt));
+    } catch (_) {}
+  }
+
   /// جدولة تذكير محلي في وقت موعد مكتشف (المرحلة 9 ب — 0.23.0):
   /// إشعار محلي على جهازك حصراً بلا أي خادم — الفشل يعيد رسالة صادقة
   /// ولا يرمي استثناءً؛ المحاولة الدقيقة أولاً ثم غير الدقيقة على أندرويد
@@ -310,7 +326,7 @@ class PushService {
         priority: Priority.high,
       ),
     );
-    final id = fireAt.millisecondsSinceEpoch ~/ 1000 & 0x7FFFFFFF;
+    final id = localReminderId(fireAt);
     try {
       tz_data.initializeTimeZones();
       final scheduled = tz.TZDateTime.from(fireAt, tz.UTC);
