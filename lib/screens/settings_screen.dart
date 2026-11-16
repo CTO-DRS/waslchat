@@ -25,6 +25,7 @@ import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import 'e2e_key_screen.dart';
+import 'hijri_occasions_screen.dart';
 import 'bots_screen.dart';
 import 'feedback_screen.dart';
 import 'key_log_screen.dart';
@@ -94,6 +95,14 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const KeyLogScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.event_available_rounded, color: WaslColors.teal),
+            title: const Text('المناسبات الهجرية'),
+            subtitle: const Text('رمضان والعيدان ورأس السنة — تذكير محلي حسابي بصدق الرؤية'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const HijriOccasionsScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.smart_toy_outlined, color: WaslColors.violet),

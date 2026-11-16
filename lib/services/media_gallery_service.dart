@@ -16,6 +16,7 @@ class MediaItem {
     this.name,
     this.caption,
     this.rawContent,
+    this.sizeBytes,
   });
 
   final String messageId;
@@ -26,6 +27,10 @@ class MediaItem {
   final String? name;
   final String? caption;
   final String? rawContent; // نص الرسالة كما على الخادم (مشفّر) — لقراءة mk الوسيط
+
+  /// الحجم بالبايت من ميتا الملف/الفيديو ({"name","size"}) — null
+  /// للصور والصوتيات (بلا حجم موثق) — صدق لا تخمين (البحث الصادق 1.4.0).
+  final int? sizeBytes;
 
   bool get isImage => type == 'image';
   bool get isVideo => type == 'video';
@@ -65,10 +70,14 @@ class MediaGalleryService {
 
       String? name;
       String? caption;
+      int? sizeBytes;
       final decoded = textOf(m);
       if (decoded != null && decoded.startsWith('{')) {
         try {
           name = RegExp(r'"name"\s*:\s*"([^"]*)"').firstMatch(decoded)?.group(1);
+          sizeBytes = int.tryParse(
+              RegExp(r'"size"\s*:\s*(\d+)').firstMatch(decoded)?.group(1) ??
+                  '');
         } catch (_) {}
       } else {
         caption = captionOf(decoded, t);
@@ -82,6 +91,7 @@ class MediaGalleryService {
         name: name,
         caption: caption,
         rawContent: m['content'] as String?,
+        sizeBytes: sizeBytes,
       ));
     }
     // الأحدث أولاً
