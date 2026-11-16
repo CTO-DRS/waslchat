@@ -10,9 +10,12 @@ import 'config.dart';
 import 'app_keys.dart';
 import 'services/app_lock_service.dart';
 import 'services/desktop_notify_service.dart';
+import 'services/jank_service.dart';
 import 'services/link_preview_service.dart';
 import 'services/locale_service.dart';
+import 'services/media_service.dart';
 import 'services/metrics_service.dart';
+import 'services/offline_queue_service.dart';
 import 'services/pwa_service.dart';
 import 'services/web_push_service.dart';
 import 'theme.dart';
@@ -31,10 +34,17 @@ Future<void> main() async {
   await WallpaperService.load();
   await LocaleService.load();
   await MetricsService.init();
+  // المرحلة 13 أ (1.1.0): قياس السقوط الإطاري وذاكرة الوسائط بسقف معلن —
+  // قياس محلي حصراً يعرضه صاحبه في ورقة المؤشرات
+  await JankService.init();
+  await MediaCacheService.init();
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.supabaseAnonKey,
   );
+  // المرحلة 13 أ (1.1.0): طابور الإرسال بلا شبكة — بعد تهيئة Supabase
+  // لأنه يربط نبضة قناة Realtime كإشارة عودة اتصال ويجرب الإرسال فوراً
+  await OfflineQueueService.start();
   await PushService.init();
   await LinkPreviewService.init(); // معاينة الروابط (0.21.0): المفتاح والكاش المحلي
   // المرحلة 12 (0.28.0): انتشار المنصات — إشعارات سطح المكتب الأساسية
