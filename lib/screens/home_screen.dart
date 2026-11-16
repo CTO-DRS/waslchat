@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:ui';
 
@@ -11,6 +12,7 @@ import '../services/l10n.dart';
 import '../services/locale_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
+import '../services/realtime_hub_service.dart';
 import '../services/update_service.dart';
 import '../services/voice_commands_service.dart';
 import '../services/voice_room_service.dart';
@@ -43,6 +45,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
+    // مركز Realtime الواحد (1.2.0): قناة postgres واحدة لكل المشاهدين
+    // طويلة العمر بدل قنوات لكل شاشة — أقل انضمامات للخادم وبطارية أقل
+    unawaited(RealtimeHubService.start());
     // المرحلة 10: إزالة جهاز كاملة — إصغاء لحظي لإزالة الأجهزة فتسقط الجلسات
     // الميتة محلياً فوراً + مطابقة دورية شبكة أمان
     DeviceSecurityService.attach();
@@ -220,6 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
     CallService.stopWatching();
     VoiceRoomService.incomingInvite.removeListener(_showGroupCallInvite);
     VoiceRoomService.stopWatchingInvites();
+    unawaited(RealtimeHubService.stop()); // فك القناة الواحدة عند الخروج
     super.dispose();
   }
 

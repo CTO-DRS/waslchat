@@ -240,6 +240,7 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
+          tooltip: 'رجوع من البحث',
           icon: const Icon(Icons.arrow_forward),
           onPressed: () => Navigator.pop(context),
         ),
@@ -254,6 +255,7 @@ class _UnifiedSearchScreenState extends State<UnifiedSearchScreen> {
             suffixIcon: q.isEmpty
                 ? null
                 : IconButton(
+                    tooltip: 'مسح حقل البحث',
                     icon: const Icon(Icons.close_rounded, size: 20),
                     onPressed: () {
                       _ctrl.clear();

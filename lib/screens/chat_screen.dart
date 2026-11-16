@@ -2453,6 +2453,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       const Spacer(),
                       if (text != null)
                         IconButton(
+                          tooltip: 'نسخ نص الرسالة',
                           icon: const Icon(Icons.copy_rounded),
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: text));
@@ -3018,6 +3019,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           ]),
         ),
         IconButton(
+          tooltip: 'إلغاء التعديل والرد',
           icon: const Icon(Icons.close_rounded),
           onPressed: () => setState(() {
             if (editing) _text.clear();
@@ -3056,6 +3058,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       appBar: _searching
           ? AppBar(
               leading: IconButton(
+                tooltip: 'إنهاء البحث داخل المحادثة',
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () => setState(() {
                   _searching = false;
@@ -3644,6 +3647,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               child: Row(children: [
                 if (!_recording)
                   IconButton(
+                    tooltip: 'إرفاق — صور وملفات وألبوم',
                     onPressed: _uploading ? null : _showAttachSheet,
                     icon: const Icon(Icons.attach_file_rounded),
                   ),
@@ -3681,6 +3685,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                         decoration: const BoxDecoration(
                             shape: BoxShape.circle, gradient: WaslColors.gradient),
                         child: IconButton(
+                          tooltip: 'إرسال الرسالة',
                           onPressed: _sendText,
                           icon: const Icon(Icons.send_rounded, color: Colors.white),
                         ),

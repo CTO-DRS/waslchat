@@ -21,6 +21,7 @@ import '../config.dart';
 import 'call_logic.dart';
 import 'call_quality_service.dart';
 import 'push_service.dart';
+import 'realtime_hub_service.dart';
 
 /// جلسة مكالمة حية — حالة واحدة تلاحظها الواجهة وتدفعها الخدمة.
 /// كل الحقول ValueNotifier فتتحدث الشاشة لحظياً بلا setState يدوي.
@@ -682,39 +683,22 @@ class CallService {
   /// تُضبطها الشاشة الرئيسية: ماذا تفعل عند مكالمة واردة (فتح شاشة المكالمة)
   static void Function(CallSession session)? onIncoming;
 
-  static RealtimeChannel? _watch;
-  static bool _watching = false;
+  /// الإصغاء للواردات عبر مركز Realtime الواحد (1.2.0) — بلا قناة مستقلة
+  static StreamSubscription<Map<String, dynamic>>? _watchSub;
 
-  /// الاستماع للواردات: إدراج صف مكالمة أعني أن أحداً يتصل بي الآن
+  /// الاستماع للواردات: إدراج صف مكالمة أعني أن أحداً يتصل بي الآن —
+  /// عبر مركز Realtime الواحد بلا انضمام جديد لكل استدعاء (1.2.0)
   static Future<void> watchIncoming() async {
-    if (_watching) return;
-    _watching = true;
-    try {
-      _watch = supabase
-          .channel('call-watch')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.insert,
-            schema: 'public',
-            table: 'calls',
-            callback: (payload) => _onIncomingRow(payload.newRecord),
-          )
-          .subscribe();
-    } catch (e) {
-      debugPrint('call watch failed: $e');
-      _watching = false;
-    }
+    if (_watchSub != null) return;
+    await RealtimeHubService.start(); // قناة واحدة — إعادة الاستدعاء لا شيء
+    if (!RealtimeHubService.registry.attach('call-watch')) return;
+    _watchSub = RealtimeHubService.callInserted.listen(_onIncomingRow);
   }
 
   static Future<void> stopWatching() async {
-    final ch = _watch;
-    _watch = null;
-    _watching = false;
-    try {
-      if (ch != null) {
-        await ch.unsubscribe();
-        await supabase.removeChannel(ch);
-      }
-    } catch (_) {}
+    await _watchSub?.cancel();
+    _watchSub = null;
+    RealtimeHubService.registry.detach('call-watch');
   }
 
   static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
