@@ -87,7 +87,17 @@ Deno.serve(async (req) => {
     }
 
     if (mode === "translate") {
-      const target = body.target === "en" ? "الإنجليزية" : "العربية";
+      // المرحلة 14 أ (1.3.0): اللغات الجديدة (فرنسي/تركي/أردو) بجانب العربية
+      // والإنجليزية — أي هدف آخر يعود عربياً كالسلوك القائم، والعميل يحرس
+      // اللغات الجديدة بحارس كتابة صادق فيعلن إن لم يُنشر هذا التحديث بعد.
+      const TARGETS: Record<string, string> = {
+        en: "الإنجليزية",
+        fr: "الفرنسية",
+        tr: "التركية",
+        ur: "الأردية",
+        ar: "العربية",
+      };
+      const target = TARGETS[String(body.target ?? "ar")] ?? "العربية";
       const text = String(body.text ?? "").slice(0, 4000);
       const reply = await gemini(
         `ترجم النص إلى ${target} بدقة وطبيعية. أعد الترجمة فقط بدون أي شرح.`,
