@@ -24,6 +24,7 @@ import '../services/web_push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
+import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
 import 'hijri_occasions_screen.dart';
 import 'bots_screen.dart';
@@ -95,6 +96,14 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const KeyLogScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.backup_outlined, color: WaslColors.indigo),
+            title: const Text('النسخة الاحتياطية الكاملة'),
+            subtitle: const Text('صدّر كل محادثاتك مفكوكة ومشفرة بكلمة سر تختارها — على جهازك حصراً'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const BackupExportScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.event_available_rounded, color: WaslColors.teal),
