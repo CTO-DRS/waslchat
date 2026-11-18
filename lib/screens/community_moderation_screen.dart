@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../services/ai_moderation_service.dart';
+import '../services/bot_proposals_service.dart';
 import '../services/moderation_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -33,10 +34,12 @@ class _CommunityModerationScreenState
   List<Map<String, dynamic>> _filters = [];
   List<Map<String, dynamic>> _log = [];
   List<Map<String, dynamic>> _aiFlags = [];
+  List<BotProposal> _proposals = [];
   bool _loading = true;
   bool _amOwner = false;
   bool? _aiEnabled; // null = قيد التحميل
   bool _scanning = false;
+  String _actingOn = ''; // معرّف المقترح قيد التنفيذ — تعطيل الأزرار لحظة القرار
 
   @override
   void initState() {
@@ -44,6 +47,7 @@ class _CommunityModerationScreenState
     _amOwner = widget.myRole == 'owner';
     _load();
     _loadAi();
+    _loadProposals();
   }
 
   void _snack(String m) =>
@@ -177,6 +181,30 @@ class _CommunityModerationScreenState
   }
 
   /// حالة المساعد الذكي وملاحظاته — تحميل منفصل حتى لا يبطئ التبويبات الأخرى
+  Future<void> _loadProposals() async {
+    try {
+      final list = await BotProposalsService.fetch(widget.communityId);
+      if (!mounted) return;
+      setState(() => _proposals = list);
+    } catch (_) {
+      if (mounted) setState(() => _proposals = []);
+    }
+  }
+
+  /// قرار المشرف على مقترح بوت: موافقة تنفذ بصلاحيته لحظة الموافقة،
+  /// أو رفض بلا أي إجراء — والأخطاء الإشرافية الحقيقية تعلن بصدق
+  Future<void> _decideProposal(BotProposal p, bool approve) async {
+    setState(() => _actingOn = p.messageId);
+    try {
+      final outcome = await BotProposalsService.resolve(p.messageId, approve);
+      _snack(BotProposalsService.outcomeLabel(outcome, p));
+    } catch (e) {
+      _snack(BotProposalsService.resolveErrorHint(e));
+    }
+    if (mounted) setState(() => _actingOn = '');
+    _loadProposals();
+  }
+
   Future<void> _loadAi() async {
     try {
       final cid = widget.communityId;
@@ -484,6 +512,7 @@ class _CommunityModerationScreenState
               Tab(text: 'فلتر الكلمات'),
               Tab(text: 'السجل'),
               Tab(text: 'المساعد الذكي'),
+              Tab(text: 'مقترحات البوتات'),
             ],
           ),
         ),
@@ -497,6 +526,7 @@ class _CommunityModerationScreenState
                   _filtersTab(),
                   _logTab(),
                   _aiTab(),
+                  _proposalsTab(),
                 ],
               ),
       ),
@@ -789,6 +819,88 @@ class _CommunityModerationScreenState
           style: TextStyle(fontSize: 12, color: context.textTertiary),
         ),
         onTap: () => _flagSheet(f),
+      ),
+    );
+  }
+
+  // ============ مقترحات البوتات (المرحلة 15 ج — 1.7.0، ترحيل 039) ============
+  // البوت يقترح ولا ينفذ: التنفيذ بصلاحية المشرف لحظة موافقته — بلا تلقائية
+
+  Widget _proposalsTab() {
+    return RefreshIndicator(
+      onRefresh: _loadProposals,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              'البوت يقترح ولا ينفذ إطلاقاً: كتم أو طرد يقترحه بوت مجتمعي نشط يظهر هنا معلقاً — وموافقتك تنفذه بصلاحيتك أنت لحظة الضغط، ورفضك يعتبره بلا أي أثر. لا تنفيذ تلقائي ولا صلاحية للبوت على أحد.',
+              style: TextStyle(height: 1.6, fontSize: 12.5, color: context.textTertiary),
+            ),
+          ),
+          if (_proposals.isEmpty)
+            GlassEmptyState(
+              icon: Icons.smart_toy_outlined,
+              title: 'لا مقترحات معلقة',
+              subtitle: 'بوتات مجتمعك النشطة ترصد ولا تقترح بعد — حين يقترح أحدها كتماً أو طرداً يظهر هنا بانتظار قرارك',
+            )
+          else
+            for (final p in _proposals) _proposalTile(p),
+        ],
+      ),
+    );
+  }
+
+  Widget _proposalTile(BotProposal p) {
+    final busy = _actingOn == p.messageId;
+    return Card(
+      color: context.surfaceAlt,
+      elevation: 0,
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.smart_toy_outlined, size: 17, color: WaslColors.teal),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text('مقترح من ${p.botName}',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            Text(shortTime(p.createdAtIso),
+                style: TextStyle(fontSize: 11.5, color: context.textTertiary)),
+          ]),
+          const SizedBox(height: 6),
+          Text(BotProposalsService.describe(p),
+              style: const TextStyle(height: 1.5, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text('الغرفة: ${p.roomTitle.isEmpty ? 'غرفة مجتمع' : p.roomTitle}',
+              style: TextStyle(fontSize: 12, color: context.textTertiary)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: busy ? null : () => _decideProposal(p, true),
+                icon: busy
+                    ? const SizedBox(width: 15, height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.check_rounded, size: 18),
+                label: Text(busy ? 'جارٍ التنفيذ…' : 'موافقة وتنفيذ'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: busy ? null : () => _decideProposal(p, false),
+                icon: const Icon(Icons.close_rounded, size: 18),
+                label: const Text('رفض'),
+              ),
+            ),
+          ]),
+        ]),
       ),
     );
   }

@@ -135,6 +135,13 @@ class BotService {
     return List<Map<String, dynamic>>.from(data as List);
   }
 
+  /// إحصاءات البوت لصاحبه (المرحلة 15 ج — 1.7.0، ترحيل 039): ما يمكن قراءته
+  /// فعلاً من الجداول القائمة — رسائل ونشاط ووصول ومقترحات — بلا تخزين جديد
+  static Future<BotStats> stats(String botId) async {
+    final r = await supabase.rpc('bot_stats', params: {'p_bot': botId});
+    return BotStats.fromRow(Map<String, dynamic>.from(r as Map));
+  }
+
   /// ترجمة أخطاء الخادم إلى عربية
   static String errorLabel(Object e) {
     final s = e.toString();
@@ -162,10 +169,10 @@ class BotService {
   }
 }
 
-/// لوحة إحصاءات البوت النقية (المرحلة 12 ب — 0.29.0): تعرض صاحب البوت ما
-/// يمكن قراءته فعلاً عن بوتيه — الحالة والويب هوك وعدد المحادثات المرتبطة
-/// وعمر البوت — بإفصاح صادق: جدول إحصاءات استخدام خادمي (عدد الرسائل المرسلة
-/// وما شابه) غير موجود حتى الآن ولا يُخترع له رقم — يُعرض عند توفره لاحقاً.
+/// لوحة إحصاءات البوت النقية (المرحلة 12 ب — 0.29.0 وتوسعة المرحلة 15 ج — 1.7.0):
+/// تعرض صاحب البوت ما يمكن قراءته فعلاً عن بوتيه — الحالة والويب هوك
+/// والمحادثات المرتبطة وعمر البوت، ومع ترحيل 039: الرسائل المرسلة ونشاط
+/// آخر 24 ساعة والوصول المقاس وحالة المقترحات — بإفصاح صادق بلا اختراع.
 class BotStatsView {
   BotStatsView._();
 
@@ -206,6 +213,73 @@ class BotStatsView {
 
   /// إفصاح اللوحة الثابت — يظهر كما هو في الشاشة
   static const disclosure =
-      'هذه اللوحة تعرض ما يمكن قراءته فعلاً عن بوتك من الخادم — بلا تخمين ولا أرقام مكتوظة. '
-      'إحصاءات الاستخدام التفصيلية (الرسائل المرسلة وردود الويب هوك) جدولها الخادمي متأجل وموثق في BOT_MODERATION_PATTERNS.md.';
+      'هذه اللوحة تعرض ما يمكن قراءته فعلاً عن بوتك من الخادم — بلا تخمين ولا أرقام مكتوظة: '
+      'الرسائل المرسلة والنشاط الأخير والوصول المقاس وحالة المقترحات من ترحيل 039، '
+      'ورموز ردود الويب هوك تفصلها بيئة بوتك نفسها ولا يراها الخادم.';
+}
+
+/// إحصاءات البوت كما تعود من `bot_stats` (ترحيل 039) — تحليل دفاعي:
+/// أي غرابة أو حقل ناقص يهبط صفراً صادقاً لا رقماً مكتوظاً
+class BotStats {
+  const BotStats({
+    required this.totalMessages,
+    required this.messages24h,
+    required this.lastMessageAtIso,
+    required this.conversations,
+    required this.membersReached,
+    required this.proposalsPending,
+    required this.proposalsApproved,
+    required this.proposalsRejected,
+  });
+
+  final int totalMessages;
+  final int messages24h;
+  final String lastMessageAtIso;
+  final int conversations;
+  final int membersReached;
+  final int proposalsPending;
+  final int proposalsApproved;
+  final int proposalsRejected;
+
+  static int _int(Object? v) => (v is num && v >= 0) ? v.toInt() : 0;
+
+  factory BotStats.fromRow(Map<String, dynamic> r) => BotStats(
+        totalMessages: _int(r['total_messages']),
+        messages24h: _int(r['messages_24h']),
+        lastMessageAtIso: (r['last_message_at'] as String?) ?? '',
+        conversations: _int(r['conversations']),
+        membersReached: _int(r['members_reached']),
+        proposalsPending: _int(r['proposals_pending']),
+        proposalsApproved: _int(r['proposals_approved']),
+        proposalsRejected: _int(r['proposals_rejected']),
+      );
+
+  /// آخر نشاط بنص عربي مختصر — غياب النشاط يعلن بصدق
+  static String lastActivity(String iso, DateTime now) {
+    final d = DateTime.tryParse(iso)?.toLocal();
+    if (d == null) return 'لا نشاط مسجل بعد';
+    final mins = now.difference(d).inMinutes;
+    if (mins < 1) return 'الآن';
+    if (mins < 60) return 'قبل $mins دقيقة';
+    final hours = mins ~/ 60;
+    if (hours < 24) return 'قبل $hours ساعة';
+    final days = hours ~/ 24;
+    return days == 1 ? 'قبل يوم' : 'قبل $days أيام';
+  }
+
+  /// سطر الوصول المقاس — مجموع أعضاء محادثات البوت (تقدير صادق معلن)
+  static String reachLabel(int n) {
+    if (n <= 0) return 'لا وصول بعد';
+    return '$n عضواً عبر محادثات بوتك (مجموع الأعضاء — قد يتكرر بين الغرف)';
+  }
+
+  /// سطر المقترحات الثلاثة الصادق
+  static String proposalsLabel(BotStats s) {
+    if (s.proposalsPending == 0 &&
+        s.proposalsApproved == 0 &&
+        s.proposalsRejected == 0) {
+      return 'لا مقترحات بعد — بوتك يرصد ولا يقترح بعد';
+    }
+    return 'معلقة ${s.proposalsPending} · منفذة ${s.proposalsApproved} · مرفوضة ${s.proposalsRejected}';
+  }
 }

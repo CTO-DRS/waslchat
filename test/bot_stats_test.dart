@@ -56,9 +56,12 @@ void main() {
       expect(BotStatsView.chatCountLabel(4), '4 محادثات مرتبطة');
     });
 
-    test('الإفصاح يعلن الصدق والجدول المتأجل موثق', () {
+    test('الإفصاح يعلن الصدق والإحصاءات المقاسة من 039 موثقة', () {
       expect(BotStatsView.disclosure, contains('بلا تخمين ولا أرقام مكتوظة'));
-      expect(BotStatsView.disclosure, contains('BOT_MODERATION_PATTERNS.md'));
+      expect(BotStatsView.disclosure, contains('ترحيل 039'));
+      expect(BotStatsView.disclosure,
+          contains('رموز ردود الويب هوك تفصلها بيئة بوتك نفسها'),
+          reason: 'ردود الويب هوك لا تُقرأ من الخادم — الحد يعلن');
     });
   });
 }

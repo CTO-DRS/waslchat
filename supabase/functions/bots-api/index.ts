@@ -95,11 +95,21 @@ Deno.serve(async (req) => {
         if (typeof chatId !== "string" || !text.trim()) {
           return fail("bad_request", "الحقول المطلوبة: chat_id و text");
         }
+        // المقترح المنفذ بعد موافقة المشرف (1.7.0): كائن اختياري مغلق
+        // { action: 'mute'|'kick', target_id, minutes?, reason? } — التحقق
+        // الصارم في bot_send_message داخل الترحيل 039، والتنفيذ بصلاحية
+        // المشرف الموافق من شاشة الإشراف لا بصلاحية البوت
+        const proposal =
+          args.proposal && typeof args.proposal === "object" &&
+          !Array.isArray(args.proposal)
+            ? args.proposal
+            : null;
         const { data: mid, error } = await db.rpc("bot_send_message", {
           p_bot: bot.id,
           p_conv: chatId,
           p_text: text,
           p_reply_to: typeof args.reply_to === "string" ? args.reply_to : null,
+          p_proposal: proposal,
         });
         if (error) return fail(mapSqlError(error.message), arabicError(error.message));
         return json(200, { ok: true, result: { message_id: mid, chat_id: chatId } });
