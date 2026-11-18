@@ -33,7 +33,7 @@ enum VerifyScanResult {
 /// - مفتاح المحادثة يُشتق عند الطرفين معاً:
 ///   HKDF-SHA256( X25519(خاصي، عامُ الآخر) , salt = conversation_id, info = 'wasl-dm-v1' )
 /// - الرسائل النصية: AES-256-GCM بصيغة
-///   "v1.<nonce b64>.<ciphertext b64>.<mac b64>" مع AAD = conversation_id
+///   `v1.<nonce b64>.<ciphertext b64>.<mac b64>` مع AAD = conversation_id
 ///   (يمنع نقل نص مشفّر بين محادثات مختلفة).
 /// - الوسائط: ملف ثنائي = nonce(12بايت) + ciphertext + mac(16بايت) بامتداد .enc.bin
 /// - الرسائل القديمة (بدون بادئة v1.) تُعرض كما هي — توافق رجعي كامل.
@@ -393,7 +393,7 @@ class E2eService {
   static const _verifyPrefix = 'e2e_verified_';
 
   /// حمولة رمز QR للتحقق — تربط هوية الحساب بمفتاحه العام:
-  /// wasl-verify:v1|<userId>|<identity_public_key base64>
+  /// wasl-verify:v1|`<userId>`|`<identity_public_key base64>`
   static Future<String?> myVerifyPayload() async {
     if (!_ready) return null;
     final uid = supabase.auth.currentUser?.id;
@@ -1952,7 +1952,7 @@ class E2eService {
 
   // ---------- تخزين المفاتيح محلياً (كل الإصدارات) ----------
 
-  /// الإصدار 1 يبقى بالمفتاح القديم (توافق مع 0.1.4)، والإصدارات اللاحقة بلاحقة #v<n>
+  /// الإصدار 1 يبقى بالمفتاح القديم (توافق مع 0.1.4)، والإصدارات اللاحقة بلاحقة `#v<n>`
   static String _localKeyName(String convId, int version) =>
       version == 1 ? '$_groupKeyPrefix$convId' : '$_groupKeyPrefix$convId#v$version';
   static String _versionsName(String convId) => '$_groupKeyPrefix$convId#versions';
