@@ -9,8 +9,13 @@ import '../theme.dart';
 ///
 /// صدق كامل قبل أي إرسال: الملاحظة تصل نصاً صريحاً لفريق وصل — لا تشفير هنا
 /// ولا مفاجآت، ومَن يراها صاحبها وإدارة التطبيق حصراً (RLS ترحيل 029).
+///
+/// منذ 1.8.0: تقبل تعبئة مسبقة اختيارية (قالب تقرير الاختبار الميداني من
+/// شاشة البرنامج) — تصنيفها وحدودها نفسها بلا أي تغيير في المسار.
 class FeedbackScreen extends StatefulWidget {
-  const FeedbackScreen({super.key});
+  const FeedbackScreen({super.key, this.initialText, this.initialCategory});
+  final String? initialText;
+  final String? initialCategory;
 
   @override
   State<FeedbackScreen> createState() => _FeedbackScreenState();
@@ -20,6 +25,18 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   final _body = TextEditingController();
   String _category = 'bug';
   bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // تعبئة مسبقة اختيارية (تقرير اختبار): التصنيف يُقبل إن كان من الفئات
+    // المعروفة حصراً — أي غرابة تعود للتصنيف الافتراضي
+    if (widget.initialText != null) _body.text = widget.initialText!;
+    if (widget.initialCategory != null &&
+        FeedbackService.categories.any((c) => c.$1 == widget.initialCategory)) {
+      _category = widget.initialCategory!;
+    }
+  }
 
   @override
   void dispose() {

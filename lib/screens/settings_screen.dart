@@ -24,6 +24,7 @@ import '../services/web_push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
+import 'beta_screen.dart';
 import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
 import 'hijri_occasions_screen.dart';
@@ -128,6 +129,14 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_left),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const FeedbackScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.science_outlined, color: WaslColors.violet),
+            title: const Text('برنامج الاختبار الميداني'),
+            subtitle: const Text('عائِل صادق لما يُختبر ولما ينقص — وانضمامك يبصم تقاريرك'),
+            trailing: const Icon(Icons.chevron_left),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const BetaScreen())),
           ),
           ListTile(
             leading: const Icon(Icons.password, color: WaslColors.teal),
