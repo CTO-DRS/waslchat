@@ -1,0 +1,10 @@
+name: wasl_model_gate
+description: "بوابة تقييم تشغيل نموذج لغوي على الجهاز: قراءة الذاكرة من /proc/meminfo وحكم مرشّح الأعمق الممكن بهامش معلن — نقية بلا إذن ولا شبكة."
+version: 1.9.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dev_dependencies:
+  test: ^1.25.0

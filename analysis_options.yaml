@@ -12,6 +12,9 @@ analyzer:
     - ios/**
     - android/**
     - web/**
+    # محركات وصل النقية (1.9.0): حزم مستقلة بpubspec خاصها — تحلل بنفسها
+    # عبر dart analyze داخل مجلد كل حزمة، لا ضمن سياق تطبيق Flutter
+    - engines/**
 
 linter:
   rules:

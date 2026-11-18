@@ -1,0 +1,10 @@
+name: wasl_translate
+description: "الترجمة القاموسية المحلية عربي↔إنجليزي بلا شبكة: عبارات المراسلة أولاً بتغطية معلنة وتطبيع الهمزات والتشكيل — نقية."
+version: 1.9.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dev_dependencies:
+  test: ^1.25.0

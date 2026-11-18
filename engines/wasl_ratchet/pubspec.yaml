@@ -1,0 +1,13 @@
+name: wasl_ratchet
+description: "نواة التشفير الأمامي لمراسل وصل: Double Ratchet بتبادل X3DH ثلاثي وتوقيع Ed25519 للمفاتيح الأولية وبدء جلسات ما بعد الكم الهجين ML-KEM-768 — نقية بلا Flutter ولا شبكة ولا تخزين."
+version: 1.9.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dependencies:
+  cryptography: ^2.7.0
+  pqcrypto: ^0.4.4
+dev_dependencies:
+  test: ^1.25.0

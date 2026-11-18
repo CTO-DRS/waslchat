@@ -51,3 +51,7 @@ app.*.map.json
 
 # Flutter-generated (يُعاد توليده عند pub get/build)
 /android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+
+# محركات وصل النقية (1.9.0): مخلفات dart pub get داخل كل حزمة مستقلة
+engines/**/.dart_tool/
+engines/**/pubspec.lock
