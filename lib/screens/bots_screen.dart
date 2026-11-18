@@ -622,6 +622,56 @@ class _BotDetailsSheetState extends State<_BotDetailsSheet> {
                             BotStatsView.chatCountLabel(chats)),
                         _statRow(context, 'نهاية الرمز', '…${b['token_tail'] ?? ''}'),
                         const SizedBox(height: 6),
+                        // إحصاءات الاستخدام المقاسة (المرحلة 15 ج — 1.7.0، ترحيل 039):
+                        // ما يمكن قراءته فعلاً من الجداول القائمة — بلا تخمين
+                        FutureBuilder<BotStats>(
+                          future: BotService.stats(b['id'] as String),
+                          builder: (context, st) {
+                            if (st.connectionState != ConnectionState.done) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(children: [
+                                  const SizedBox(width: 16, height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2)),
+                                  const SizedBox(width: 10),
+                                  Text('تُقرأ الإحصاءات…',
+                                      style: TextStyle(
+                                          fontSize: 12, color: context.textTertiary)),
+                                ]),
+                              );
+                            }
+                            final s = st.data;
+                            if (s == null) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Text('تعذّرت قراءة الإحصاءات الآن — جرّب إعادة فتح البطاقة',
+                                    style: TextStyle(
+                                        fontSize: 12, color: context.textTertiary)),
+                              );
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _statRow(context, 'الرسائل المرسلة',
+                                    s.totalMessages == 0
+                                        ? 'لا رسائل بعد'
+                                        : '${s.totalMessages} رسالة منذ الإنشاء'),
+                                _statRow(context, 'آخر 24 ساعة',
+                                    s.messages24h == 0
+                                        ? 'صفر — البوت صامت اليوم'
+                                        : '${s.messages24h} رسالة'),
+                                _statRow(context, 'آخر نشاط',
+                                    BotStats.lastActivity(s.lastMessageAtIso, DateTime.now())),
+                                _statRow(context, 'الوصول المقاس',
+                                    BotStats.reachLabel(s.membersReached)),
+                                _statRow(context, 'المقترحات',
+                                    BotStats.proposalsLabel(s)),
+                                const SizedBox(height: 6),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 6),
                         Text(BotStatsView.disclosure,
                             style: TextStyle(
                                 fontSize: 11.5,

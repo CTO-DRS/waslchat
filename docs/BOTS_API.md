@@ -84,6 +84,24 @@ https://<project-ref>.supabase.co/functions/v1/bots-api
 أكواد الأخطاء: `chat_not_found`، `bot_not_in_chat`، `not_allowed` (القناة)،
 `bot_muted`، `rate_limited`، `bad_text_length`.
 
+### proposal في sendMessage — المقترح المنفذ بعد موافقة المشرف (1.7.0)
+
+حقل `proposal` اختياري في sendMessage: بوت مجتمعي يرسل تنبيهه نصاً **ومعه
+مقترح منظماً** (كتم عضو لمدة أو طرده) يخزَّن معلقاً بعد تحقق صارم — وموافقة
+مشرف بشري من شاشة الإشراف تنفذه **بصلاحية المشرف الموافق نفسه**، والتنفيذ
+التلقائي مرفوض تصميمياً وبلا صلاحية جديدة للبوت إطلاقاً.
+
+```json
+{ "method": "sendMessage", "chat_id": "<uuid>", "text": "⚠️ تنبيه إشرافي…",
+  "proposal": { "action": "mute", "target_id": "<uuid عضو>",
+                "minutes": 60, "reason": "سبب ≤200 حرف" } }
+```
+
+قيود الخادم الصارمة (ترحيل 039): غرف المجتمعات العامة حصراً — والهدف عضو
+فعلي في المحادثة — و`action` من mute/kick حصراً (الحظر قرار بشري أثقل) —
+والكتم بمدة 1–43200 والطرد بلا مدة — وسبب حتى 200 حرف. أخطاءه:
+`proposals community rooms only`، `bad proposal action/target/duration/reason`.
+
 ### editMessageText
 تعديل رسالة أرسلها البوت خلال 48 ساعة.
 ```json
@@ -123,6 +141,18 @@ https://<project-ref>.supabase.co/functions/v1/bots-api
   }
 }
 ```
+
+### أحداث العضوية (1.7.0)
+
+إلى جانب الرسائل، يصلك حدثان موقّعان بنفس الترويسة لكل انضمام ومغادرة عضو
+في محادثات بوتك النشطة:
+
+```json
+{ "update_id": "<uuid>", "event": "member_join", "chat_id": "<uuid>",
+  "member_id": "<uuid العضو>", "at": "2026-11-18T09:00:00Z" }
+```
+و`member_leave` بالمغادرة. هذه كل ما أُضاف لما يخرج من الخادم في هذا
+الإصدار — بيانات عضوية كانت غائبة كلياً وموثقة في TRANSPARENCY.md.
 
 ### التحقق من التوقيع (إلزامي أمنياً)
 
