@@ -1,23 +1,29 @@
 {
   "name": "وصل شات",
   "short_name": "وصل شات",
+  "id": "/web/",
   "start_url": "/web/",
   "display": "standalone",
   "background_color": "#070B1F",
   "theme_color": "#070B1F",
-  "description": "وصل شات على الويب",
+  "description": "وصل شات على الويب: محادثاتك المشفّرة من المتصفح",
   "orientation": "any",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["social", "communication"],
   "prefer_related_applications": false,
   "icons": [
     {
       "src": "icons/Icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icons/Icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icons/Icon-maskable-192.png",

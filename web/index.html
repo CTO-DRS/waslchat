@@ -14,7 +14,7 @@
     This is a placeholder for base href that will be replaced by the value of
     the `--base-href` argument provided to `flutter build`.
   -->
-  <base href="/web/">
+  <base href="/">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
@@ -33,6 +33,27 @@
   <meta name="theme-color" content="#070B1F">
   <style>body{background:#070B1F;margin:0}#wl{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#2EE6C5;font-family:sans-serif;font-size:18px}</style>
   <link rel="manifest" href="manifest.json">
+  <script>
+    // المرحلة 12 (0.28.0): تسجيل عامل الصفحة + التقاط حدث التثبيت.
+    // خدمة PWA تقرأ __waslCanInstall و__waslDeferredPrompt من هنا.
+    window.__waslCanInstall = false;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      window.__waslDeferredPrompt = e;
+      window.__waslCanInstall = true;
+    });
+    window.addEventListener('appinstalled', function () {
+      window.__waslCanInstall = false;
+      window.__waslDeferredPrompt = null;
+    });
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {
+          // فشل التسجيل لا يمنع التطبيق — بلا عمل دون اتصال بصدق
+        });
+      });
+    }
+  </script>
 </head>
 <body>
   <div id="wl">وصل شات… جارٍ التحميل</div>
