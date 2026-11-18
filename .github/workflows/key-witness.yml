@@ -1,0 +1,57 @@
+name: Key transparency witness
+# المرحلة 15 ب (1.6.0): الشهود الخارجيون لشفافية المفاتيح — إغلاق الحد F7.
+# شاهد آلي يقرأ لقطة دورية من الدالتين العموميتين (ترحيل 038 — بصمات عمياء
+# حصراً بلا معرّفات ولا مفاتيح) ويلحقها بسجل إلحاحي عام على فرع witness-log
+# في هذا المستودع — فأي إعادة كتابة لتاريخ المفاتيح على الخادم تغيّر اللقطات
+# الجديدة عن المنشورة قديماً فيكشف الانتهاك أمام الجميع.
+# الصدق: سجل الشاهد يُدار آلياً بهذا المفتاح الداخلي نفسه — شهود مستقلون
+# يشغّلون tools/key_transparency_witness.py من عندهم هم مكمّل القوة الحقيقية
+# (docs/WITNESS.md تشرح ذلك خطوة بخطوة). الأسرار: صفر — مفتاح anon مفتوح
+# بالتصميم ويُضبط كمتغير مستودع SUPABASE_URL وSUPABASE_ANON_KEY.
+on:
+  schedule:
+    - cron: '17 * * * *' # كل ساعة عند الدقيقة 17 — خارج زحام الدقائق المدورة
+  workflow_dispatch:
+permissions:
+  contents: write # لدفع فرع witness-log الحامل لسجل اللقطات
+concurrency:
+  group: key-witness
+  cancel-in-progress: false # اللقطات لا تُساقط — الإلحاح يصطف لا يُلغى
+jobs:
+  witness:
+    # حارس المستودع: الشاهد على قناة النشر العامة حصراً — فرع witness-log
+    # سجل عام يملكه الجميع، والخاص لا يشغّل شيئاً (لا سر يُلمس إطلاقاً)
+    if: github.repository == 'CTO-DRS/waslchat'
+    runs-on: ubuntu-latest
+    steps:
+      - name: نسخة كود الأداة من الفرع الرئيسي
+        uses: actions/checkout@v4
+        with:
+          path: src
+      - name: جلب فرع سجل الشاهد (أو بدء سجل جديد)
+        run: |
+          git clone --depth 1 --branch witness-log \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" logdir \
+            2>/dev/null || git init -b witness-log logdir
+          cd logdir
+          git config user.name "wasl-witness-bot"
+          git config user.email "witness@waslchat.app"
+      - name: إلحاح لقطة الشهود بتحقق الاتساق قبل الكتابة
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          cd logdir
+          python3 ../src/tools/key_transparency_witness.py append \
+            --url "$SUPABASE_URL" --key "$SUPABASE_ANON_KEY" \
+            --log witness.jsonl --min-heads 1
+      - name: دفع السجل إن تغيّر
+        run: |
+          cd logdir
+          if git status --porcelain | grep -q witness.jsonl; then
+            git add witness.jsonl
+            git commit -m "لقطة شهداء شفافية المفاتيح: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            git push -u origin witness-log
+          else
+            echo "السجل لم يتغير — بلا دفع فارغ"
+          fi

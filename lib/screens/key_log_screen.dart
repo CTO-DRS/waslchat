@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../services/key_transparency_service.dart';
+import '../services/key_witness_service.dart';
 import '../theme.dart';
 
 String _fpGroups(String fp) {
@@ -68,6 +70,7 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
   bool? _chainOk;
   int _brokenAt = -1;
   String? _note;
+  String _blind = '';
 
   @override
   void initState() {
@@ -89,11 +92,16 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
       return;
     }
     final (ok, at) = await KeyTransparencyService.verifyChain(rows);
+    // بصمتك العمياء عند الشهود (1.6.0): رأس سلسلتك مغلف بمعرفك — يعرف
+    // معناها صاحبها حصراً، والشاهد الخارجي يراها بصمة غامقة بلا هوية
+    final blind = await KeyWitnessService.blindFromChain(
+        rows.last.userId, [for (final r in rows) r.entryHash]);
     if (!mounted) return;
     setState(() {
       _rows = rows;
       _chainOk = ok;
       _brokenAt = at;
+      _blind = blind;
       _loading = false;
     });
   }
@@ -167,16 +175,80 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
                         style: const TextStyle(height: 1.6, fontSize: 13)),
                   ),
                 const SizedBox(height: 6),
+                if (_chainOk == true && _blind.isNotEmpty)
+                  Card(
+                    color: context.surfaceAlt,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.visibility_off_rounded,
+                                  size: 18, color: WaslColors.indigo),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text('بصمتك عند الشهود — عمياء',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w800)),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.copy_rounded, size: 18),
+                                tooltip: 'نسخ البصمة العمياء',
+                                onPressed: () async {
+                                  await Clipboard.setData(
+                                      ClipboardData(text: _blind));
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text(
+                                              'نُسخت البصمة العمياء — تحقق بها من سجل الشهود العام')));
+                                },
+                              ),
+                            ]),
+                            const SizedBox(height: 6),
+                            Text(
+                              _groupHex(_blind),
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  height: 1.5,
+                                  fontFamily: 'monospace',
+                                  color: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.color),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'هذه بصمة رأس سلسلتك مغلفة بمعرّف حسابك — لا يفكّ معناها إلا صاحبها أنت. الشاهد الخارجي (سجل witness-log في المستودع العام، وأي طرف يشغّل الأداة المفتوحة) يوثقها دورياً: إن أُعيدت كتابة تاريخ المفاتيح على الخادم خلف ظهورك، تتغير اللقطات المنشورة عن الجديدة فيكشف الانتهاك أمام الجميع — الحد البنيوي للسجل المُستضاف على الخادم نفسه أُغلق بشاهد لا بوعد (docs/WITNESS.md تشرح التحقق خطوة خطوة).',
+                              style: TextStyle(
+                                  height: 1.55, fontSize: 12.5),
+                            ),
+                          ]),
+                    ),
+                  ),
+                const SizedBox(height: 6),
                 for (var i = 0; i < _rows.length; i++)
                   _entryTile(_rows[i], i),
                 const SizedBox(height: 12),
                 const Text(
-                  'حدود صادقة: السجل مُستضاف على خادم وصل نفسه — من يستطيع إعادة كتابة القاعدة كلها يستطيع نظرياً بناء سلسلة كاذبة متسقة (الشفافية الكاملة ب شهود خارجيين بعد 1.0). ما يكشفه السجل اليوم: أي عبث جزئي — حذف حدث، تعديل بصمة، إعادة ترتيب، استبدال تاريخي.',
+                  'حدود صادقة: السجل مُستضاف على خادم وصل نفسه — العبث الجزئي والحذف وإعادة الترتيب يكشفهم التحقق المحلي، والشهود الخارجيون (1.6.0 — ترحيل 038) يوثّقون رؤوس السلاسل بصمات عمياء دورياً أمام الجميع. الحد المتبقي معلن في WITNESS.md §6: خادم قد يظهر وجهين لشاهدٍ ولصاحب السلسلة — الحد البنيوي لأي شفافية بمصدر قراءة واحد، تُغله شهود متعددون مستقلون لا وعود.',
                   style: TextStyle(height: 1.6, fontSize: 12.5),
                 ),
               ],
             ),
     );
+  }
+
+  String _groupHex(String hex) {
+    if (hex.length != 64) return hex;
+    final parts = [
+      for (var i = 0; i < 64; i += 8) hex.substring(i, i + 8),
+    ];
+    return parts.join(' ');
   }
 
   Widget _entryTile(KeyLogEntry e, int index) {
