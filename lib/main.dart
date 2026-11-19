@@ -24,6 +24,7 @@ import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/security_screens.dart';
 import 'services/push_service.dart';
+import 'services/tone_service.dart';
 import 'widgets/lock_gate.dart';
 
 Future<void> main() async {
@@ -34,6 +35,7 @@ Future<void> main() async {
   await FontScaleService.load();
   await WallpaperService.load();
   await LocaleService.load();
+  await ToneService.load();
   await MetricsService.init();
   // المرحلة 13 أ (1.1.0): قياس السقوط الإطاري وذاكرة الوسائط بسقف معلن —
   // قياس محلي حصراً يعرضه صاحبه في ورقة المؤشرات
