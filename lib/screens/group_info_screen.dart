@@ -11,6 +11,7 @@ import '../services/invite_service.dart';
 import '../services/media_service.dart';
 import '../theme.dart';
 import '../widgets/group_avatar.dart';
+import 'chat_studio_screen.dart';
 
 /// نتيجة شاشة معلومات المجموعة للمحادثة
 class GroupInfoResult {
@@ -441,6 +442,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       textAlign: TextAlign.center,
                       style: TextStyle(color: context.textTertiary)),
                   const SizedBox(height: 12),
+                  ChatStudioEntry(conversationId: widget.conversationId, title: _title),
+                  const SizedBox(height: 4),
                   ListTile(
                     leading: const Icon(Icons.lock_outline, color: WaslColors.teal),
                     title: const Text('الرسائل مشفّرة بين الأعضاء'),

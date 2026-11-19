@@ -122,7 +122,7 @@ void main() {
       final d = WaslTheme.dark;
       expect(d.scaffoldBackgroundColor, WaslColors.darkBg);
       expect(d.appBarTheme.backgroundColor, Colors.transparent);
-      expect(d.pageTransitionsTheme, isNot(isA<StudioPageTransitions>()));
+      expect(d.pageTransitionsTheme, isA<StudioPageTransitions>());
       final l = WaslTheme.light;
       expect(l.scaffoldBackgroundColor, const Color(0xFFF2F4FA));
     });

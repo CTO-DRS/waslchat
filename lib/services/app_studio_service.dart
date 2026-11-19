@@ -916,12 +916,45 @@ class WelcomeService {
   /// معرّف الحساب الذي ينتظر جولته الآن (null = لا جولة)
   static final ValueNotifier<String?> pendingFor = ValueNotifier<String?>(null);
 
-  /// يُستدعى عند حدث «تسجيل دخول» فعلي (لا عند استعادة جلسة محفوظة)
+  /// 1.13.1: الجولة لا تظهر إلا بعد إجراء دخول/تسجيل صريح من شاشة الدخول.
+  /// Supabase قد يطلق حدث signedIn عند استعادة الجلسة أو تجديد الرمز، فلا
+  /// يكفي الحدث وحده — شاشة الدخول «تسلّح» الجولة قبل طلب الدخول.
+  static bool _armed = false;
+  static bool get armed => _armed;
+
+  /// تستدعيها شاشة الدخول قبل signIn/signUp/OAuth مباشرة
+  static void expectSignIn() => _armed = true;
+
+  /// إلغاء التسليح (فشل الدخول) — اختياري
+  static void disarm() => _armed = false;
+
+  /// يُستدعى عند حدث «تسجيل دخول»؛ يتجاهله ما لم يسبقه إجراء دخول صريح
   static Future<void> onSignedIn(String uid) async {
+    if (!_armed) return;
+    _armed = false;
     try {
       final seen = await _storage.read(key: '$_prefix$uid');
       if (seen != '1') pendingFor.value = uid;
     } catch (_) {}
+  }
+
+  /// جلسة موجودة عند فتح التطبيق (مستخدم كان داخلاً قبل التحديث):
+  /// تُعلَّم الجولة كمشاهَدة بصمت لهذا الحساب. تبقى إعادتها من الإعدادات.
+  static Future<void> onSessionRestored(String uid) async {
+    if (pendingFor.value == uid) return;
+    try {
+      final seen = await _storage.read(key: '$_prefix$uid');
+      if (seen != '1') await _storage.write(key: '$_prefix$uid', value: '1');
+    } catch (_) {}
+  }
+
+  /// هل شوهدت الجولة لهذا الحساب؟ (للاختبارات والإعدادات)
+  static Future<bool> seenFor(String uid) async {
+    try {
+      return await _storage.read(key: '$_prefix$uid') == '1';
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> markSeen() async {

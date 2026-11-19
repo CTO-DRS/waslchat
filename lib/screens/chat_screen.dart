@@ -3508,21 +3508,23 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
              : (!widget.isGroup && widget.otherId != null ? _openContact : null),
          behavior: HitTestBehavior.opaque,
          child: Row(children: [
-          if (widget.isGroup && !widget.isChannel && (_groupAvatarPath ?? '').isNotEmpty)
-            GroupAvatar(
-              conversationId: widget.conversationId,
-              path: _groupAvatarPath,
-              name: _title,
-              radius: 20,
-            )
-          else
-            UserAvatar(
-              name: _title,
-              url: _otherAvatar,
-              radius: 20,
-              color: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
-              icon: widget.isGroup ? (widget.isChannel ? Icons.campaign : Icons.groups_2) : null,
-            ),
+          Hero(
+            tag: 'chat-avatar-${widget.conversationId}',
+            child: (widget.isGroup && !widget.isChannel && (_groupAvatarPath ?? '').isNotEmpty)
+                ? GroupAvatar(
+                    conversationId: widget.conversationId,
+                    path: _groupAvatarPath,
+                    name: _title,
+                    radius: 20,
+                  )
+                : UserAvatar(
+                    name: _title,
+                    url: _otherAvatar,
+                    radius: 20,
+                    color: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
+                    icon: widget.isGroup ? (widget.isChannel ? Icons.campaign : Icons.groups_2) : null,
+                  ),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
