@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- نغمات وصل شات تُستدعى بالاسم من Dart: نمنع حذفها عند تقليص الموارد -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/wasl_classic,@raw/wasl_breeze,@raw/wasl_crystal,@raw/wasl_pulse,@raw/wasl_calm,@raw/wasl_voice" />

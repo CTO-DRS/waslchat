@@ -37,6 +37,8 @@ import 'key_log_screen.dart';
 import 'linked_devices_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
+import '../services/tone_service.dart';
+import '../widgets/tone_picker_sheet.dart';
 import 'security_screens.dart';
 
 String _modeLabel(ThemeMode m) => switch (m) {
@@ -216,6 +218,19 @@ class SettingsScreen extends StatelessWidget {
           const SheetSectionLabel('الإشعارات'),
           GlassGroup([
             const _NotificationsTile(),
+            if (!kIsWeb)
+              SheetTile(
+                icon: Icons.music_note_rounded,
+                color: WaslColors.teal,
+                title: 'نغمة الإشعارات',
+                subtitle: '«وصل شات» ثم لحن تختاره — لكل المحادثات',
+                trailing: ValueListenableBuilder<String>(
+                  valueListenable: ToneService.global,
+                  builder: (_, t, __) => Text(ToneService.byId(t).label,
+                      style: TextStyle(color: context.textFaint)),
+                ),
+                onTap: () => showTonePicker(context),
+              ),
             if (!kIsWeb &&
                 DesktopNotifyRules.platformSupported(
                     kIsWeb: false, ioLabel: devicePlatformLabel()))
@@ -234,14 +249,29 @@ class SettingsScreen extends StatelessWidget {
                 'تذكير برمضان والعيدين', () => const HijriOccasionsScreen()),
             if (kIsWeb) const _PwaTile(),
           ]),
-          const SheetSectionLabel('للمحترفين'),
+          const SheetSectionLabel('ما زالت تحت التطوير'),
           GlassGroup([
+            SheetTile(
+              icon: Icons.auto_awesome,
+              color: WaslColors.violet,
+              title: 'وصل AI',
+              subtitle: 'الملخّص والترجمة والصياغة والردود الذكية — من «المزيد» داخل أي محادثة',
+              trailing: const DevBadge(short: true),
+            ),
             _nav(context, Icons.smart_toy_rounded, WaslColors.violet, 'البوتات والمطوّرون',
                 null, () => const BotsScreen()),
+            const _OnDeviceModelTile(),
+            const _MetricsTile(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+              child: Text('هذه الميزات تعمل لكنها ما زالت تتحسّن، وقد تتغيّر أو تخطئ أحياناً.',
+                  style: TextStyle(fontSize: 12, color: context.textFaint)),
+            ),
+          ]),
+          const SheetSectionLabel('للمحترفين'),
+          GlassGroup([
             _nav(context, Icons.fact_check_rounded, WaslColors.teal, 'سجل المفاتيح',
                 'كل تغيير في مفاتيح حسابك', () => const KeyLogScreen()),
-            const _MetricsTile(),
-            const _OnDeviceModelTile(),
           ]),
           const SheetSectionLabel('المساعدة'),
           GlassGroup([

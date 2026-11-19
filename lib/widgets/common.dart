@@ -261,3 +261,39 @@ class VerifiedBadge extends StatelessWidget {
         child: Icon(Icons.verified, size: size, color: color),
       );
 }
+
+
+/// شارة الحساب الرسمي لوصل شات (1.11.0): درع بتدرّج ألوان التطبيق مع علامة
+/// تحقق — تميّز حسابات التطبيق نفسه (@waslchat، الدعم، القناة والمجموعة
+/// الرسمية) عن التوثيق الأزرق العادي. العرض فقط؛ المنح من الخادم.
+class OfficialBadge extends StatelessWidget {
+  const OfficialBadge({super.key, this.size = 16});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: 'حساب رسمي من وصل شات',
+        child: ShaderMask(
+          shaderCallback: (r) => WaslColors.gradient.createShader(r),
+          child: Icon(Icons.verified_user_rounded, size: size, color: Colors.white),
+        ),
+      );
+}
+
+/// وسم «ما زالت تحت التطوير» (1.11.0) للميزات غير المكتملة
+class DevBadge extends StatelessWidget {
+  const DevBadge({super.key, this.short = false});
+  final bool short;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF59E0B).withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(short ? 'تحت التطوير' : 'ما زالت تحت التطوير',
+            style: const TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFD97706))),
+      );
+}

@@ -15,6 +15,8 @@ import io.flutter.plugin.common.MethodChannel
 /// FlutterFragmentActivity بدل FlutterActivity: مطلوب لقفل التطبيق بالبصمة
 /// (BiometricPrompt في local_auth) — نفس سلوك التطبيق دون تغيير.
 class MainActivity : FlutterFragmentActivity() {
+    private var tonePlayer: android.media.MediaPlayer? = null
+
     // Wasl Shield (1.10.0): اكتشاف الالتقاط حيث يدعم النظام — يبلّغ Flutter فقط،
     // والمنع الفعلي هو FLAG_SECURE عبر قناة wasl/secure.
     private var shieldChannel: MethodChannel? = null
@@ -133,6 +135,29 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "wasl/notify")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // معاينة نغمة «وصل شات» من res/raw (1.11.0)
+                    "playTone" -> {
+                        try {
+                            val name = call.argument<String>("name") ?: ""
+                            tonePlayer?.release()
+                            tonePlayer = null
+                            if (name == "system") {
+                                val uri = android.media.RingtoneManager.getDefaultUri(
+                                    android.media.RingtoneManager.TYPE_NOTIFICATION)
+                                android.media.RingtoneManager.getRingtone(this, uri)?.play()
+                            } else {
+                                val id = resources.getIdentifier(name, "raw", packageName)
+                                if (id != 0) {
+                                    tonePlayer = android.media.MediaPlayer.create(this, id)
+                                    tonePlayer?.setOnCompletionListener { it.release(); if (tonePlayer === it) tonePlayer = null }
+                                    tonePlayer?.start()
+                                }
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
                     "createMessageChannel" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

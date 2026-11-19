@@ -216,7 +216,10 @@ class _ContactScreenState extends State<ContactScreen> {
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
             ),
-            if (_p?['verified'] == true) ...[
+            if (_p?['is_official'] == true) ...[
+              const SizedBox(width: 6),
+              const OfficialBadge(size: 24),
+            ] else if (_p?['verified'] == true) ...[
               const SizedBox(width: 6),
               const VerifiedBadge(size: 22),
             ],

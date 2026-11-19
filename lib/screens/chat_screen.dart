@@ -50,6 +50,7 @@ import '../services/moderation_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
+import '../widgets/tone_picker_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/link_preview_card.dart';
@@ -802,13 +803,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   /// صورة الطرف الآخر — طلب مستقل كي لا يسقطها فشل أي استعلام آخر
   bool _otherVerified = false;
+  bool _otherOfficial = false;
 
   Future<void> _loadOtherAvatar() async {
     if (widget.isGroup || widget.otherId == null) return;
     try {
       final p = await supabase
           .from('profiles')
-          .select('avatar_url, verified')
+          .select('avatar_url, verified, is_official')
           .eq('id', widget.otherId!)
           .maybeSingle();
       if (!mounted || p == null) return;
@@ -816,6 +818,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       setState(() {
         if (a != null && a.isNotEmpty) _otherAvatar = a;
         _otherVerified = p['verified'] == true;
+        _otherOfficial = p['is_official'] == true;
       });
     } catch (_) {}
   }
@@ -2450,6 +2453,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const ListTile(
+              dense: true,
+              title: Row(children: [
+                Text('وصل AI', style: TextStyle(fontWeight: FontWeight.w800)),
+                SizedBox(width: 8),
+                DevBadge(),
+              ]),
+            ),
             ListTile(
               leading: const Icon(Icons.question_answer_rounded, color: WaslColors.teal),
               title: const Text('اسأل وصل — من أرشيفك'),
@@ -3015,6 +3026,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               title: 'رمز الأمان',
               subtitle: _verified ? 'موثّق ✓' : 'تأكّد أنك تكلّم الشخص الصحيح',
               onTap: () => go(ctx, _showSafetyNumber)),
+        if (!kIsWeb)
+          SheetTile(
+              icon: Icons.music_note_rounded,
+              color: WaslColors.teal,
+              title: 'نغمة الإشعار',
+              subtitle: 'نغمة خاصة لهذه المحادثة',
+              onTap: () => go(ctx,
+                  () => showTonePicker(context, conversationId: widget.conversationId))),
         SheetTile(
             icon: speaking ? Icons.stop_circle_outlined : Icons.volume_up_rounded,
             color: WaslColors.indigo,
@@ -3448,7 +3467,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
                 ),
-                if (widget.officialVerified || _otherVerified) ...[
+                if (_otherOfficial) ...[
+                  const SizedBox(width: 4),
+                  const OfficialBadge(size: 16),
+                ] else if (widget.officialVerified || _otherVerified) ...[
                   const SizedBox(width: 4),
                   const VerifiedBadge(size: 15),
                 ],

@@ -550,7 +550,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontWeight: FontWeight.w700)),
                             ),
-                            if (verified) ...[
+                            if (official) ...[
+                              const SizedBox(width: 4),
+                              const OfficialBadge(size: 16),
+                            ] else if (verified) ...[
                               const SizedBox(width: 4),
                               const VerifiedBadge(size: 15),
                             ],

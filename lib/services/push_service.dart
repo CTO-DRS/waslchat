@@ -16,6 +16,7 @@ import '../firebase_options.dart';
 import '../theme.dart';
 import 'call_quality_service.dart';
 import 'quick_action_service.dart';
+import 'tone_service.dart';
 
 /// الإشعارات عبر Firebase Cloud Messaging (اختيارية: إن لم يُعدّ Firebase تُتجاهل).
 /// منذ 0.7.3:
@@ -185,12 +186,16 @@ class PushService {
     if (!_localNotifReady) await _initLocalNotifications();
     if (!_localNotifReady) return;
     final payload = QuickActionService.encodeOpen(conversationId, messageId: messageId);
+    // نغمة «وصل شات» (1.11.0): نغمة المحادثة إن اختيرت، وإلا النغمة العامة
+    final tone = await ToneService.effective(conversationId);
     final details = AndroidNotificationDetails(
-      'messages', // نفس قناة «الرسائل» الأصلية بأهمية عالية
-      'الرسائل',
+      ToneService.channelId(tone),
+      ToneService.channelName(tone),
       channelDescription: 'تنبيهات الرسائل الجديدة في محادثاتك',
       importance: Importance.high,
       priority: Priority.high,
+      sound: tone == 'system' ? null : RawResourceAndroidNotificationSound(tone),
+      playSound: true,
       groupKey: conversationId,
       setAsGroupSummary: false,
       category: AndroidNotificationCategory.message,
@@ -317,13 +322,15 @@ class PushService {
     await _initLocalNotifications();
     if (!_localNotifReady) return 'تعذّر تهيئة الإشعارات المحلية';
     if (!fireAt.isAfter(DateTime.now())) return 'الوقت المكتشف انقضى — بلا جدولة';
-    const details = NotificationDetails(
+    final tone = await ToneService.effective(null);
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        'wasl-reminders',
+        tone == 'system' ? 'wasl-reminders' : 'rem_${tone}_v1',
         'التذكيرات المحلية',
         channelDescription: 'تذكيرات المواعيد على جهازك من وصل شات',
         importance: Importance.high,
         priority: Priority.high,
+        sound: tone == 'system' ? null : RawResourceAndroidNotificationSound(tone),
       ),
     );
     final id = localReminderId(fireAt);
