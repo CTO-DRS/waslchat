@@ -23,6 +23,8 @@ android {
 
     dependencies {
         coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+        // استوديو الصوت (1.12.0): FileProvider لنغماتك
+        implementation("androidx.core:core:1.13.1")
     }
 
     defaultConfig {

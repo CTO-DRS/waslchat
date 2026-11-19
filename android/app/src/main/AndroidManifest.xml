@@ -20,6 +20,16 @@
         android:label="وصل شات"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- استوديو الصوت (1.12.0): نغماتك تُقرأ من هنا لنظام الإشعارات -->
+        <provider
+            android:name=".ToneFileProvider"
+            android:authorities="${applicationId}.tones"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/tone_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- نغمات وصل شات تُستدعى بالاسم من Dart: نمنع حذفها عند تقليص الموارد -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@raw/wasl_classic,@raw/wasl_breeze,@raw/wasl_crystal,@raw/wasl_pulse,@raw/wasl_calm,@raw/wasl_voice" />
+    tools:keep="@raw/wasl_classic,@raw/wasl_breeze,@raw/wasl_crystal,@raw/wasl_pulse,@raw/wasl_calm,@raw/wasl_voice,@raw/wasl_man,@raw/wasl_man_deep,@raw/wasl_man_energy,@raw/wasl_anchor,@raw/wasl_grand,@raw/wasl_newmsg,@raw/wasl_whisper,@raw/wasl_warm,@raw/wasl_cheer,@raw/wasl_soft,@raw/wasl_bright,@raw/wasl_kid,@raw/wasl_kid_play,@raw/wasl_kid_boy,@raw/wasl_robot,@raw/wasl_radio,@raw/wasl_space,@raw/wasl_echo,@raw/wasl_giant,@raw/tone_marimba,@raw/tone_bubble,@raw/tone_oasis,@raw/tone_star,@raw/tone_dawn,@raw/tone_knock,@raw/tone_alert,@raw/tone_classic" />

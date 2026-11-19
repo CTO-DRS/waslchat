@@ -38,7 +38,7 @@ import 'linked_devices_screen.dart';
 import 'profile_screen.dart';
 import 'starred_screen.dart';
 import '../services/tone_service.dart';
-import '../widgets/tone_picker_sheet.dart';
+import 'voice_studio_screen.dart';
 import 'security_screens.dart';
 
 String _modeLabel(ThemeMode m) => switch (m) {
@@ -222,14 +222,15 @@ class SettingsScreen extends StatelessWidget {
               SheetTile(
                 icon: Icons.music_note_rounded,
                 color: WaslColors.teal,
-                title: 'نغمة الإشعارات',
-                subtitle: '«وصل شات» ثم لحن تختاره — لكل المحادثات',
+                title: 'استوديو الصوت',
+                subtitle: 'نغمات «وصل شات» بأصوات وألحان، أو اصنع نغمتك',
                 trailing: ValueListenableBuilder<String>(
                   valueListenable: ToneService.global,
                   builder: (_, t, __) => Text(ToneService.byId(t).label,
                       style: TextStyle(color: context.textFaint)),
                 ),
-                onTap: () => showTonePicker(context),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const VoiceStudioScreen())),
               ),
             if (!kIsWeb &&
                 DesktopNotifyRules.platformSupported(
