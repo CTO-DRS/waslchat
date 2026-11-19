@@ -152,9 +152,9 @@ class WaslTheme {
 
     final needsWrap = s.backdrop != StudioBackdrop.plain &&
         s.backdrop != StudioBackdrop.pure;
-    final transitions = (needsWrap || s.motion != StudioMotion.full)
-        ? StudioPageTransitions(wrap: needsWrap, motion: s.motion)
-        : null;
+    // 1.13.1: انتقال موحّد للتطبيق كله (تلاشٍ + انزلاق وتكبير خفيف ~260ms)
+    // يحترم «مستوى الحركة»: خفيفة = تلاشٍ قصير، متوقفة = فوري
+    final transitions = StudioPageTransitions(wrap: needsWrap, motion: s.motion);
 
     return ThemeData(
       useMaterial3: true,
@@ -184,10 +184,71 @@ class WaslTheme {
   }
 }
 
+/// انتقال صفحات وصل الموحّد (1.13.1): تلاشٍ مع انزلاق قصير وتكبير خفيف
+/// للصفحة الداخلة، وتراجع خفيف للصفحة السابقة. المدة حسب «مستوى الحركة»:
+/// كاملة 260ms، خفيفة 180ms (تلاشٍ فقط)، متوقفة = فوري بلا حركة.
+class WaslPageTransitionsBuilder extends PageTransitionsBuilder {
+  const WaslPageTransitionsBuilder(this.motion);
+  final StudioMotion motion;
+
+  static Duration durationFor(StudioMotion m) => switch (m) {
+        StudioMotion.full => const Duration(milliseconds: 260),
+        StudioMotion.reduced => const Duration(milliseconds: 180),
+        StudioMotion.off => Duration.zero,
+      };
+
+  @override
+  Duration get transitionDuration => durationFor(motion);
+
+  @override
+  Duration get reverseTransitionDuration => durationFor(motion);
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    switch (motion) {
+      case StudioMotion.off:
+        return child;
+      case StudioMotion.reduced:
+        return FadeTransition(opacity: animation, child: child);
+      case StudioMotion.full:
+        final rtl = Directionality.maybeOf(context) == TextDirection.rtl;
+        final inC = CurvedAnimation(
+            parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+        final outC = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: Tween<double>(begin: 1, end: 0.85).animate(outC),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 1, end: 0.97).animate(outC),
+            child: FadeTransition(
+              opacity: inC,
+              child: SlideTransition(
+                position: Tween<Offset>(begin: Offset(rtl ? -0.06 : 0.06, 0), end: Offset.zero)
+                    .animate(inC),
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.98, end: 1).animate(inC),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+    }
+  }
+}
+
 /// انتقالات الصفحات حسب الاستوديو: ترسم خلفية التطبيق خلف كل صفحة،
-/// وتخفّف الحركة أو توقفها حسب «مستوى الحركة».
+/// وتطبّق انتقال وصل الموحّد حسب «مستوى الحركة» على كل المنصات.
 class StudioPageTransitions extends PageTransitionsTheme {
-  const StudioPageTransitions({required this.wrap, required this.motion});
+  StudioPageTransitions({required this.wrap, required this.motion})
+      : super(builders: {
+          for (final p in TargetPlatform.values) p: WaslPageTransitionsBuilder(motion),
+        });
   final bool wrap;
   final StudioMotion motion;
 
@@ -200,14 +261,8 @@ class StudioPageTransitions extends PageTransitionsTheme {
     Widget child,
   ) {
     final c = wrap ? StudioBackdropView(child: child) : child;
-    switch (motion) {
-      case StudioMotion.off:
-        return c;
-      case StudioMotion.reduced:
-        return FadeTransition(opacity: animation, child: c);
-      case StudioMotion.full:
-        return super.buildTransitions(route, context, animation, secondaryAnimation, c);
-    }
+    return WaslPageTransitionsBuilder(motion)
+        .buildTransitions(route, context, animation, secondaryAnimation, c);
   }
 
   @override

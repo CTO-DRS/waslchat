@@ -524,19 +524,22 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         final groupAvatar = c['avatar_url'] as String?;
                         return ListTile(
                           leading: Stack(clipBehavior: Clip.none, children: [
-                            if (isGroup && (groupAvatar ?? '').isNotEmpty)
-                              GroupAvatar(
-                                conversationId: c['conversation_id'] as String,
-                                path: groupAvatar,
-                                name: name,
-                              )
-                            else
-                              UserAvatar(
-                                name: name,
-                                url: isGroup ? null : c['avatar_url'] as String?,
-                                color: isGroup ? WaslColors.teal : WaslColors.indigo,
-                                icon: isGroup ? Icons.groups_2 : null,
-                              ),
+                            // 1.13.1: الصورة تطير إلى شريط المحادثة (Hero)
+                            Hero(
+                              tag: 'chat-avatar-${c['conversation_id']}',
+                              child: (isGroup && (groupAvatar ?? '').isNotEmpty)
+                                  ? GroupAvatar(
+                                      conversationId: c['conversation_id'] as String,
+                                      path: groupAvatar,
+                                      name: name,
+                                    )
+                                  : UserAvatar(
+                                      name: name,
+                                      url: isGroup ? null : c['avatar_url'] as String?,
+                                      color: isGroup ? WaslColors.teal : WaslColors.indigo,
+                                      icon: isGroup ? Icons.groups_2 : null,
+                                    ),
+                            ),
                             if (!isGroup)
                               ValueListenableBuilder<Set<String>>(
                                 valueListenable: PresenceService.online,

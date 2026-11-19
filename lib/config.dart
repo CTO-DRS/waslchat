@@ -7,8 +7,8 @@ class AppConfig {
   /// إصدار هذا البناء — يُحدّث مع كل إصدار (وليس تلقائياً).
   /// **يجب أن يطابق pubspec.yaml حرفياً** — اختبار version_sync_test يفحص
   /// التطابق عند كل بناء فأي انزياح يكسر الاختبارات (فشل 0.26/0.27 المكتشف).
-  static const appVersion = '1.13.0';
-  static const appBuild = 79;
+  static const appVersion = '1.13.1';
+  static const appBuild = 80;
 
   /// رابط الموقع الرسمي (يُستخدم لروابط الدعوة وصفحات الويب)
   static const siteUrl = 'https://waslchat.app';

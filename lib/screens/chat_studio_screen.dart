@@ -393,3 +393,25 @@ class _ColorRow extends StatelessWidget {
           ),
       ]);
 }
+
+/// مدخل «استوديو المحادثة» في شاشة معلومات المحادثة/المجموعة (1.13.1) —
+/// نفس الاستوديو المتاح من قائمة «المزيد» في المحادثة.
+class ChatStudioEntry extends StatelessWidget {
+  const ChatStudioEntry({super.key, required this.conversationId, required this.title});
+  final String conversationId;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => GlassGroup([
+        SheetTile(
+          icon: Icons.palette_rounded,
+          color: WaslColors.violet,
+          title: 'استوديو المحادثة',
+          subtitle: 'خلفية وألوان وخط هذه المحادثة',
+          trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) =>
+                  ChatStudioScreen(conversationId: conversationId, title: title))),
+        ),
+      ]);
+}

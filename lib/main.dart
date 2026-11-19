@@ -63,7 +63,10 @@ Future<void> main() async {
   PwaService.init();
   WebPushService.init();
   _initCrashlytics();
-  // جولة الترحيب (1.13.0): عند أول تسجيل دخول فعلي لكل حساب على الجهاز
+  // جولة الترحيب (1.13.1): جلسة محفوظة عند الفتح = مستخدم قديم، تُعلَّم بصمت
+  final restored = supabase.auth.currentSession?.user.id;
+  if (restored != null) await WelcomeService.onSessionRestored(restored);
+  // وتظهر فقط بعد دخول صريح من شاشة الدخول (لا استعادة جلسة ولا تجديد رمز)
   supabase.auth.onAuthStateChange.listen((st) {
     final uid = st.session?.user.id;
     if (st.event == AuthChangeEvent.signedIn && uid != null) {

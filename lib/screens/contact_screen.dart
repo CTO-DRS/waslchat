@@ -5,6 +5,7 @@ import '../services/block_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/report_dialog.dart';
+import 'chat_studio_screen.dart';
 
 String disappearLabel(int? s) {
   switch (s) {
@@ -252,6 +253,8 @@ class _ContactScreenState extends State<ContactScreen> {
             ),
           ],
           const SizedBox(height: 16),
+          ChatStudioEntry(conversationId: widget.conversationId, title: widget.title),
+          const SizedBox(height: 8),
           if (widget.onSafetyNumber != null)
             ListTile(
               leading: const Icon(Icons.verified_user_outlined, color: WaslColors.teal),

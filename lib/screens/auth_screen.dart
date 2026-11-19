@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart' as ul;
 
 import '../config.dart';
+import '../services/app_studio_service.dart';
 import '../theme.dart';
 import '../widgets/wasl_mascot.dart';
 
@@ -87,6 +88,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           return;
         }
         TextInput.finishAutofillContext();
+        WelcomeService.expectSignIn();
         final res = await supabase.auth.signUp(
           email: email,
           password: password,
@@ -96,11 +98,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           _show('تم إنشاء الحساب. تحقق من بريدك لتفعيله');
         }
       } else {
+        WelcomeService.expectSignIn();
         await supabase.auth.signInWithPassword(email: email, password: password);
       }
     } on AuthException catch (e) {
+      WelcomeService.disarm();
       _show(e.message);
     } catch (_) {
+      WelcomeService.disarm();
       _show('حدث خطأ غير متوقع');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -110,14 +115,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   Future<void> _google() async {
     setState(() => _loading = true);
     try {
+      WelcomeService.expectSignIn();
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: AppConfig.authRedirect,
         authScreenLaunchMode: LaunchMode.externalApplication,
       );
     } on AuthException catch (e) {
+      WelcomeService.disarm();
       _show(e.message);
     } catch (_) {
+      WelcomeService.disarm();
       _show('تعذّر فتح تسجيل الدخول بجوجل');
     } finally {
       if (mounted) setState(() => _loading = false);
