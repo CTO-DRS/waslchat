@@ -37,11 +37,11 @@ jobs:
             pack: zip-app
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.47.9
+          flutter-version: 3.50.0
           cache: true
       # توليد مجلدات المنصة المطلوبة فقط (لا تمس الأندرويد والويب القائمين)
       - run: flutter config --enable-${{ matrix.target }}-desktop
@@ -74,7 +74,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/wasl_chat.app "wasl_chat_${VERSION}_macos.zip"
           echo "PKG=wasl_chat_${VERSION}_macos.zip" >> $GITHUB_ENV
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.path }}
