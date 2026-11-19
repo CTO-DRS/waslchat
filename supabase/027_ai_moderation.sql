@@ -133,7 +133,7 @@ begin
     'public.community_set_ai_moderation(uuid, boolean)',
     'public.community_ai_flags_list(uuid)',
     'public.community_ai_flag_resolve(uuid, text)'
-  ] loop
+  ]) loop
     execute format('revoke execute on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
   end loop;

@@ -34,7 +34,7 @@ security definer
 set search_path = public
 as $$
   select
-    encode(digest('wt1|' || u.uid::text || '|' || u.head, 'sha256'), 'hex') as blind_digest,
+    encode(extensions.digest('wt1|' || u.uid::text || '|' || u.head, 'sha256'), 'hex') as blind_digest,
     c.len as chain_len,
     u.last_at as last_event_at
   from (
@@ -63,7 +63,7 @@ set search_path = public
 as $$
   select coalesce(
     encode(
-      digest(
+      extensions.digest(
         (select string_agg(h.blind_digest, chr(10) order by h.blind_digest)
          from public.key_log_witness_heads() h),
         'sha256'),

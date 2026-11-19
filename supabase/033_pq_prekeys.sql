@@ -120,8 +120,7 @@ grant execute on function public.e2e_claim_prekey(uuid, uuid) to authenticated;
 
 do $$ begin
   alter publication supabase_realtime add table public.devices;
-exception when duplicate_object then null;
-exception when undefined_object then null;
+exception when duplicate_object or undefined_object then null;
 end $$;
 
 -- 4) التحققات ---------------------------------------------------------------

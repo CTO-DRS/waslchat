@@ -489,7 +489,7 @@ begin
     'public.community_bans_list(uuid)',
     'public.community_mod_log_list(uuid)',
     'public.my_mute_in_conversation(uuid)'
-  ] loop
+  ]) loop
     execute format('revoke execute on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
   end loop;

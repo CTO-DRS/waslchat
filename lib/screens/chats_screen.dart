@@ -501,6 +501,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         final name = _nameOf(c);
                         final isGroup = c['is_group'] == true;
                         final isBot = !isGroup && c['is_bot'] == true;
+                        final verified = c['verified'] == true;
+                        // الحساب/المجموعة الرسمية: محادثة مفتوحة غير مشفّرة طرفياً (كالبوت)
+                        final official = c['official'] == true;
                         final unread = (c['unread'] as num?)?.toInt() ?? 0;
                         final otherId = c['other_id'] as String?;
                         final groupAvatar = c['avatar_url'] as String?;
@@ -547,6 +550,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontWeight: FontWeight.w700)),
                             ),
+                            if (verified) ...[
+                              const SizedBox(width: 4),
+                              const VerifiedBadge(size: 15),
+                            ],
                             if (isBot) ...[
                               const SizedBox(width: 4),
                               Icon(Icons.smart_toy_outlined,
@@ -603,7 +610,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               isGroup: isGroup,
                               otherId: otherId,
                               isBot: isBot,
-                              encrypted: isGroup || !isBot,
+                              encrypted: official ? false : (isGroup || !isBot),
+                              officialVerified: verified,
                               initialAvatar:
                                   isGroup ? null : c['avatar_url'] as String?,
                             ));

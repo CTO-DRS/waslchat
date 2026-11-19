@@ -74,8 +74,8 @@ create policy "event rsvps read members" on public.community_event_rsvps
 -- 3) الإنشاء والتعديل والحذف — لمشرفي المجتمع (والمنشئ في التعديل والحذف)
 -- ============================================================
 create or replace function public.community_event_create(
-  cid uuid, p_title text, p_description text default null, p_location text default null,
-  p_starts_at timestamptz, p_duration_minutes int default 60, p_remind_minutes int default 30
+  cid uuid, p_title text, p_starts_at timestamptz, p_description text default null,
+  p_location text default null, p_duration_minutes int default 60, p_remind_minutes int default 30
 )
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
@@ -111,8 +111,8 @@ end; $$;
 
 -- التعديل: منشئ الحدث أو مشرفو المجتمع — وقبل بدئه فقط (إعادة تسليح التذكير تلقائياً)
 create or replace function public.community_event_update(
-  eid uuid, p_title text, p_description text default null, p_location text default null,
-  p_starts_at timestamptz, p_duration_minutes int default 60, p_remind_minutes int default 30
+  eid uuid, p_title text, p_starts_at timestamptz, p_description text default null,
+  p_location text default null, p_duration_minutes int default 60, p_remind_minutes int default 30
 )
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -244,13 +244,13 @@ do $$
 declare f text;
 begin
   for f in select unnest(array[
-    'public.community_event_create(uuid, text, text, text, timestamptz, integer, integer)',
-    'public.community_event_update(uuid, text, text, text, timestamptz, integer, integer)',
+    'public.community_event_create(uuid, text, timestamptz, text, text, integer, integer)',
+    'public.community_event_update(uuid, text, timestamptz, text, text, integer, integer)',
     'public.community_event_delete(uuid)',
     'public.community_event_respond(uuid, text)',
     'public.community_events_list(uuid)',
     'public.community_event_rsvps_list(uuid)'
-  ] loop
+  ]) loop
     execute format('revoke execute on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
   end loop;
