@@ -7,6 +7,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/webio/web_files.dart';
+import '../services/app_lock_service.dart';
+import '../services/shield_service.dart';
 import '../theme.dart';
 
 /// تُحمّل بايتات الوسيط (بعد فك التشفير إن كان مشفّراً)
@@ -130,8 +132,11 @@ class ViewOnceImageScreen extends StatelessWidget {
 
 /// فقاعة صورة: تُحمّل مرة واحدة، والضغط يفتحها بملء الشاشة
 class ImageBubble extends StatefulWidget {
-  const ImageBubble({super.key, required this.loader, this.width = 220});
+  const ImageBubble({super.key, required this.loader, this.width = 220, this.protected = false});
   final MediaLoader loader;
+
+  /// Wasl Shield: وسيط محمي — عرض داخل التطبيق فقط، بعلامة مائية باسم المشاهد ومنع الالتقاط
+  final bool protected;
 
   /// العرض المطلوب (يتغير في شبكة الألبوم — 0.20.0)
   final double width;
@@ -172,11 +177,25 @@ class _ImageBubbleState extends State<ImageBubble> {
         return GestureDetector(
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => _FullImage(bytes: bytes)),
+            MaterialPageRoute(builder: (_) => _FullImage(bytes: bytes, protected: widget.protected)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Image.memory(bytes, width: widget.width, fit: BoxFit.cover),
+            child: Stack(children: [
+              Image.memory(bytes, width: widget.width, fit: BoxFit.cover),
+              if (widget.protected)
+                const PositionedDirectional(
+                  top: 6,
+                  start: 6,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                    child: Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.shield_rounded, size: 14, color: Color(0xFF2DD4BF)),
+                    ),
+                  ),
+                ),
+            ]),
           ),
         );
       },
@@ -184,17 +203,54 @@ class _ImageBubbleState extends State<ImageBubble> {
   }
 }
 
-class _FullImage extends StatelessWidget {
-  const _FullImage({required this.bytes});
+class _FullImage extends StatefulWidget {
+  const _FullImage({required this.bytes, this.protected = false});
   final Uint8List bytes;
+  final bool protected;
+
+  @override
+  State<_FullImage> createState() => _FullImageState();
+}
+
+class _FullImageState extends State<_FullImage> {
+  String? _tag;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.protected) {
+      ScreenshotService.setSecure(true);
+      ShieldService.watermarkTag().then((t) {
+        if (mounted) setState(() => _tag = t);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    // العودة لحالة الشاشة السابقة: المحادثة تعيد تطبيق علمها عند الرجوع (routeObserver)
+    if (widget.protected) ScreenshotService.setSecure(false);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final img = Image.memory(widget.bytes, fit: BoxFit.contain);
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black),
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: widget.protected
+            ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.shield_rounded, size: 18, color: Color(0xFF2DD4BF)),
+                SizedBox(width: 6),
+                Text('وسيط محمي', style: TextStyle(fontSize: 15)),
+              ])
+            : null,
+      ),
       body: Center(
-          child: InteractiveViewer(child: Image.memory(bytes, fit: BoxFit.contain))),
+          child: InteractiveViewer(
+              child: widget.protected && _tag != null ? ShieldWatermark(tag: _tag!, child: img) : img)),
     );
   }
 }
