@@ -66,6 +66,7 @@ import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import 'voice_room_screen.dart';
+import '../widgets/wasl_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -1524,69 +1525,68 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   void _showAttachSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: context.surfaceAlt,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => SafeArea(
-        child: Wrap(children: [
-          SwitchListTile(
-            secondary: const Icon(Icons.looks_one_rounded, color: Colors.redAccent),
-            title: const Text('عرض مرة واحدة',
-                style: TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: const Text(
-                'الصورة أو الفيديو التاليان تُحذف من الخادم بعد مشاهدتها'),
-            value: _viewOnce,
-            onChanged: (v) => setState(() => _viewOnce = v),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library_outlined, color: WaslColors.teal),
-            title: Text(
-                _viewOnce ? 'صورة (عرض مرة واحدة)' : 'صورة من المعرض'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _pickImage(ImageSource.gallery);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_album_outlined, color: WaslColors.indigo),
-            title: const Text('ألبوم صور'),
-            subtitle: const Text('حتى 10 صور برسالة واحدة — معاينة متسلسلة'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _pickAlbum();
-            },
-          ),
+    showWaslSheet<void>(
+      context,
+      title: 'إرسال',
+      titleIcon: Icons.attach_file_rounded,
+      children: (ctx) => [
+        SheetActionGrid([
+          SheetAction(Icons.photo_library_rounded,
+              _viewOnce ? 'صورة · مرة' : 'المعرض', WaslColors.teal, () {
+            Navigator.pop(ctx);
+            _pickImage(ImageSource.gallery);
+          }),
           if (!kIsWeb)
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined, color: WaslColors.indigo),
-              title: const Text('الكاميرا'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-          ListTile(
-            leading: const Icon(Icons.movie_outlined, color: WaslColors.violet),
-            title: const Text('فيديو'),
-            subtitle: const Text('حتى ${MediaLimits.maxMediaText}'),
-            onTap: () {
+            SheetAction(Icons.photo_camera_rounded, 'الكاميرا', WaslColors.indigo, () {
               Navigator.pop(ctx);
-              _pickVideo();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.insert_drive_file_outlined, color: Colors.amber),
-            title: const Text('ملف'),
-            subtitle: const Text('PDF، مستندات، وغيرها حتى ${MediaLimits.maxMediaText}'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _pickFile();
-            },
-          ),
+              _pickImage(ImageSource.camera);
+            }),
+          SheetAction(Icons.collections_rounded, 'ألبوم', const Color(0xFFEC4899), () {
+            Navigator.pop(ctx);
+            _pickAlbum();
+          }),
+          SheetAction(Icons.movie_rounded, 'فيديو', WaslColors.violet, () {
+            Navigator.pop(ctx);
+            _pickVideo();
+          }),
+          SheetAction(Icons.description_rounded, 'ملف', const Color(0xFFF59E0B), () {
+            Navigator.pop(ctx);
+            _pickFile();
+          }),
         ]),
-      ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: StatefulBuilder(
+            builder: (ctx2, setSheet) => Container(
+              decoration: BoxDecoration(
+                color: _viewOnce
+                    ? Colors.redAccent.withValues(alpha: 0.12)
+                    : context.glass,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: SwitchListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                secondary: Icon(Icons.looks_one_rounded,
+                    color: _viewOnce ? Colors.redAccent : context.textTertiary),
+                title: const Text('عرض مرة واحدة',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('الصورة أو الفيديو التالي يُحذف بعد مشاهدته',
+                    style: TextStyle(fontSize: 12.5, color: context.textFaint)),
+                value: _viewOnce,
+                onChanged: (v) {
+                  setState(() => _viewOnce = v);
+                  setSheet(() {});
+                },
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 6, 22, 0),
+          child: Text('الحد الأقصى للفيديو والملفات ${MediaLimits.maxMediaText}',
+              style: TextStyle(fontSize: 12, color: context.textFaint)),
+        ),
+      ],
     );
   }
 
@@ -2913,6 +2913,101 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     });
   }
 
+  /// قائمة «المزيد» بورقة سفلية مرتبة: أهم أربع أدوات كأزرار، ثم أقسام
+  void _showMoreSheet() {
+    final speaking = _ttsBusy || VoiceReadService.speaking.value;
+    void go(BuildContext ctx, VoidCallback f) {
+      Navigator.pop(ctx);
+      f();
+    }
+
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        SheetActionGrid([
+          SheetAction(Icons.search_rounded, 'بحث', WaslColors.indigo,
+              () => go(ctx, () => setState(() => _searching = true))),
+          SheetAction(Icons.auto_awesome, 'وصل AI', WaslColors.violet,
+              () => go(ctx, _showAiMenu)),
+          SheetAction(Icons.photo_library_rounded, 'الوسائط', WaslColors.teal,
+              () => go(ctx, _openMediaGallery)),
+          SheetAction(_starredOnly ? Icons.star_rounded : Icons.star_outline_rounded,
+              _starredOnly ? 'كل الرسائل' : 'المميزة', const Color(0xFFF59E0B),
+              () => go(ctx, () => setState(() => _starredOnly = !_starredOnly)),
+              active: _starredOnly),
+        ]),
+        const SheetSectionLabel('هذه المحادثة'),
+        if (_isPrivateGroup)
+          SheetTile(
+              icon: Icons.info_outline_rounded,
+              color: WaslColors.indigo,
+              title: 'معلومات المجموعة',
+              onTap: () => go(ctx, _openGroupInfo)),
+        if (_isPrivateGroup)
+          SheetTile(
+              icon: Icons.spatial_audio_off_rounded,
+              color: WaslColors.teal,
+              title: 'غرفة صوت',
+              subtitle: 'دردشة صوتية مفتوحة لأعضاء المجموعة',
+              onTap: () => go(ctx, _openVoiceRoom)),
+        if (widget.isChannel && widget.canPost)
+          SheetTile(
+              icon: Icons.query_stats_rounded,
+              color: WaslColors.teal,
+              title: 'إحصاءات القناة',
+              onTap: () => go(ctx, _showChannelStats)),
+        if (_showSafety)
+          SheetTile(
+              icon: _verified ? Icons.verified_user_rounded : Icons.verified_user_outlined,
+              color: _verified ? const Color(0xFF2FBE63) : WaslColors.teal,
+              title: 'رمز الأمان',
+              subtitle: _verified ? 'موثّق ✓' : 'تأكّد أنك تكلّم الشخص الصحيح',
+              onTap: () => go(ctx, _showSafetyNumber)),
+        SheetTile(
+            icon: speaking ? Icons.stop_circle_outlined : Icons.volume_up_rounded,
+            color: WaslColors.indigo,
+            title: speaking ? 'إيقاف القراءة' : 'اقرأ آخر الرسائل بصوت',
+            onTap: () => go(ctx, _toggleSpeak)),
+        const SheetSectionLabel('الخصوصية'),
+        if (!widget.isChannel)
+          SheetTile(
+              icon: Icons.timer_outlined,
+              color: WaslColors.violet,
+              title: 'الرسائل المختفية',
+              trailing: Text(disappearLabel(_disappear),
+                  style: TextStyle(color: context.textFaint)),
+              onTap: () => go(ctx, _changeDisappearing)),
+        if (!widget.isChannel)
+          SheetTile(
+              icon: Icons.translate_rounded,
+              color: WaslColors.teal,
+              title: 'الترجمة الفورية',
+              trailing: Icon(
+                  _autoTranslate ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  size: 36,
+                  color: _autoTranslate ? WaslColors.teal : context.textFaint),
+              onTap: () => go(ctx, _toggleAutoTranslate)),
+        SheetTile(
+            icon: Icons.screenshot_monitor_outlined,
+            color: WaslColors.indigo,
+            title: 'منع لقطات الشاشة',
+            subtitle: 'تشغيل أو إيقاف لهذه المحادثة',
+            onTap: () => go(ctx, _toggleNoScreenshots)),
+        const SheetSectionLabel('أخرى'),
+        SheetTile(
+            icon: Icons.ios_share_rounded,
+            color: WaslColors.teal,
+            title: 'تصدير المحادثة نصاً',
+            onTap: () => go(ctx, _exportConversation)),
+        SheetTile(
+            icon: Icons.delete_sweep_outlined,
+            danger: true,
+            title: 'مسح المحادثة عندي',
+            onTap: () => go(ctx, _clearConversation)),
+      ],
+    );
+  }
+
   void _messageActions(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) return;
     final isText = (m['type'] ?? 'text') == 'text';
@@ -2925,175 +3020,187 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final arabic = text != null && RegExp(r'[\u0600-\u06FF]').hasMatch(text);
     final mine = m['sender_id'] == _me;
     final myReaction = _emojiOf(_reactions[m['id']]?[_me] ?? '');
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: context.surfaceAlt,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => SafeArea(
-        child: Wrap(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 14, 12, 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                for (final e in _quickEmojis)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(24),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _react(m, e);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: myReaction == e ? context.glass : null,
-                      ),
-                      child: Text(e, style: const TextStyle(fontSize: 26)),
-                    ),
-                  ),
-              ],
-            ),
+    final starred = _stars.contains(m['id']);
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        // صف التفاعلات داخل كبسولة زجاجية
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: context.glass,
+            borderRadius: BorderRadius.circular(40),
           ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              for (final e in _quickEmojis)
+                InkWell(
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _react(m, e);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: myReaction == e
+                          ? WaslColors.teal.withValues(alpha: 0.30)
+                          : null,
+                    ),
+                    child: Text(e, style: const TextStyle(fontSize: 27)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        SheetActionGrid([
           if (widget.canPost)
-            ListTile(
-              leading: const Icon(Icons.reply_rounded),
-              title: const Text('رد'),
-              onTap: () {
-                Navigator.pop(ctx);
-                setState(() {
-                  _replyTo = m;
-                  _editing = null;
-                });
-              },
-            ),
+            SheetAction(Icons.reply_rounded, 'رد', WaslColors.teal, () {
+              Navigator.pop(ctx);
+              setState(() {
+                _replyTo = m;
+                _editing = null;
+              });
+            }),
           if (text != null)
-            ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: const Text('نسخ'),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: text));
-                Navigator.pop(ctx);
-                _snack('تم النسخ');
-              },
-            ),
-          if (m['deleted_at'] == null)
-            ListTile(
-              leading: Icon(
-                  _stars.contains(m['id']) ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: Colors.amber),
-              title: Text(_stars.contains(m['id']) ? 'إزالة النجمة' : 'تمييز بنجمة'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _toggleStar(m);
-              },
-            ),
+            SheetAction(Icons.copy_rounded, 'نسخ', WaslColors.indigo, () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.pop(ctx);
+              _snack('تم النسخ');
+            }),
+          SheetAction(starred ? Icons.star_rounded : Icons.star_outline_rounded,
+              starred ? 'إلغاء النجمة' : 'نجمة', const Color(0xFFF59E0B), () {
+            Navigator.pop(ctx);
+            _toggleStar(m);
+          }, active: starred),
           if (_e2e && !widget.isChannel && m['view_once'] != true)
-            ListTile(
-              leading: const Icon(Icons.shortcut_rounded),
-              title: const Text('إعادة توجيه'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _forward(m);
-              },
-            ),
+            SheetAction(Icons.shortcut_rounded, 'توجيه', WaslColors.violet, () {
+              Navigator.pop(ctx);
+              _forward(m);
+            }),
           if (_canEdit(m))
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('تعديل'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _startEdit(m);
-              },
-            ),
-          if (text != null)
-            ListTile(
-              leading: const Icon(Icons.translate_rounded, color: WaslColors.violet),
-              title: Text(arabic ? 'ترجمة إلى الإنجليزية' : 'ترجمة إلى العربية'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
-              },
-            ),
-          if (text != null)
-            ListTile(
-              leading: const Icon(Icons.language_rounded, color: WaslColors.violet),
-              title: const Text('ترجمة إلى لغة أخرى…'),
-              subtitle: const Text(
-                  'سحابياً عبر خادم وصل بموافقتك القائمة — والنتيجة تُفحص محلياً أن لغتها طابقت طلبك'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _translateToOtherLanguage(m['id'] as String, text);
-              },
-            ),
-          if (text != null)
-            ListTile(
-              leading: const Icon(Icons.travel_explore_rounded, color: WaslColors.teal),
-              title: Text(
-                  LocalTranslateService.detectScript(text) == 'ar'
-                      ? 'ترجمة محلية إلى الإنجليزية (قاموسية — بلا شبكة)'
-                      : 'ترجمة محلية إلى العربية (قاموسية — بلا شبكة)'),
-              subtitle: const Text('كشف الكتابة تلقائياً على جهازك — تغطية قاموسية أساسية قد تكون ناقصة'),
-              onTap: () {
-                Navigator.pop(ctx);
-                final r = LocalTranslateService.translate(
-                    text,
-                    toEnglish: LocalTranslateService.detectScript(text) == 'ar');
-                _snack(r.low
-                    ? 'الترجمة المحلية تغطية ضعيفة (${(r.coverage * 100).round()}%) — للترجمة الأعمق استخدم الترجمة السحابية'
-                    : 'ترجمة محلية بغطاء ${(r.coverage * 100).round()}%');
-                setState(() => _translations[m['id'] as String] =
-                    '🔁 محلياً: ${r.text}');
-              },
-            ),
-          if (isVoice)
-            ListTile(
-              leading: const Icon(Icons.graphic_eq_rounded, color: WaslColors.teal),
-              title: Text(_transcripts.containsKey(m['id'])
-                  ? 'عرض التفريغ النصي'
-                  : 'تفريغ نصي (تجريبي)'),
-              subtitle: const Text('يُرسل الصوت بعد موافقتك الصريحة إلى Gemini'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _transcribeVoice(m);
-              },
-            ),
-          if (isVoice && _transcripts[m['id']]?.isNotEmpty == true)
-            ListTile(
-              leading: const Icon(Icons.translate_rounded, color: WaslColors.violet),
-              title: const Text('ترجمة التفريغ'),
-              onTap: () {
-                Navigator.pop(ctx);
-                final t = _transcripts[m['id']]!;
-                final isAr = RegExp(r'[\u0600-\u06FF]').hasMatch(t);
-                _showAiResult('ترجمة التفريغ', AiService.translate(t, isAr ? 'en' : 'ar'));
-              },
-            ),
-          if (mine)
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title: const Text('حذف للجميع', style: TextStyle(color: Colors.redAccent)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _delete(m);
-              },
-            ),
-          if (!mine)
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
-              title: const Text('الإبلاغ عن الرسالة',
-                  style: TextStyle(color: Colors.redAccent)),
-              onTap: () {
-                Navigator.pop(ctx);
-                showReportDialog(context,
-                    targetUser: m['sender_id'] as String?,
-                    messageId: m['id'] as String?,
-                    targetName: _senderName(m['sender_id'] as String?));
-              },
-            ),
+            SheetAction(Icons.edit_rounded, 'تعديل', const Color(0xFF0EA5E9), () {
+              Navigator.pop(ctx);
+              _startEdit(m);
+            }),
         ]),
-      ),
+        if (text != null)
+          SheetTile(
+            icon: Icons.translate_rounded,
+            color: WaslColors.violet,
+            title: arabic ? 'ترجمة إلى الإنجليزية' : 'ترجمة إلى العربية',
+            trailing: TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _translateOptions(m, text);
+              },
+              child: const Text('خيارات'),
+            ),
+            onTap: () {
+              Navigator.pop(ctx);
+              _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
+            },
+          ),
+        if (isVoice)
+          SheetTile(
+            icon: Icons.graphic_eq_rounded,
+            color: WaslColors.teal,
+            title: _transcripts.containsKey(m['id'])
+                ? 'عرض النص المكتوب'
+                : 'حوّل الصوت إلى نص',
+            subtitle: 'تجريبي — يُرسل المقطع لـ Gemini بعد موافقتك',
+            onTap: () {
+              Navigator.pop(ctx);
+              _transcribeVoice(m);
+            },
+          ),
+        if (isVoice && _transcripts[m['id']]?.isNotEmpty == true)
+          SheetTile(
+            icon: Icons.translate_rounded,
+            color: WaslColors.violet,
+            title: 'ترجمة النص',
+            onTap: () {
+              Navigator.pop(ctx);
+              final t = _transcripts[m['id']]!;
+              final isAr = RegExp(r'[\u0600-\u06FF]').hasMatch(t);
+              _showAiResult('ترجمة النص', AiService.translate(t, isAr ? 'en' : 'ar'));
+            },
+          ),
+        const SizedBox(height: 4),
+        if (mine)
+          SheetTile(
+            icon: Icons.delete_outline_rounded,
+            danger: true,
+            title: 'حذف للجميع',
+            onTap: () {
+              Navigator.pop(ctx);
+              _delete(m);
+            },
+          ),
+        if (!mine)
+          SheetTile(
+            icon: Icons.flag_outlined,
+            danger: true,
+            title: 'الإبلاغ عن الرسالة',
+            onTap: () {
+              Navigator.pop(ctx);
+              showReportDialog(context,
+                  targetUser: m['sender_id'] as String?,
+                  messageId: m['id'] as String?,
+                  targetName: _senderName(m['sender_id'] as String?));
+            },
+          ),
+      ],
+    );
+  }
+
+  /// خيارات الترجمة الثلاث في ورقة مستقلة بدل ازدحام ورقة الرسالة
+  void _translateOptions(Map<String, dynamic> m, String text) {
+    final toEn = LocalTranslateService.detectScript(text) == 'ar';
+    showWaslSheet<void>(
+      context,
+      title: 'ترجمة الرسالة',
+      titleIcon: Icons.translate_rounded,
+      children: (ctx) => [
+        SheetTile(
+          icon: Icons.auto_awesome,
+          color: WaslColors.violet,
+          title: toEn ? 'إلى الإنجليزية' : 'إلى العربية',
+          subtitle: 'الأدق — عبر وصل AI',
+          onTap: () {
+            Navigator.pop(ctx);
+            _showAiResult('الترجمة', AiService.translate(text, toEn ? 'en' : 'ar'));
+          },
+        ),
+        SheetTile(
+          icon: Icons.language_rounded,
+          color: WaslColors.indigo,
+          title: 'إلى لغة أخرى…',
+          subtitle: 'اختر من قائمة اللغات',
+          onTap: () {
+            Navigator.pop(ctx);
+            _translateToOtherLanguage(m['id'] as String, text);
+          },
+        ),
+        SheetTile(
+          icon: Icons.wifi_off_rounded,
+          color: WaslColors.teal,
+          title: 'ترجمة سريعة بلا إنترنت',
+          subtitle: 'على جهازك — للكلمات الأساسية فقط',
+          onTap: () {
+            Navigator.pop(ctx);
+            final r = LocalTranslateService.translate(text, toEnglish: toEn);
+            _snack(r.low
+                ? 'الترجمة بلا إنترنت غطّت ${(r.coverage * 100).round()}% فقط — جرّب «الأدق»'
+                : 'ترجمة بلا إنترنت (${(r.coverage * 100).round()}%)');
+            setState(() => _translations[m['id'] as String] = '🔁 ${r.text}');
+          },
+        ),
+      ],
     );
   }
 
@@ -3327,72 +3434,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                         : context.textFaint,
               ),
             ),
-          PopupMenuButton<String>(
+          IconButton(
             tooltip: 'المزيد',
             icon: const Icon(Icons.more_vert_rounded),
-            onSelected: (v) {
-              if (v == 'search') setState(() => _searching = true);
-              if (v == 'ai') _showAiMenu();
-              if (v == 'speak') _toggleSpeak();
-              if (v == 'safety') _showSafetyNumber();
-              if (v == 'info') _openGroupInfo();
-              if (v == 'room') _openVoiceRoom();
-              if (v == 'stats') _showChannelStats();
-              if (v == 'disappear') _changeDisappearing();
-              if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
-              if (v == 'screenshots') _toggleNoScreenshots();
-              if (v == 'autotranslate') _toggleAutoTranslate();
-              if (v == 'media') _openMediaGallery();
-              if (v == 'export') _exportConversation();
-              if (v == 'clear') _clearConversation();
-            },
-            itemBuilder: (_) {
-              final speaking = _ttsBusy || VoiceReadService.speaking.value;
-              PopupMenuItem<String> item(String v, IconData icon, String label,
-                      {Color? color}) =>
-                  PopupMenuItem(
-                    value: v,
-                    child: Row(children: [
-                      Icon(icon, size: 20, color: color ?? context.textTertiary),
-                      const SizedBox(width: 12),
-                      Flexible(child: Text(label)),
-                    ]),
-                  );
-              return [
-                item('search', Icons.search_rounded, 'بحث في المحادثة'),
-                item('ai', Icons.auto_awesome, 'وصل AI: تلخيص واقتراحات',
-                    color: WaslColors.violet),
-                item('media', Icons.photo_library_outlined, 'معرض الوسائط',
-                    color: WaslColors.teal),
-                item('starred', Icons.star_outline_rounded,
-                    _starredOnly ? 'كل الرسائل' : 'الرسائل المميزة بنجمة'),
-                if (_isPrivateGroup)
-                  item('info', Icons.info_outline_rounded, 'معلومات المجموعة'),
-                if (_isPrivateGroup)
-                  item('room', Icons.spatial_audio_off_rounded, 'غرفة صوت'),
-                if (widget.isChannel && widget.canPost)
-                  item('stats', Icons.query_stats_rounded, 'إحصاءات القناة'),
-                if (_showSafety)
-                  item('safety', Icons.verified_user_outlined,
-                      _verified ? 'رمز الأمان (موثّق)' : 'رمز الأمان',
-                      color: _verified ? const Color(0xFF2FBE63) : WaslColors.teal),
-                item('speak', speaking ? Icons.stop_circle_outlined : Icons.volume_up_outlined,
-                    speaking ? 'إيقاف القراءة' : 'اقرأ آخر الرسائل بصوت'),
-                const PopupMenuDivider(),
-                if (!widget.isChannel)
-                  item('disappear', Icons.timer_outlined,
-                      'الرسائل المختفية: ${disappearLabel(_disappear)}'),
-                if (!widget.isChannel)
-                  item('autotranslate', Icons.translate_rounded,
-                      _autoTranslate ? 'إيقاف الترجمة الفورية' : 'الترجمة الفورية',
-                      color: _autoTranslate ? WaslColors.teal : null),
-                item('screenshots', Icons.screenshot_monitor_outlined,
-                    'منع/السماح بلقطات الشاشة'),
-                item('export', Icons.ios_share_rounded, 'تصدير المحادثة نصاً'),
-                item('clear', Icons.delete_sweep_outlined, 'مسح المحادثة عندي',
-                    color: Colors.redAccent),
-              ];
-            },
+            onPressed: _showMoreSheet,
           ),
         ],
       ),
