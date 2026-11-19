@@ -5,6 +5,10 @@ import 'package:url_launcher/url_launcher.dart' as ul;
 
 import '../config.dart';
 import '../theme.dart';
+import '../widgets/wasl_mascot.dart';
+
+/// يحتفل «وصول» لحظة نجاح الدخول (تضبطه AuthGate في main)
+final authCelebrate = ValueNotifier<bool>(false);
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -20,6 +24,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _isSignUp = false;
   bool _loading = false;
   bool _showPass = false;
+  // «وصول» (1.13.0): ينظر للحقول ويغطي عينيه عند كلمة المرور ويحزن عند الخطأ
+  final _emailFocus = FocusNode();
+  final _passFocus = FocusNode();
+  bool _sad = false;
   late final AnimationController _glow =
       AnimationController(vsync: this, duration: const Duration(seconds: 4))
         ..repeat(reverse: true);
@@ -30,10 +38,36 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _password.dispose();
     _username.dispose();
     _glow.dispose();
+    _emailFocus.dispose();
+    _passFocus.dispose();
     super.dispose();
   }
 
+  @override
+  void initState() {
+    super.initState();
+    for (final f in [_emailFocus, _passFocus]) {
+      f.addListener(() => setState(() {}));
+    }
+    _email.addListener(() {
+      if (_emailFocus.hasFocus) setState(() {});
+    });
+  }
+
+  MascotMood get _mood {
+    if (authCelebrate.value) return MascotMood.celebrating;
+    if (_sad) return MascotMood.sad;
+    if (_passFocus.hasFocus && !_showPass) return MascotMood.shy;
+    if (_emailFocus.hasFocus) return MascotMood.curious;
+    if (_loading) return MascotMood.thinking;
+    return MascotMood.waving;
+  }
+
   void _show(String msg) {
+    setState(() => _sad = true);
+    Future<void>.delayed(const Duration(milliseconds: 2200), () {
+      if (mounted) setState(() => _sad = false);
+    });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -151,29 +185,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 constraints: const BoxConstraints(maxWidth: 440),
                 child: AutofillGroup(
                   child: Column(children: [
-                    AnimatedBuilder(
-                      animation: _glow,
-                      builder: (context, child) => Container(
-                        width: 96,
-                        height: 96,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: WaslColors.gradient,
-                          boxShadow: [
-                            BoxShadow(
-                              color: WaslColors.teal
-                                  .withValues(alpha: 0.35 + 0.25 * _glow.value),
-                              blurRadius: 30 + 20 * _glow.value,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                        alignment: Alignment.center,
-                        child: child,
+                    ValueListenableBuilder<bool>(
+                      valueListenable: authCelebrate,
+                      builder: (context, _, __) => WaslMascot(
+                        size: 128,
+                        mood: _mood,
+                        // ينظر نحو موضع المؤشر في حقل البريد أثناء الكتابة
+                        look: _emailFocus.hasFocus
+                            ? Offset((_email.text.length.clamp(0, 30) / 15.0) - 1, 0.9)
+                            : null,
                       ),
-                      child: const Text('و',
-                          style: TextStyle(
-                              fontSize: 48, fontWeight: FontWeight.w900, color: Colors.white)),
                     ),
                     const SizedBox(height: 18),
                     ShaderMask(
@@ -250,6 +271,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         ),
                         TextField(
                           controller: _email,
+                          focusNode: _emailFocus,
                           keyboardType: TextInputType.emailAddress,
                           textDirection: TextDirection.ltr,
                           textInputAction: TextInputAction.next,
@@ -259,6 +281,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         const SizedBox(height: 12),
                         TextField(
                           controller: _password,
+                          focusNode: _passFocus,
                           obscureText: !_showPass,
                           textDirection: TextDirection.ltr,
                           textInputAction: TextInputAction.done,

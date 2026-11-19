@@ -13,7 +13,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../app_keys.dart';
 import '../config.dart';
 import '../firebase_options.dart';
-import '../theme.dart';
+import '../widgets/in_app_banner.dart';
 import 'call_quality_service.dart';
 import 'quick_action_service.dart';
 import 'tone_service.dart';
@@ -439,29 +439,9 @@ class PushService {
     });
   }
 
-  static void _showInAppBanner(String title, String body) {
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null) return;
-    late final OverlayState overlay;
-    try {
-      overlay = Overlay.of(ctx, rootOverlay: true);
-    } catch (_) {
-      return;
-    }
-    late final OverlayEntry entry;
-    entry = OverlayEntry(
-      builder: (_) => _InAppBanner(
-        title: title,
-        body: body,
-        onDismiss: () {
-          try {
-            entry.remove();
-          } catch (_) {}
-        },
-      ),
-    );
-    overlay.insert(entry);
-  }
+  /// اللافتة الداخلية بشكل «استوديو التطبيق» (1.13.0) — انظر WaslBanner
+  static void _showInAppBanner(String title, String body) =>
+      WaslBanner.show(title, body);
 
   static Future<void> _save(String token) async {
     final uid = supabase.auth.currentUser?.id;
@@ -498,128 +478,5 @@ class PushService {
     } else {
       await unregister();
     }
-  }
-}
-
-/// لافتة إشعار داخلية تظهر أعلى الشاشة عند وصول رسالة والتطبيق مفتوح:
-/// شكل متسق مع هوية التطبيق، تختفي تلقائياً بعد 4 ثوانٍ أو بالنقر عليها.
-class _InAppBanner extends StatefulWidget {
-  const _InAppBanner({
-    required this.title,
-    required this.body,
-    required this.onDismiss,
-  });
-  final String title;
-  final String body;
-  final VoidCallback onDismiss;
-
-  @override
-  State<_InAppBanner> createState() => _InAppBannerState();
-}
-
-class _InAppBannerState extends State<_InAppBanner> {
-  Timer? _timer;
-  bool _closed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(const Duration(seconds: 4), _close);
-  }
-
-  void _close() {
-    if (_closed) return;
-    _closed = true;
-    _timer?.cancel();
-    widget.onDismiss();
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 8,
-      left: 12,
-      right: 12,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-        builder: (_, t, child) => Opacity(
-          opacity: t,
-          child: Transform.translate(
-            offset: Offset(0, -18 * (1 - t)),
-            child: child,
-          ),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(20),
-            onTap: _close,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: dark ? WaslColors.darkSurface : WaslColors.lightSurface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                    color: dark ? Colors.white24 : Colors.black.withValues(alpha: 0.08)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      gradient: WaslColors.gradient,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(Icons.chat_bubble_rounded,
-                        color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(widget.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w800, fontSize: 13.5)),
-                        const SizedBox(height: 2),
-                        Text(widget.body,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: dark ? Colors.white70 : WaslColors.ink2,
-                                fontSize: 12.5)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.close_rounded,
-                      size: 18, color: dark ? Colors.white54 : WaslColors.ink3),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

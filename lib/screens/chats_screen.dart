@@ -11,6 +11,8 @@ import '../services/saved_service.dart';
 import '../services/smart_order_service.dart';
 import '../services/widget_data_service.dart';
 import '../theme.dart';
+import '../services/app_studio_service.dart';
+import '../widgets/studio_backdrop.dart';
 import '../services/status_service.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
@@ -431,7 +433,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
         child: WaslFab(onPressed: _showNewSheet, icon: Icons.edit_outlined),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const WaslSkeletonList()
           : RefreshIndicator(
               onRefresh: () async {
                 await Future.wait([_load(), _loadStatuses(), _loadSaved()]);
@@ -453,7 +455,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           (!_showArchived && _statusGroups.isNotEmpty ? 1 : 0),
                       itemBuilder: (context, i) {
                         // حركة دخول متدرجة للعناصر الأولى (المرحلة 5)
-                        final item = _chatListItem(i, visible, archivedCount);
+                        var item = _chatListItem(i, visible, archivedCount);
+                        // استوديو التطبيق: قائمة على هيئة بطاقات
+                        final studio = AppStudioService.style.value;
+                        final isStrip = i == 0 && !_showArchived && _statusGroups.isNotEmpty;
+                        if (studio.listStyle == StudioListStyle.cards && !isStrip) {
+                          item = Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            clipBehavior: Clip.antiAlias,
+                            decoration: studioSurfaceDecoration(studio,
+                                dark: Theme.of(context).brightness == Brightness.dark,
+                                radius: studio.r(18)),
+                            child: Material(type: MaterialType.transparency, child: item),
+                          );
+                        }
                         return i <= 8 ? MotionStagger(index: i, child: item) : item;
                       },
                     ),

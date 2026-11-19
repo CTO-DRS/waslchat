@@ -237,7 +237,7 @@ class _VoiceStudioScreenState extends State<VoiceStudioScreen> {
           Container(
             width: 52,
             height: 52,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
                 gradient: WaslColors.gradient, shape: BoxShape.circle),
             child: const Icon(Icons.graphic_eq_rounded, color: Colors.white, size: 28),
           ),

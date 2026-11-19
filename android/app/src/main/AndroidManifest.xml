@@ -84,6 +84,55 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity-alias>
+        <!-- استوديو التطبيق (1.13.0): أيقونات إضافية داكنة/فاتحة/ذهبية/نيون -->
+        <activity-alias
+            android:name=".MainActivityDark"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="وصل شات"
+            android:icon="@mipmap/ic_launcher_dark">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".MainActivityLight"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="وصل شات"
+            android:icon="@mipmap/ic_launcher_light">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".MainActivityGold"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="وصل شات"
+            android:icon="@mipmap/ic_launcher_gold">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".MainActivityNeon"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="وصل شات"
+            android:icon="@mipmap/ic_launcher_neon">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- ويدجت «آخر المحادثات» (0.21.0): يقرأ آخر 3 محادثات من التخزين
              المحلي الذي يكتبه التطبيق عبر home_widget — لا خدمة خلفية ولا
              شبكة: تحديث عند فتح التطبيق حصراً -->

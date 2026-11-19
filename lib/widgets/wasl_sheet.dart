@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_studio_service.dart';
 import '../theme.dart';
+import 'studio_backdrop.dart';
 
 /// ورقة سفلية موحّدة لوصل (1.9.3): مقبض سحب، عنوان اختياري، محتوى قابل
 /// للتمرير لا يتجاوز 88% من الشاشة، وحشوة سفلية تحترم شريط إيماءات الجوال
@@ -219,11 +221,10 @@ class GlassGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 4),
-        decoration: BoxDecoration(
-          color: context.glass,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: context.hairline.withValues(alpha: 0.5)),
-        ),
+        // شكل البطاقة من «استوديو التطبيق» (زجاجي افتراضياً كما كان)
+        decoration: studioSurfaceDecoration(AppStudioService.style.value,
+            dark: Theme.of(context).brightness == Brightness.dark,
+            radius: AppStudioService.style.value.r(22)),
         clipBehavior: Clip.antiAlias,
         child: Column(children: [
           for (var i = 0; i < children.length; i++) ...[

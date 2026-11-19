@@ -17,6 +17,7 @@ import '../services/realtime_hub_service.dart';
 import '../services/update_service.dart';
 import '../services/voice_commands_service.dart';
 import '../services/voice_room_service.dart';
+import '../services/app_studio_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/motion.dart';
@@ -266,25 +267,22 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
       ]),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: context.glass,
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: context.hairline),
-                ),
-                child: NavigationBar(
-                  height: 68,
+      // الشريط السفلي حسب «استوديو التطبيق»: عائم (الأصل) أو كلاسيكي أو بسيط
+      bottomNavigationBar: ValueListenableBuilder<StudioStyle>(
+        valueListenable: AppStudioService.style,
+        builder: (context, studio, _) {
+          final bar = NavigationBar(
+                  height: studio.navLabels ? 68 : 60,
                   backgroundColor: Colors.transparent,
-                  indicatorColor: const Color(0x556366F1),
+                  indicatorColor: studio.accentColor.withValues(alpha: 0x55 / 255),
+                  labelBehavior: studio.navLabels
+                      ? NavigationDestinationLabelBehavior.alwaysShow
+                      : NavigationDestinationLabelBehavior.alwaysHide,
                   selectedIndex: _index,
-                  onDestinationSelected: (i) => setState(() => _index = i),
+                  onDestinationSelected: (i) {
+                    AppStudioService.tick();
+                    setState(() => _index = i);
+                  },
                   destinations: [
                     NavigationDestination(
                         icon: _NavBadge(icon: Icons.chat_bubble_outline),
@@ -307,11 +305,45 @@ class _HomeScreenState extends State<HomeScreen> {
                         selectedIcon: const Icon(Icons.settings),
                         label: l10nT('nav_settings', LocaleService.lang.value)),
                   ],
+                );
+          switch (studio.nav) {
+            case StudioNav.floating:
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(studio.r(28)),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: context.glass,
+                          borderRadius: BorderRadius.circular(studio.r(28)),
+                          border: Border.all(color: context.hairline),
+                        ),
+                        child: bar,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ),
-        ),
+              );
+            case StudioNav.classic:
+              return Container(
+                decoration: BoxDecoration(
+                  color: context.surfaceAlt,
+                  border: Border(top: BorderSide(color: context.hairline)),
+                ),
+                child: SafeArea(top: false, child: bar),
+              );
+            case StudioNav.minimal:
+              return ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: SafeArea(top: false, child: bar),
+                ),
+              );
+          }
+        },
       ),
     );
   }
