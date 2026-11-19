@@ -6,6 +6,7 @@ import '../config.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/wasl_sheet.dart';
+import 'shield_admin_screen.dart';
 
 /// لوحة إدارة وصل شات (1.9.4) — تظهر لمسؤولي التطبيق فقط (is_app_admin).
 /// كل إجراء هنا يتحقق منه الخادم مرة أخرى؛ إخفاء الشاشة ليس هو الحماية.
@@ -200,6 +201,17 @@ class _AdminScreenState extends State<AdminScreen> {
                     borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
               ),
             ),
+            const SizedBox(height: 10),
+            GlassGroup([
+              SheetTile(
+                icon: Icons.shield_rounded,
+                color: Colors.redAccent,
+                title: 'بلاغات Wasl Shield',
+                subtitle: 'الابتزاز والتهديد والتحرّش — الأدلة والإجراءات وسجل التدقيق',
+                onTap: () => Navigator.push(
+                    context, MaterialPageRoute(builder: (_) => const ShieldAdminScreen())),
+              ),
+            ]),
             const SheetSectionLabel('المستخدمون'),
             if (_loading)
               const Padding(

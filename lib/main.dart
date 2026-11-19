@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
 import 'app_keys.dart';
+import 'services/shield_service.dart';
 import 'services/app_lock_service.dart';
 import 'services/desktop_notify_service.dart';
 import 'services/jank_service.dart';
@@ -126,7 +127,7 @@ class WaslApp extends StatelessWidget {
           data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.linear(fontScale),
           ),
-          child: child ?? const SizedBox.shrink(),
+          child: ShieldCaptureCover(child: child ?? const SizedBox.shrink()),
         ),
       ),
       ),

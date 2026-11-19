@@ -58,11 +58,12 @@ begin
   if uid is not null and exists (select 1 from auth.users where id = uid) then return uid; end if;
   uid := gen_random_uuid();
   insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-                          raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+                          raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                          confirmation_token, recovery_token, email_change_token_new, email_change)
   values ('00000000-0000-0000-0000-000000000000', uid, 'authenticated', 'authenticated', p_email,
           crypt(encode(gen_random_bytes(24), 'hex'), gen_salt('bf')), now(),
           '{"provider":"email","providers":["email"]}',
-          jsonb_build_object('username', p_username, 'display_name', p_name), now(), now());
+          jsonb_build_object('username', p_username, 'display_name', p_name), now(), now(), '', '', '', '');
   update profiles set username = p_username, display_name = p_name, bio = p_bio,
                       verified = true, is_official = true
    where id = uid;

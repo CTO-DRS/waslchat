@@ -55,6 +55,7 @@ import '../widgets/group_avatar.dart';
 import '../widgets/link_preview_card.dart';
 import '../widgets/media_bubbles.dart';
 import '../widgets/motion.dart';
+import '../widgets/shield_report_sheet.dart';
 import '../widgets/report_dialog.dart';
 import 'album_preview_screen.dart';
 import 'ask_wasl_screen.dart';
@@ -1471,6 +1472,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   /// يفك الملف إلى مجلد مؤقت ثم يفتحه (الفيديو داخل التطبيق، وغيره بتطبيق مناسب)
   Future<void> _openMedia(Map<String, dynamic> m) async {
+    if (m['shield_removed'] == true) return;
+    final prot = m['protected'] == true && m['sender_id'] != _me;
+    if (prot && m['type'] != 'video') {
+      _snack('🛡️ ملف محمي: لا يُفتح خارج وصل شات');
+      return;
+    }
     if (kIsWeb) return _openMediaWeb(m);
     setState(() => _uploading = true);
     try {
@@ -1488,8 +1495,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       await file.writeAsBytes(bytes, flush: true);
       if (!mounted) return;
       if (m['type'] == 'video') {
+        if (prot) await ScreenshotService.setSecure(true);
+        if (!mounted) return;
         await Navigator.push(
             context, MaterialPageRoute(builder: (_) => VideoScreen(file: file)));
+        if (prot) await ScreenshotService.setSecure(_noScreenshots);
+        if (prot) unawaited(file.delete().catchError((_) => file));
       } else {
         final res = await OpenFilex.open(file.path);
         if (res.type != ResultType.done) _snack('لا يوجد تطبيق يفتح هذا الملف');
@@ -1645,6 +1656,33 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   /// تنزيل وسيط وفكّ تشفيره إن كان مشفّراً (null = فشل)
   /// الخاص: مفتاح الوسيط عبر dmMediaKey (mk المخزّن أو الميتا أو v1 للقديم)
+  /// Wasl Shield: بلاغ عاجل بأدلة من المحادثة كما تظهر على هذا الجهاز (بعد فك التشفير)
+  Future<void> _openShieldReport(String? targetId) async {
+    final target = targetId ?? (widget.isGroup ? null : widget.otherId);
+    final items = <ShieldEvidenceItem>[];
+    for (final m in _allMsgs.reversed) {
+      if (m['deleted_at'] != null) continue;
+      final type = (m['type'] as String?) ?? 'text';
+      final sender = m['sender_id'] as String?;
+      final isMedia = type != 'text' && m['media_url'] != null && m['shield_removed'] != true;
+      items.add(ShieldEvidenceItem(
+        id: m['id'] as String,
+        fromTarget: target != null ? sender == target : sender != _me,
+        senderName: sender == _me ? 'أنا' : _senderName(sender),
+        at: (m['created_at'] as String?) ?? '',
+        text: type == 'text' ? _textOf(m) : null,
+        mediaType: isMedia ? type : null,
+        loader: isMedia ? () => _mediaBytes(m) : null,
+      ));
+    }
+    await showShieldReportSheet(context,
+        conversationId: widget.conversationId,
+        targetUserId: target,
+        targetName: target == null ? widget.title : _senderName(target),
+        items: items);
+    if (target != null) _refreshBlockState();
+  }
+
   Future<Uint8List?> _mediaBytes(Map<String, dynamic> m) async {
     try {
       final path = m['media_url'] as String?;
@@ -1780,6 +1818,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                     height: tile,
                     child: ImageBubble(
                         loader: () => _mediaBytes(m),
+                        protected: m['protected'] == true,
                         width: tile),
                   ),
               ],
@@ -1823,13 +1862,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             style: TextStyle(color: c, fontStyle: FontStyle.italic)),
       ]);
     }
+    if (m['shield_removed'] == true) {
+      final c = m['sender_id'] == _me ? Colors.white70 : context.textTertiary;
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.shield_rounded, size: 16, color: c),
+        const SizedBox(width: 6),
+        Text('أُزيلت هذه الوسائط للحماية', style: TextStyle(color: c, fontStyle: FontStyle.italic)),
+      ]);
+    }
     if (m['view_once'] == true &&
         (m['type'] == 'image' || m['type'] == 'video')) {
       return _viewOnceBody(m);
     }
     switch (m['type'] as String? ?? 'text') {
       case 'image':
-        return ImageBubble(loader: () => _mediaBytes(m));
+        return ImageBubble(loader: () => _mediaBytes(m), protected: m['protected'] == true);
       case 'voice':
         return VoiceBubble(
             loader: () => _mediaBytes(m),
@@ -2998,6 +3045,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             title: 'منع لقطات الشاشة',
             subtitle: 'تشغيل أو إيقاف لهذه المحادثة',
             onTap: () => go(ctx, _toggleNoScreenshots)),
+        if (!widget.isChannel && !widget.isBot) ...[
+          const SheetSectionLabel('الحماية'),
+          SheetTile(
+              icon: Icons.shield_rounded,
+              danger: true,
+              title: 'بلاغ عاجل',
+              subtitle: 'ابتزاز، تهديد، تحرّش أو انتحال — يصل للمدير مباشرة وبسرّية',
+              onTap: () => go(ctx, () => _openShieldReport(null))),
+        ],
         const SheetSectionLabel('أخرى'),
         SheetTile(
             icon: Icons.ios_share_rounded,
@@ -3082,7 +3138,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             Navigator.pop(ctx);
             _toggleStar(m);
           }, active: starred),
-          if (_e2e && !widget.isChannel && m['view_once'] != true)
+          if (_e2e && !widget.isChannel && m['view_once'] != true && m['protected'] != true)
             SheetAction(Icons.shortcut_rounded, 'توجيه', WaslColors.violet, () {
               Navigator.pop(ctx);
               _forward(m);
@@ -3157,6 +3213,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                   targetUser: m['sender_id'] as String?,
                   messageId: m['id'] as String?,
                   targetName: _senderName(m['sender_id'] as String?));
+            },
+          ),
+        if (!mine && !widget.isChannel)
+          SheetTile(
+            icon: Icons.shield_rounded,
+            danger: true,
+            title: 'بلاغ عاجل عن المرسل',
+            subtitle: 'Wasl Shield — ابتزاز أو تهديد أو تحرّش',
+            onTap: () {
+              Navigator.pop(ctx);
+              _openShieldReport(m['sender_id'] as String?);
             },
           ),
       ],

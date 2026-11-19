@@ -70,8 +70,12 @@ class ScreenshotService {
   static final RouteObserver<ModalRoute<void>> routeObserver =
       RouteObserver<ModalRoute<void>>();
 
+  /// Wasl Shield: حماية الشاشات الحساسة مفعّلة على مستوى التطبيق — لا تُرفع بإغلاق محادثة
+  static bool globalSecure = false;
+
   static Future<void> setSecure(bool secure) async {
     if (kIsWeb) return;
+    secure = secure || globalSecure;
     try {
       await _channel.invokeMethod('setSecure', {'secure': secure});
     } on PlatformException {

@@ -26,6 +26,7 @@ import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import '../widgets/wasl_sheet.dart';
 import 'admin_screen.dart';
+import 'shield_screen.dart';
 import 'beta_screen.dart';
 import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
@@ -171,6 +172,8 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SheetSectionLabel('الخصوصية والأمان'),
           GlassGroup([
+            _nav(context, Icons.shield_rounded, Colors.redAccent, 'Wasl Shield',
+                'الحماية من الابتزاز والتهديد، وبلاغ سرّي للمدير', () => const ShieldScreen()),
             const _AppLockTile(),
             _nav(context, Icons.shield_outlined, WaslColors.indigo, 'التحقق بخطوتين',
                 'رمز إضافي عند الدخول', () => const TwoFactorScreen()),
