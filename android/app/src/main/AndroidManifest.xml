@@ -13,6 +13,9 @@
     <!-- مكبر صوت البلوتوث أثناء المكالمة (أندرويد 12+): يُطلب عند الحاجة فقط -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- Wasl Shield: إشعار التطبيق عند لقطة/تسجيل الشاشة (أندرويد 14+/15+) — صلاحيات عادية بلا طلب -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE"/>
+    <uses-permission android:name="android.permission.DETECT_SCREEN_RECORDING"/>
     <application
         android:label="وصل شات"
         android:name="${applicationName}"
