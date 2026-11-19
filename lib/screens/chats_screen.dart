@@ -604,6 +604,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               otherId: otherId,
                               isBot: isBot,
                               encrypted: isGroup || !isBot,
+                              initialAvatar:
+                                  isGroup ? null : c['avatar_url'] as String?,
                             ));
                           },
                         );

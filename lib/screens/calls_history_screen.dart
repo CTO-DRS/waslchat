@@ -210,28 +210,9 @@ class _CallsHistoryScreenState extends State<CallsHistoryScreen> {
           ),
         ),
         const SizedBox(height: 26),
-        _feature(Icons.mic_none_rounded, WaslColors.indigo, 'اتصال صوتي نقي',
-            'الاتصال مباشر بين الجهازين — الصوت لا يعبر أي خادم'),
-        _feature(Icons.videocam_outlined, WaslColors.teal, 'مكالمة مرئية',
-            'شاهد من تحادثك وجهاً لوجه بجودة تناسب شبكتك'),
-        _feature(Icons.lock_outline_rounded, WaslColors.violet, 'تشفير DTLS-SRTP',
-            'مفاتيح الوسائط تُتفاوض بين جهازيكما حصراً — لا حتى الخادم'),
-        const SizedBox(height: 20),
-        Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: context.glass,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: context.hairline),
-            ),
-            child: Text(
-              'بصدق: الإشارة الأولية تعبر خادم وصل، وبعض الشبكات الصارمة\nتحتاج خادم TURN يُعدّه المالك — عندها تظهر «تعذر الاتصال»',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: context.textSecondary, fontSize: 11.5, height: 1.6),
-            ),
-          ),
-        ),
+        // واجهة للمستخدم لا للمطوّر: سطر واحد واضح بدل المصطلحات التقنية
+        _feature(Icons.lock_outline_rounded, WaslColors.violet, 'مكالمات مشفّرة',
+            'الصوت والصورة مشفّران بين جهازيكما'),
       ],
     );
   }

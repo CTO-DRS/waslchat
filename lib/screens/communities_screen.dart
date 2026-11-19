@@ -151,12 +151,17 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                     ),
                   ),
                   if (_discover.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
                       child: GlassEmptyState(
                         icon: Icons.diversity_3_outlined,
-                        title: 'لا توجد مجتمعات مطابقة',
-                        subtitle: 'أنشئ أول مجتمع بزر + واجمع أعضاءك في مكان واحد',
+                        // نص مختلف حين لا يوجد بحث: «مطابقة» بلا بحث كانت مربكة
+                        title: _q.isEmpty
+                            ? 'لا توجد مجتمعات عامة أخرى بعد'
+                            : 'لا توجد مجتمعات مطابقة',
+                        subtitle: _q.isEmpty
+                            ? 'أنشئ أول مجتمع بزر + واجمع أعضاءك في مكان واحد'
+                            : 'جرّب كلمة أخرى أو تحقق من الإملاء',
                       ),
                     ),
                   ..._discover.map((c) => ListTile(

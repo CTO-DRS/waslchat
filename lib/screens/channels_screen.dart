@@ -293,12 +293,17 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                     ),
                   ),
                   if (_discover.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
                       child: GlassEmptyState(
                         icon: Icons.campaign_outlined,
-                        title: 'لا توجد قنوات مطابقة',
-                        subtitle: 'أنشئ قناتك الأولى بزر + وابدأ النشر لكل متابعيك',
+                        // نص مختلف حين لا يوجد بحث: «مطابقة» بلا بحث كانت مربكة
+                        title: _q.isEmpty
+                            ? 'لا توجد قنوات عامة أخرى بعد'
+                            : 'لا توجد قنوات مطابقة',
+                        subtitle: _q.isEmpty
+                            ? 'أنشئ قناتك الأولى بزر + وابدأ النشر لكل متابعيك'
+                            : 'جرّب كلمة أخرى أو تحقق من الإملاء',
                       ),
                     ),
                   ..._discover.map((c) => ListTile(
