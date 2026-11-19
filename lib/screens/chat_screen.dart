@@ -800,17 +800,22 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   }
 
   /// صورة الطرف الآخر — طلب مستقل كي لا يسقطها فشل أي استعلام آخر
+  bool _otherVerified = false;
+
   Future<void> _loadOtherAvatar() async {
     if (widget.isGroup || widget.otherId == null) return;
     try {
       final p = await supabase
           .from('profiles')
-          .select('avatar_url')
+          .select('avatar_url, verified')
           .eq('id', widget.otherId!)
           .maybeSingle();
-      final a = p?['avatar_url'] as String?;
-      if (!mounted || a == null || a.isEmpty) return;
-      setState(() => _otherAvatar = a);
+      if (!mounted || p == null) return;
+      final a = p['avatar_url'] as String?;
+      setState(() {
+        if (a != null && a.isNotEmpty) _otherAvatar = a;
+        _otherVerified = p['verified'] == true;
+      });
     } catch (_) {}
   }
 
@@ -3376,7 +3381,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
                 ),
-                if (widget.isGroup && widget.officialVerified) ...[
+                if (widget.officialVerified || _otherVerified) ...[
                   const SizedBox(width: 4),
                   const VerifiedBadge(size: 15),
                 ],

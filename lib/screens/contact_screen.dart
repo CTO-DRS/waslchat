@@ -169,7 +169,7 @@ class _ContactScreenState extends State<ContactScreen> {
       final results = await Future.wait([
         supabase
             .from('profiles')
-            .select('username, display_name, bio, avatar_url')
+            .select('username, display_name, bio, avatar_url, verified, is_official')
             .eq('id', widget.otherId)
             .single(),
         supabase
@@ -210,9 +210,31 @@ class _ContactScreenState extends State<ContactScreen> {
         children: [
           Center(child: UserAvatar(name: name, url: _p?['avatar_url'] as String?, radius: 60)),
           const SizedBox(height: 14),
-          Center(
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Flexible(
               child: Text(name,
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800))),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+            ),
+            if (_p?['verified'] == true) ...[
+              const SizedBox(width: 6),
+              const VerifiedBadge(size: 22),
+            ],
+          ]),
+          if (_p?['is_official'] == true)
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 6, bottom: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: VerifiedBadge.color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text('حساب رسمي من وصل شات',
+                    style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700, color: VerifiedBadge.color)),
+              ),
+            ),
           if (_p != null)
             Center(
                 child: Text('@${_p!['username']}',

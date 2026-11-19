@@ -574,22 +574,22 @@ create trigger bot_webhook_dispatch after insert on public.messages
 -- ============ د) مشاهدات القنوات ============
 
 -- صف لكل مشاهدة لكل مستخدم — القنوات فقط (kind='channel')
-create table if not exists public.message_views (
+create table if not exists public.channel_post_views (
   message_id uuid not null references public.messages(id) on delete cascade,
   user_id    uuid not null references public.profiles(id) on delete cascade,
   viewed_at  timestamptz not null default now(),
   primary key (message_id, user_id)
 );
-create index if not exists message_views_message on public.message_views (message_id);
-alter table public.message_views enable row level security;
+create index if not exists channel_post_views_message on public.channel_post_views (message_id);
+alter table public.channel_post_views enable row level security;
 
-drop policy if exists "views read by channel members" on public.message_views;
-create policy "views read by channel members" on public.message_views
+drop policy if exists "views read by channel members" on public.channel_post_views;
+create policy "views read by channel members" on public.channel_post_views
   for select to authenticated using (public.is_member(
     (select m.conversation_id from messages m where m.id = message_id)));
 
-drop policy if exists "views insert own in my channel" on public.message_views;
-create policy "views insert own in my channel" on public.message_views
+drop policy if exists "views insert own in my channel" on public.channel_post_views;
+create policy "views insert own in my channel" on public.channel_post_views
   for insert to authenticated with check (
     user_id = auth.uid()
     and exists (
@@ -600,7 +600,7 @@ create policy "views insert own in my channel" on public.message_views
 -- تسجيل مشاهدات دفعة واحدة (رسائل القنوات التي أعرضها الآن)
 create or replace function public.channel_track_views(p_ids uuid[])
 returns void language sql security definer set search_path = public as $$
-  insert into message_views (message_id, user_id)
+  insert into channel_post_views (message_id, user_id)
   select v, auth.uid()
   from unnest(p_ids) as v
   join messages m on m.id = v
@@ -616,7 +616,7 @@ language sql security definer stable set search_path = public as $$
   select v, count(mv.user_id)
   from unnest(p_ids) as v
   join messages m on m.id = v
-  left join message_views mv on mv.message_id = v
+  left join channel_post_views mv on mv.message_id = v
   where public.is_member(m.conversation_id)
   group by v;
 $$;
@@ -644,14 +644,14 @@ begin
   )
   select
     (select count(*) from conversation_participants x where x.conversation_id = p_conv),
-    (select count(*) from message_views mv
+    (select count(*) from channel_post_views mv
       join messages m2 on m2.id = mv.message_id and m2.conversation_id = p_conv),
     coalesce((select round(avg(cnt), 1) from (
-      select count(mv2.user_id) cnt from message_views mv2
+      select count(mv2.user_id) cnt from channel_post_views mv2
       join messages m3 on m3.id = mv2.message_id and m3.conversation_id = p_conv
       group by mv2.message_id) s), 0),
     posts.id, posts.type, posts.content, posts.created_at,
-    (select count(*) from message_views mv3 where mv3.message_id = posts.id)
+    (select count(*) from channel_post_views mv3 where mv3.message_id = posts.id)
   from posts
   order by posts.created_at desc;
 end; $$;

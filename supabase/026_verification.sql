@@ -118,7 +118,7 @@ begin
   for f in select unnest(array[
     'public.verify_community(uuid, boolean)',
     'public.verify_channel(uuid, boolean)'
-  ] loop
+  ]) loop
     execute format('revoke execute on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
   end loop;

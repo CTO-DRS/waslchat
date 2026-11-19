@@ -25,6 +25,7 @@ import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
 import '../widgets/wasl_sheet.dart';
+import 'admin_screen.dart';
 import 'beta_screen.dart';
 import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
@@ -155,6 +156,19 @@ class SettingsScreen extends StatelessWidget {
           const _ProfileCard(),
           const SizedBox(height: 10),
           const _SecurityBadge(),
+          FutureBuilder<bool>(
+            future: AdminScreen.isAdmin(),
+            builder: (context, snap) => snap.data != true
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: GlassGroup([
+                      _nav(context, Icons.admin_panel_settings_rounded, WaslColors.teal,
+                          'لوحة الإدارة', 'المستخدمون والتوثيق والحظر والإحصاءات',
+                          () => const AdminScreen()),
+                    ]),
+                  ),
+          ),
           const SheetSectionLabel('الخصوصية والأمان'),
           GlassGroup([
             const _AppLockTile(),
