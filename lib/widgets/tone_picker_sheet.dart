@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../screens/voice_studio_screen.dart';
 import '../services/tone_service.dart';
 import '../theme.dart';
 import 'wasl_sheet.dart';
@@ -22,9 +23,12 @@ Future<void> showTonePicker(BuildContext context, {String? conversationId}) asyn
           return SheetTile(
             icon: id == null
                 ? Icons.settings_suggest_rounded
-                : id == 'system'
-                    ? Icons.phone_android_rounded
-                    : Icons.graphic_eq_rounded,
+                : switch (ToneService.byId(id).group) {
+                    ToneGroup.system => Icons.phone_android_rounded,
+                    ToneGroup.melody => Icons.music_note_rounded,
+                    ToneGroup.custom => Icons.auto_awesome_rounded,
+                    ToneGroup.voice => Icons.record_voice_over_rounded,
+                  },
             color: on ? WaslColors.teal : WaslColors.indigo,
             title: title,
             subtitle: sub,
@@ -48,7 +52,24 @@ Future<void> showTonePicker(BuildContext context, {String? conversationId}) asyn
           if (conversationId != null)
             tile(null, 'مثل الإعدادات العامة',
                 'الحالية: ${ToneService.byId(ToneService.global.value).label}'),
-          for (final t in ToneService.tones) tile(t.id, t.label, t.hint),
+          SheetTile(
+            icon: Icons.graphic_eq_rounded,
+            color: WaslColors.violet,
+            title: 'استوديو الصوت',
+            subtitle: 'اصنع نغمتك من صوت ولحن أو بصوتك أنت',
+            trailing: const Icon(Icons.chevron_left_rounded),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const VoiceStudioScreen()));
+            },
+          ),
+          for (final sec in ToneService.sectionOrder)
+            if (ToneService.tones.any((t) => ToneService.sectionOf(t) == sec)) ...[
+              SheetSectionLabel(sec),
+              for (final t in ToneService.tones.where((t) => ToneService.sectionOf(t) == sec))
+                tile(t.id, t.label, t.hint),
+            ],
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 8, 22, 4),
             child: Text('اضغط أي نغمة لتسمعها وتختارها.',

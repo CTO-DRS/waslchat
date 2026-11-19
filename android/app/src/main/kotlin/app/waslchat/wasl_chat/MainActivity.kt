@@ -158,6 +158,70 @@ class MainActivity : FlutterFragmentActivity() {
                             result.success(false)
                         }
                     }
+                    // استوديو الصوت (1.12.0): تشغيل ملف نغمة من الجهاز
+                    "playFile" -> {
+                        try {
+                            val path = call.argument<String>("path") ?: ""
+                            tonePlayer?.release()
+                            tonePlayer = android.media.MediaPlayer().apply {
+                                setDataSource(path)
+                                setOnCompletionListener { it.release(); if (tonePlayer === it) tonePlayer = null }
+                                prepare()
+                                start()
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    // تسجيل نغمة من الاستوديو: رابط محتوى يقرؤه النظام + قناتان بصوتها
+                    "registerTone" -> {
+                        try {
+                            val path = call.argument<String>("path") ?: ""
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                this, "$packageName.tones", java.io.File(path))
+                            for (pkg in listOf("com.android.systemui", "android")) {
+                                try {
+                                    grantUriPermission(pkg, uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                } catch (_: Exception) {}
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                                val attrs = android.media.AudioAttributes.Builder()
+                                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                    .build()
+                                val name = call.argument<String>("name") ?: "الرسائل"
+                                val msg = NotificationChannel(
+                                    call.argument<String>("msgChannel"), name,
+                                    NotificationManager.IMPORTANCE_HIGH)
+                                msg.description = "تنبيهات الرسائل الجديدة في محادثاتك"
+                                msg.setSound(uri, attrs)
+                                nm.createNotificationChannel(msg)
+                                val rem = NotificationChannel(
+                                    call.argument<String>("remChannel"), "التذكيرات المحلية",
+                                    NotificationManager.IMPORTANCE_HIGH)
+                                rem.description = "تذكيرات المواعيد على جهازك من وصل شات"
+                                rem.setSound(uri, attrs)
+                                nm.createNotificationChannel(rem)
+                            }
+                            result.success(uri.toString())
+                        } catch (e: Exception) {
+                            result.success(null)
+                        }
+                    }
+                    "deleteTone" -> {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                                call.argument<String>("msgChannel")?.let { nm.deleteNotificationChannel(it) }
+                                call.argument<String>("remChannel")?.let { nm.deleteNotificationChannel(it) }
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
                     "createMessageChannel" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

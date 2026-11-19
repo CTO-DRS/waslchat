@@ -165,6 +165,13 @@ class PushService {
     }
   }
 
+  /// صوت الإشعار: نغمة جاهزة من res/raw، أو نغمتك من الاستوديو برابطها
+  static AndroidNotificationSound? _soundFor(WaslTone t) {
+    if (t.id == 'system') return null;
+    if (t.isCustom) return t.uri == null ? null : UriAndroidNotificationSound(t.uri!);
+    return RawResourceAndroidNotificationSound(t.id);
+  }
+
   static void _snackLocal(String msg) {
     final ctx = navigatorKey.currentContext;
     if (ctx == null) return;
@@ -187,14 +194,15 @@ class PushService {
     if (!_localNotifReady) return;
     final payload = QuickActionService.encodeOpen(conversationId, messageId: messageId);
     // نغمة «وصل شات» (1.11.0): نغمة المحادثة إن اختيرت، وإلا النغمة العامة
-    final tone = await ToneService.effective(conversationId);
+    final t = await ToneService.effectiveTone(conversationId);
+    final tone = t.id;
     final details = AndroidNotificationDetails(
       ToneService.channelId(tone),
-      ToneService.channelName(tone),
+      t.id == 'system' ? 'الرسائل' : 'الرسائل — ${t.label}',
       channelDescription: 'تنبيهات الرسائل الجديدة في محادثاتك',
       importance: Importance.high,
       priority: Priority.high,
-      sound: tone == 'system' ? null : RawResourceAndroidNotificationSound(tone),
+      sound: _soundFor(t),
       playSound: true,
       groupKey: conversationId,
       setAsGroupSummary: false,
@@ -322,15 +330,16 @@ class PushService {
     await _initLocalNotifications();
     if (!_localNotifReady) return 'تعذّر تهيئة الإشعارات المحلية';
     if (!fireAt.isAfter(DateTime.now())) return 'الوقت المكتشف انقضى — بلا جدولة';
-    final tone = await ToneService.effective(null);
+    final t = await ToneService.effectiveTone(null);
+    final tone = t.id;
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        tone == 'system' ? 'wasl-reminders' : 'rem_${tone}_v1',
+        ToneService.reminderChannelId(tone),
         'التذكيرات المحلية',
         channelDescription: 'تذكيرات المواعيد على جهازك من وصل شات',
         importance: Importance.high,
         priority: Priority.high,
-        sound: tone == 'system' ? null : RawResourceAndroidNotificationSound(tone),
+        sound: _soundFor(t),
       ),
     );
     final id = localReminderId(fireAt);
