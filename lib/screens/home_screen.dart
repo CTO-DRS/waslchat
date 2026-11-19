@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/shield_service.dart';
 import '../services/call_service.dart';
 import '../services/device_security_service.dart';
 import '../services/l10n.dart';
@@ -45,6 +46,8 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     PresenceService.start();
     PushService.register();
+    // Wasl Shield (1.10.0): الإعدادات + اكتشاف الالتقاط حيث يدعم النظام
+    unawaited(ShieldService.init());
     // مركز Realtime الواحد (1.2.0): قناة postgres واحدة لكل المشاهدين
     // طويلة العمر بدل قنوات لكل شاشة — أقل انضمامات للخادم وبطارية أقل
     unawaited(RealtimeHubService.start());

@@ -37,7 +37,9 @@ jobs:
           path: wasl_chat.apk
       # نشر الإصدار ليصل رابط التحديث داخل التطبيق:
       # https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk
+      # فروع الميزات (مثل feature/wasl-shield) تُبنى للاختبار فقط بلا نشر
       - name: Publish release
+        if: github.ref == 'refs/heads/app'
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
           TAG="v$VERSION"

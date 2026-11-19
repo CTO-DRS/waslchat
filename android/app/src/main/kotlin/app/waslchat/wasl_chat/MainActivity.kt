@@ -1,5 +1,6 @@
 package app.waslchat.wasl_chat
 
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ComponentName
@@ -14,8 +15,65 @@ import io.flutter.plugin.common.MethodChannel
 /// FlutterFragmentActivity بدل FlutterActivity: مطلوب لقفل التطبيق بالبصمة
 /// (BiometricPrompt في local_auth) — نفس سلوك التطبيق دون تغيير.
 class MainActivity : FlutterFragmentActivity() {
+    // Wasl Shield (1.10.0): اكتشاف الالتقاط حيث يدعم النظام — يبلّغ Flutter فقط،
+    // والمنع الفعلي هو FLAG_SECURE عبر قناة wasl/secure.
+    private var shieldChannel: MethodChannel? = null
+    private var captureCallback: Any? = null
+    private var recordingCallback: java.util.function.Consumer<Int>? = null
+
+    override fun onStart() {
+        super.onStart()
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                val cb = Activity.ScreenCaptureCallback {
+                    runOnUiThread { shieldChannel?.invokeMethod("onScreenshot", null) }
+                }
+                registerScreenCaptureCallback(mainExecutor, cb)
+                captureCallback = cb
+            }
+        } catch (e: Exception) {
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 35) {
+                val cb = java.util.function.Consumer<Int> { state ->
+                    runOnUiThread {
+                        shieldChannel?.invokeMethod(
+                            "onRecording",
+                            state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE
+                        )
+                    }
+                }
+                val initial = windowManager.addScreenRecordingCallback(mainExecutor, cb)
+                recordingCallback = cb
+                shieldChannel?.invokeMethod(
+                    "onRecording",
+                    initial == WindowManager.SCREEN_RECORDING_STATE_VISIBLE
+                )
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    override fun onStop() {
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                (captureCallback as? Activity.ScreenCaptureCallback)?.let {
+                    unregisterScreenCaptureCallback(it)
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 35) {
+                recordingCallback?.let { windowManager.removeScreenRecordingCallback(it) }
+            }
+        } catch (e: Exception) {
+        }
+        captureCallback = null
+        recordingCallback = null
+        super.onStop()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        shieldChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "wasl/shield")
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "wasl/secure")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
