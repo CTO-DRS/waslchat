@@ -82,7 +82,11 @@ class ChatScreen extends StatefulWidget {
     this.isBot = false,
     this.officialVerified = false,
     this.focusMessageId,
+    this.initialAvatar,
   });
+
+  /// صورة الطرف الآخر كما ظهرت في القائمة — تُعرض فوراً قبل تحميل الميتا
+  final String? initialAvatar;
   final String conversationId;
   final String title;
   final bool isGroup;
@@ -682,7 +686,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         .order('created_at', ascending: true);
     _text.addListener(_onTextChanged);
     if (widget.isGroup) _loadMembers();
+    _otherAvatar = widget.initialAvatar;
     _loadMeta();
+    unawaited(_loadOtherAvatar());
     _refreshBlockState();
     unawaited(_refreshVerified());
     unawaited(_loadMuteState());
@@ -783,22 +789,27 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
           .from('message_stars')
           .select('message_id')
           .eq('conversation_id', widget.conversationId);
-      String? avatar;
-      if (!widget.isGroup && widget.otherId != null) {
-        final p = await supabase
-            .from('profiles')
-            .select('avatar_url')
-            .eq('id', widget.otherId!)
-            .maybeSingle();
-        avatar = p?['avatar_url'] as String?;
-      }
       if (!mounted) return;
       setState(() {
         _disappear = conv?['disappear_seconds'] as int?;
         _stars = {for (final r in stars) r['message_id'] as String};
-        _otherAvatar = avatar;
         _groupAvatarPath = conv?['avatar_url'] as String?;
       });
+    } catch (_) {}
+  }
+
+  /// صورة الطرف الآخر — طلب مستقل كي لا يسقطها فشل أي استعلام آخر
+  Future<void> _loadOtherAvatar() async {
+    if (widget.isGroup || widget.otherId == null) return;
+    try {
+      final p = await supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('id', widget.otherId!)
+          .maybeSingle();
+      final a = p?['avatar_url'] as String?;
+      if (!mounted || a == null || a.isEmpty) return;
+      setState(() => _otherAvatar = a);
     } catch (_) {}
   }
 
@@ -3262,6 +3273,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                   const SizedBox(width: 4),
                   const VerifiedBadge(size: 15),
                 ],
+                if (_showSafety && _verified) ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.verified_user_rounded,
+                      size: 15, color: Color(0xFF2FBE63)),
+                ],
               ]),
               if (_statusLine() != null)
                 Text(_statusLine()!,
@@ -3273,44 +3289,27 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
          ]),
         ),
         actions: [
-          // مكالمة جماعية (0.27.0): للمجموعات الخاصة المشفّرة — محرك mesh
-          // نفسه بنمط مكالمة + دعوة لحظية لا تُخزَّن للأعضاء المتصلين
+          // شريط علوي مرتّب (2.0): زران رئيسيان على الأكثر كي يظهر الاسم كاملاً،
+          // والباقي في قائمة «المزيد»
           if (_isPrivateGroup)
             IconButton(
               tooltip: 'مكالمة جماعية',
               onPressed: () => startGroupCall(context,
                   conversationId: widget.conversationId, title: _title),
-              icon: const Icon(Icons.groups_rounded),
-            ),
-          // غرفة الصوت الجماعية (0.18.0): للمجموعات الخاصة المشفّرة فقط —
-          // لا قنوات ولا المحفوظة ولا المكالمات الفردية
-          if (_isPrivateGroup)
-            IconButton(
-              tooltip: 'غرفة صوت',
-              onPressed: _openVoiceRoom,
-              icon: const Icon(Icons.spatial_audio_off_rounded),
-            ),
-          // أزرار المكالمة (0.17.0): المحادثات الخاصة الحقيقية فقط —
-          // لا قنوات ولا مجموعات ولا بوتات (لا ترد المكالمة) ولا المحفوظة
-          if (!widget.isGroup && widget.otherId != null && !widget.isBot) ...[
-            IconButton(
-              tooltip: 'مكالمة صوتية',
-              onPressed: () => _startCall(CallKind.voice),
               icon: const Icon(Icons.call_outlined),
             ),
+          if (!widget.isGroup && widget.otherId != null && !widget.isBot) ...[
             IconButton(
               tooltip: 'مكالمة مرئية',
               onPressed: () => _startCall(CallKind.video),
               icon: const Icon(Icons.videocam_outlined),
             ),
-          ],
-          if (widget.isChannel && widget.canPost)
             IconButton(
-              tooltip: 'إحصاءات القناة',
-              onPressed: _showChannelStats,
-              icon: const Icon(Icons.query_stats_rounded),
+              tooltip: 'مكالمة صوتية',
+              onPressed: () => _startCall(CallKind.voice),
+              icon: const Icon(Icons.call_outlined),
             ),
-          // جرس القنوات (0.21.0): تفضيل الإشعار لهذه القناة حصراً
+          ],
           if (widget.isChannel)
             IconButton(
               tooltip: 'إشعارات القناة: ${ChannelBellService.label(_bell)}',
@@ -3328,50 +3327,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                         : context.textFaint,
               ),
             ),
-          // القراءة الصوتية (0.21.0): TTS عربي على الجهاز حصراً
-          IconButton(
-            tooltip: _ttsBusy || VoiceReadService.speaking.value
-                ? 'إيقاف القراءة'
-                : 'اقرأ آخر الرسائل',
-            onPressed: _toggleSpeak,
-            icon: Icon(
-              _ttsBusy || VoiceReadService.speaking.value
-                  ? Icons.stop_circle_outlined
-                  : Icons.volume_up_outlined,
-              color: _ttsBusy || VoiceReadService.speaking.value
-                  ? WaslColors.teal
-                  : null,
-            ),
-          ),
-          IconButton(
-            tooltip: 'بحث',
-            onPressed: () => setState(() => _searching = true),
-            icon: const Icon(Icons.search_rounded),
-          ),
-          if (_isPrivateGroup)
-            IconButton(
-              tooltip: 'معلومات المجموعة',
-              onPressed: _openGroupInfo,
-              icon: const Icon(Icons.info_outline_rounded),
-            ),
-          if (_showSafety)
-            IconButton(
-              tooltip: _verified ? 'رمز الأمان — موثّق' : 'رمز الأمان',
-              onPressed: _showSafetyNumber,
-              icon: Icon(Icons.verified_user_outlined,
-                  color: E2eService.peerKeyChanged(widget.otherId!)
-                      ? Colors.amber
-                      : _verified
-                          ? const Color(0xFF2FBE63)
-                          : WaslColors.teal),
-            ),
-          IconButton(
-            tooltip: 'وصل AI للملخص',
-            onPressed: _showAiMenu,
-            icon: const Icon(Icons.auto_awesome, color: WaslColors.violet),
-          ),
           PopupMenuButton<String>(
+            tooltip: 'المزيد',
+            icon: const Icon(Icons.more_vert_rounded),
             onSelected: (v) {
+              if (v == 'search') setState(() => _searching = true);
+              if (v == 'ai') _showAiMenu();
+              if (v == 'speak') _toggleSpeak();
+              if (v == 'safety') _showSafetyNumber();
+              if (v == 'info') _openGroupInfo();
+              if (v == 'room') _openVoiceRoom();
+              if (v == 'stats') _showChannelStats();
               if (v == 'disappear') _changeDisappearing();
               if (v == 'starred') setState(() => _starredOnly = !_starredOnly);
               if (v == 'screenshots') _toggleNoScreenshots();
@@ -3380,55 +3346,53 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               if (v == 'export') _exportConversation();
               if (v == 'clear') _clearConversation();
             },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'starred',
-                child: Text(_starredOnly ? 'كل الرسائل' : 'الرسائل المميزة بنجمة'),
-              ),
-              const PopupMenuItem(
-                value: 'media',
-                child: Row(children: [
-                  Icon(Icons.photo_library_outlined, size: 20, color: WaslColors.teal),
-                  SizedBox(width: 12),
-                  Text('معرض الوسائط'),
-                ]),
-              ),
-              if (!widget.isChannel)
-                PopupMenuItem(
-                  value: 'disappear',
-                  child: Text('الرسائل المختفية: ${disappearLabel(_disappear)}'),
-                ),
-              if (!widget.isChannel)
-                PopupMenuItem(
-                  value: 'autotranslate',
-                  child: Row(children: [
-                    Icon(
-                      Icons.translate_rounded,
-                      size: 20,
-                      color: _autoTranslate ? WaslColors.teal : null,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(_autoTranslate ? 'إيقاف الترجمة الفورية' : 'الترجمة الفورية'),
-                    if (_autoTranslate) ...[
-                      const Spacer(),
-                      const Icon(Icons.check_rounded,
-                          size: 18, color: WaslColors.teal),
-                    ],
-                  ]),
-                ),
-              const PopupMenuItem(
-                value: 'screenshots',
-                child: Text('منع/السماح بلقطات الشاشة'),
-              ),
-              const PopupMenuItem(
-                value: 'export',
-                child: Text('تصدير المحادثة نصاً'),
-              ),
-              const PopupMenuItem(
-                value: 'clear',
-                child: Text('مسح المحادثة عندي'),
-              ),
-            ],
+            itemBuilder: (_) {
+              final speaking = _ttsBusy || VoiceReadService.speaking.value;
+              PopupMenuItem<String> item(String v, IconData icon, String label,
+                      {Color? color}) =>
+                  PopupMenuItem(
+                    value: v,
+                    child: Row(children: [
+                      Icon(icon, size: 20, color: color ?? context.textTertiary),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(label)),
+                    ]),
+                  );
+              return [
+                item('search', Icons.search_rounded, 'بحث في المحادثة'),
+                item('ai', Icons.auto_awesome, 'وصل AI: تلخيص واقتراحات',
+                    color: WaslColors.violet),
+                item('media', Icons.photo_library_outlined, 'معرض الوسائط',
+                    color: WaslColors.teal),
+                item('starred', Icons.star_outline_rounded,
+                    _starredOnly ? 'كل الرسائل' : 'الرسائل المميزة بنجمة'),
+                if (_isPrivateGroup)
+                  item('info', Icons.info_outline_rounded, 'معلومات المجموعة'),
+                if (_isPrivateGroup)
+                  item('room', Icons.spatial_audio_off_rounded, 'غرفة صوت'),
+                if (widget.isChannel && widget.canPost)
+                  item('stats', Icons.query_stats_rounded, 'إحصاءات القناة'),
+                if (_showSafety)
+                  item('safety', Icons.verified_user_outlined,
+                      _verified ? 'رمز الأمان (موثّق)' : 'رمز الأمان',
+                      color: _verified ? const Color(0xFF2FBE63) : WaslColors.teal),
+                item('speak', speaking ? Icons.stop_circle_outlined : Icons.volume_up_outlined,
+                    speaking ? 'إيقاف القراءة' : 'اقرأ آخر الرسائل بصوت'),
+                const PopupMenuDivider(),
+                if (!widget.isChannel)
+                  item('disappear', Icons.timer_outlined,
+                      'الرسائل المختفية: ${disappearLabel(_disappear)}'),
+                if (!widget.isChannel)
+                  item('autotranslate', Icons.translate_rounded,
+                      _autoTranslate ? 'إيقاف الترجمة الفورية' : 'الترجمة الفورية',
+                      color: _autoTranslate ? WaslColors.teal : null),
+                item('screenshots', Icons.screenshot_monitor_outlined,
+                    'منع/السماح بلقطات الشاشة'),
+                item('export', Icons.ios_share_rounded, 'تصدير المحادثة نصاً'),
+                item('clear', Icons.delete_sweep_outlined, 'مسح المحادثة عندي',
+                    color: Colors.redAccent),
+              ];
+            },
           ),
         ],
       ),
@@ -3549,6 +3513,27 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                             textAlign: TextAlign.center,
                             style: TextStyle(color: context.textFaint, fontSize: 12)),
                       ]),
+                    ),
+                  );
+                }
+                // حالة فارغة ودّية بدل شاشة سوداء (قناة أو محادثة بلا رسائل)
+                if (q.isEmpty && !_starredOnly && all.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: GlassEmptyState(
+                        icon: widget.isChannel
+                            ? Icons.campaign_outlined
+                            : Icons.waving_hand_outlined,
+                        title: widget.isChannel
+                            ? 'لا منشورات بعد'
+                            : 'لا رسائل بعد',
+                        subtitle: widget.isChannel
+                            ? (widget.canPost
+                                ? 'اكتب أول منشور ليصل لكل المتابعين'
+                                : 'ستظهر منشورات القناة هنا فور نشرها')
+                            : 'قل مرحباً وابدأ المحادثة',
+                      ),
                     ),
                   );
                 }

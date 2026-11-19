@@ -244,10 +244,12 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Stack(children: [
         IndexedStack(index: _index, children: _pages),
         // زر الأوامر الصوتية (المرحلة 5): تجربة صوتية بلا لمس
-        if (_voiceSupported)
+        // يظهر في تبويب المحادثات فقط، فوق زر القلم بمسافة واضحة
+        // (كان يتراكب خلف زر الإضافة في كل التبويبات)
+        if (_voiceSupported && _index == 0)
           PositionedDirectional(
-            end: 16,
-            bottom: 96,
+            end: 25,
+            bottom: 178,
             child: MotionScaleIn(
               child: FloatingActionButton.small(
                 heroTag: 'voice-commands',
