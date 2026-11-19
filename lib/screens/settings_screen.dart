@@ -24,6 +24,7 @@ import '../services/web_push_service.dart';
 import '../theme.dart';
 import '../services/e2e_service.dart';
 import '../widgets/common.dart';
+import '../widgets/wasl_sheet.dart';
 import 'beta_screen.dart';
 import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
@@ -45,6 +46,104 @@ String _modeLabel(ThemeMode m) => switch (m) {
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  static Widget _nav(BuildContext context, IconData icon, Color color, String title,
+          String? subtitle, Widget Function() page) =>
+      SheetTile(
+        icon: icon,
+        color: color,
+        title: title,
+        subtitle: subtitle,
+        trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+        onTap: () =>
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => page())),
+      );
+
+  Future<void> _pickTheme(BuildContext context) async {
+          final m = await showModalBottomSheet<ThemeMode>(
+            context: context,
+            backgroundColor: context.surfaceAlt,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+            builder: (ctx) => SafeArea(
+              child: Wrap(children: [
+                const ListTile(
+                  title: Text('المظهر',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                for (final m in ThemeMode.values)
+                  ListTile(
+                    leading: Icon(
+                        ThemeService.mode.value == m
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: WaslColors.teal),
+                    title: Text(_modeLabel(m)),
+                    onTap: () => Navigator.pop(ctx, m),
+                  ),
+              ]),
+            ),
+          );
+          if (m != null) ThemeService.set(m);
+  }
+
+  Future<void> _checkUpdate(BuildContext context) async {
+          final u = await UpdateService.check();
+          if (!context.mounted) return;
+          if (u == null) {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('لديك أحدث إصدار')));
+            return;
+          }
+          final go = await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('تحديث متوفر'),
+              content: Text(
+                  'الإصدار ${u['version'] ?? ''} متاح الآن.${((u['notes'] as String?) ?? '').isEmpty ? '' : '\n\n${u['notes']}'}'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('لاحقاً')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(c, true),
+                    child: const Text('تحميل الآن')),
+              ],
+            ),
+          );
+          if (go == true) await UpdateService.openDownload();
+  }
+
+  Future<void> _logout(BuildContext context) async {
+          // بلا نسخة احتياطية سيضيع المفتاح عند الخروج: ننبّه أولاً
+          final st = await E2eService.checkKeys();
+          if (!context.mounted) return;
+          if (st == E2eKeyState.needsBackup) {
+            final go = await showDialog<bool>(
+              context: context,
+              builder: (c) => AlertDialog(
+                title: const Text('مفتاح التشفير غير محفوظ'),
+                content: const Text(
+                    'إن خرجت الآن فلن تقرأ رسائلك المشفّرة عند الدخول مجدداً. احفظ نسخة احتياطية أولاً؟'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(c, true),
+                      child: const Text('اخرج على أي حال')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(c, false),
+                      child: const Text('احفظ النسخة')),
+                ],
+              ),
+            );
+            if (!context.mounted) return;
+            if (go != true) {
+              await checkE2eKeys(context, fromSettings: true);
+              return;
+            }
+          }
+          await E2eService.wipeLocal();
+          await PushService.unregister();
+          await PresenceService.stop();
+          await supabase.auth.signOut();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -54,221 +153,150 @@ class SettingsScreen extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
           const _ProfileCard(),
-          const SizedBox(height: 16),
-          const ListTile(
-            leading: Icon(Icons.lock_outline, color: WaslColors.teal),
-            title: Text('الرسائل محمية'),
-            subtitle: Text('صلاحيات وصول على مستوى الصفوف (RLS)'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.star_outline_rounded, color: Colors.amber),
-            title: const Text('الرسائل المميزة بنجمة'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const StarredScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.shield_outlined, color: WaslColors.indigo),
-            title: const Text('التحقق بخطوتين'),
-            subtitle: const Text('رمز من تطبيق المصادقة عند الدخول'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const TwoFactorScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.key_outlined, color: WaslColors.violet),
-            title: const Text('مفتاح التشفير'),
-            subtitle: const Text('النسخة الاحتياطية واستعادتها على جوال جديد'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => checkE2eKeys(context, fromSettings: true),
-          ),
-          ListTile(
-            leading: const Icon(Icons.devices_other_rounded, color: WaslColors.teal),
-            title: const Text('الأجهزة المرتبطة'),
-            subtitle: const Text('هواتف ومتصفحات تستخدم حسابك — لكل جهاز مفاتيحه'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const LinkedDevicesScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.fact_check_outlined, color: WaslColors.teal),
-            title: const Text('سجل مفاتيحي'),
-            subtitle: const Text('شفافية المفاتيح: تاريخ أحداث المفاتيح بسلسلة تتحقق محلياً'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const KeyLogScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.backup_outlined, color: WaslColors.indigo),
-            title: const Text('النسخة الاحتياطية الكاملة'),
-            subtitle: const Text('صدّر كل محادثاتك مفكوكة ومشفرة بكلمة سر تختارها — على جهازك حصراً'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const BackupExportScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.event_available_rounded, color: WaslColors.teal),
-            title: const Text('المناسبات الهجرية'),
-            subtitle: const Text('رمضان والعيدان ورأس السنة — تذكير محلي حسابي بصدق الرؤية'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const HijriOccasionsScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.smart_toy_outlined, color: WaslColors.violet),
-            title: const Text('البوتات وواجهة المطوّرين'),
-            subtitle: const Text('أنشئ بوتات برمز وواجهة وويب هوك موقّع'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const BotsScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.rate_review_outlined, color: WaslColors.teal),
-            title: const Text('إرسال ملاحظات'),
-            subtitle: const Text('خلل أو فكرة أو ملاحظة خصوصية — تصل لفريق وصل مباشرة'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const FeedbackScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.science_outlined, color: WaslColors.violet),
-            title: const Text('برنامج الاختبار الميداني'),
-            subtitle: const Text('عائِل صادق لما يُختبر ولما ينقص — وانضمامك يبصم تقاريرك'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const BetaScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.password, color: WaslColors.teal),
-            title: const Text('تغيير كلمة المرور'),
-            onTap: () => openChangePassword(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.dark_mode_outlined, color: WaslColors.violet),
-            title: const Text('المظهر'),
-            subtitle: ValueListenableBuilder<ThemeMode>(
-              valueListenable: ThemeService.mode,
-              builder: (_, m, __) => Text(_modeLabel(m)),
+          const SizedBox(height: 10),
+          const _SecurityBadge(),
+          const SheetSectionLabel('الخصوصية والأمان'),
+          GlassGroup([
+            const _AppLockTile(),
+            _nav(context, Icons.shield_outlined, WaslColors.indigo, 'التحقق بخطوتين',
+                'رمز إضافي عند الدخول', () => const TwoFactorScreen()),
+            SheetTile(
+              icon: Icons.key_rounded,
+              color: WaslColors.violet,
+              title: 'مفتاح التشفير',
+              subtitle: 'احفظه لتقرأ رسائلك على جوال جديد',
+              trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+              onTap: () => checkE2eKeys(context, fromSettings: true),
             ),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () async {
-              final m = await showModalBottomSheet<ThemeMode>(
-                context: context,
-                backgroundColor: context.surfaceAlt,
-                shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-                builder: (ctx) => SafeArea(
-                  child: Wrap(children: [
-                    const ListTile(
-                      title: Text('المظهر',
-                          style: TextStyle(fontWeight: FontWeight.w800)),
-                    ),
-                    for (final m in ThemeMode.values)
-                      ListTile(
-                        leading: Icon(
-                            ThemeService.mode.value == m
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_off,
-                            color: WaslColors.teal),
-                        title: Text(_modeLabel(m)),
-                        onTap: () => Navigator.pop(ctx, m),
-                      ),
-                  ]),
-                ),
-              );
-              if (m != null) ThemeService.set(m);
-            },
-          ),
-          const _FontSizeTile(),
-          const _WallpaperTile(),
-          const _AppLockTile(),
-          const _NotificationsTile(),
-          if (!kIsWeb &&
-              DesktopNotifyRules.platformSupported(
-                  kIsWeb: false, ioLabel: devicePlatformLabel()))
-            const _DesktopNotifyTile(),
-          if (kIsWeb) ...const [_WebPushTile(), _PwaTile()],
-          const _LinkPreviewTile(),
-          const _SmartOrderTile(),
-          const _OnDeviceModelTile(),
-          const _AppIconTile(),
-          // المرحلة 12 ب (0.29.0): تعدد اللغات + مؤشرات الأداء على الجهاز
-          const _LanguageTile(),
-          const _MetricsTile(),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.redAccent),
-            title: const Text('تسجيل الخروج'),
-            onTap: () async {
-              // بلا نسخة احتياطية سيضيع المفتاح عند الخروج: ننبّه أولاً
-              final st = await E2eService.checkKeys();
-              if (!context.mounted) return;
-              if (st == E2eKeyState.needsBackup) {
-                final go = await showDialog<bool>(
-                  context: context,
-                  builder: (c) => AlertDialog(
-                    title: const Text('مفتاح التشفير غير محفوظ'),
-                    content: const Text(
-                        'إن خرجت الآن فلن تقرأ رسائلك المشفّرة عند الدخول مجدداً. احفظ نسخة احتياطية أولاً؟'),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(c, true),
-                          child: const Text('اخرج على أي حال')),
-                      FilledButton(
-                          onPressed: () => Navigator.pop(c, false),
-                          child: const Text('احفظ النسخة')),
-                    ],
-                  ),
-                );
-                if (!context.mounted) return;
-                if (go != true) {
-                  await checkE2eKeys(context, fromSettings: true);
-                  return;
-                }
-              }
-              await E2eService.wipeLocal();
-              await PushService.unregister();
-              await PresenceService.stop();
-              await supabase.auth.signOut();
-            },
-          ),
-          const SizedBox(height: 24),
-          ListTile(
-            leading: const Icon(Icons.system_update_alt_rounded, color: WaslColors.teal),
-            title: const Text('فحص وجود تحديث'),
-            subtitle: Text('الإصدار ${AppConfig.appVersion}+${AppConfig.appBuild}'),
-            onTap: () async {
-              final u = await UpdateService.check();
-              if (!context.mounted) return;
-              if (u == null) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text('لديك أحدث إصدار')));
-                return;
-              }
-              final go = await showDialog<bool>(
-                context: context,
-                builder: (c) => AlertDialog(
-                  title: const Text('تحديث متوفر'),
-                  content: Text(
-                      'الإصدار ${u['version'] ?? ''} متاح الآن.${((u['notes'] as String?) ?? '').isEmpty ? '' : '\n\n${u['notes']}'}'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('لاحقاً')),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(c, true),
-                        child: const Text('تحميل الآن')),
-                  ],
-                ),
-              );
-              if (go == true) await UpdateService.openDownload();
-            },
-          ),
-          const SizedBox(height: 8),
+            _nav(context, Icons.devices_other_rounded, WaslColors.teal, 'الأجهزة المرتبطة',
+                null, () => const LinkedDevicesScreen()),
+            SheetTile(
+              icon: Icons.password_rounded,
+              color: const Color(0xFF0EA5E9),
+              title: 'تغيير كلمة المرور',
+              trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+              onTap: () => openChangePassword(context),
+            ),
+          ]),
+          const SheetSectionLabel('المظهر'),
+          GlassGroup([
+            SheetTile(
+              icon: Icons.dark_mode_rounded,
+              color: WaslColors.violet,
+              title: 'الوضع',
+              trailing: ValueListenableBuilder<ThemeMode>(
+                valueListenable: ThemeService.mode,
+                builder: (_, m, __) =>
+                    Text(_modeLabel(m), style: TextStyle(color: context.textFaint)),
+              ),
+              onTap: () => _pickTheme(context),
+            ),
+            const _FontSizeTile(),
+            const _WallpaperTile(),
+            const _AppIconTile(),
+            const _LanguageTile(),
+          ]),
+          const SheetSectionLabel('الإشعارات'),
+          GlassGroup([
+            const _NotificationsTile(),
+            if (!kIsWeb &&
+                DesktopNotifyRules.platformSupported(
+                    kIsWeb: false, ioLabel: devicePlatformLabel()))
+              const _DesktopNotifyTile(),
+            if (kIsWeb) const _WebPushTile(),
+          ]),
+          const SheetSectionLabel('المحادثات'),
+          GlassGroup([
+            _nav(context, Icons.star_rounded, const Color(0xFFF59E0B), 'الرسائل المميزة',
+                null, () => const StarredScreen()),
+            const _SmartOrderTile(),
+            const _LinkPreviewTile(),
+            _nav(context, Icons.backup_rounded, WaslColors.indigo, 'النسخة الاحتياطية',
+                'نسخة كاملة مشفّرة بكلمة سر تختارها', () => const BackupExportScreen()),
+            _nav(context, Icons.event_available_rounded, WaslColors.teal, 'المناسبات الهجرية',
+                'تذكير برمضان والعيدين', () => const HijriOccasionsScreen()),
+            if (kIsWeb) const _PwaTile(),
+          ]),
+          const SheetSectionLabel('للمحترفين'),
+          GlassGroup([
+            _nav(context, Icons.smart_toy_rounded, WaslColors.violet, 'البوتات والمطوّرون',
+                null, () => const BotsScreen()),
+            _nav(context, Icons.fact_check_rounded, WaslColors.teal, 'سجل المفاتيح',
+                'كل تغيير في مفاتيح حسابك', () => const KeyLogScreen()),
+            const _MetricsTile(),
+            const _OnDeviceModelTile(),
+          ]),
+          const SheetSectionLabel('المساعدة'),
+          GlassGroup([
+            _nav(context, Icons.rate_review_rounded, WaslColors.teal, 'أرسل ملاحظة',
+                'خلل أو فكرة — تصلنا مباشرة', () => const FeedbackScreen()),
+            _nav(context, Icons.science_rounded, WaslColors.violet, 'انضم للمختبرين',
+                'جرّب الميزات قبل الجميع', () => const BetaScreen()),
+            SheetTile(
+              icon: Icons.system_update_alt_rounded,
+              color: WaslColors.indigo,
+              title: 'البحث عن تحديث',
+              trailing: Text('${AppConfig.appVersion}',
+                  style: TextStyle(color: context.textFaint)),
+              onTap: () => _checkUpdate(context),
+            ),
+          ]),
+          const SizedBox(height: 18),
+          GlassGroup([
+            SheetTile(
+              icon: Icons.logout_rounded,
+              danger: true,
+              title: 'تسجيل الخروج',
+              onTap: () => _logout(context),
+            ),
+          ]),
+          const SizedBox(height: 22),
           Center(
-              child: Text('وصل شات · الإصدار ${AppConfig.appVersion}+${AppConfig.appBuild}',
-                  style: TextStyle(color: context.textFaint))),
+            child: Column(children: [
+              ShaderMask(
+                shaderCallback: (r) => WaslColors.gradient.createShader(r),
+                child: const Text('وصل شات',
+                    style: TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
+              ),
+              const SizedBox(height: 2),
+              Text('الإصدار ${AppConfig.appVersion} (${AppConfig.appBuild})',
+                  style: TextStyle(fontSize: 12, color: context.textFaint)),
+            ]),
+          ),
         ],
       ),
     );
   }
+}
+
+/// شارة الحماية: سطر واثق واحد بدل مصطلحات تقنية
+class _SecurityBadge extends StatelessWidget {
+  const _SecurityBadge();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(colors: [
+            WaslColors.teal.withValues(alpha: 0.16),
+            WaslColors.indigo.withValues(alpha: 0.10),
+          ]),
+          border: Border.all(color: WaslColors.teal.withValues(alpha: 0.30)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.verified_user_rounded, color: WaslColors.teal, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('رسائلك محمية، والمحادثات الخاصة مشفّرة بين الطرفين',
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: context.textSecondary)),
+          ),
+        ]),
+      );
 }
 
 /// بطاقة الملف الشخصي أعلى الإعدادات (اضغط للتعديل)
@@ -347,7 +375,7 @@ class _FontSizeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.text_fields_rounded, color: WaslColors.indigo),
+      leading: const TintIcon(Icon(Icons.text_fields_rounded, color: WaslColors.indigo)),
       title: const Text('حجم الخط'),
       subtitle: ValueListenableBuilder<double>(
         valueListenable: FontScaleService.scale,
@@ -403,7 +431,7 @@ class _WallpaperTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.wallpaper_rounded, color: WaslColors.teal),
+      leading: const TintIcon(Icon(Icons.wallpaper_rounded, color: WaslColors.teal)),
       title: const Text('خلفية المحادثة'),
       subtitle: ValueListenableBuilder<int>(
         valueListenable: WallpaperService.index,
@@ -543,9 +571,9 @@ class _AppLockTileState extends State<_AppLockTile> {
   @override
   Widget build(BuildContext context) {
     return SwitchListTile(
-      secondary: const Icon(Icons.fingerprint_rounded, color: WaslColors.violet),
+      secondary: const TintIcon(Icon(Icons.fingerprint_rounded, color: WaslColors.violet)),
       title: const Text('قفل التطبيق'),
-      subtitle: const Text('بصمة الإصبع أو رمز قفل الجهاز عند الفتح والعودة'),
+      subtitle: const Text('بالبصمة أو رمز الجوال'),
       value: _enabled,
       onChanged: _busy ? null : _toggle,
     );
@@ -562,13 +590,13 @@ class _NotificationsTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: PushService.enabled,
       builder: (context, on, _) => SwitchListTile(
-        secondary: Icon(
+        secondary: TintIcon(Icon(
             on ? Icons.notifications_active_outlined : Icons.notifications_off_outlined,
-            color: WaslColors.indigo),
+            color: WaslColors.indigo)),
         title: const Text('الإشعارات'),
         subtitle: Text(on
-            ? 'تنبيهات الرسائل الجديدة مفعّلة على هذا الجهاز'
-            : 'التنبيهات موقوفة — لن يصلك أي إشعار حتى تفعّلها'),
+            ? 'مفعّلة على هذا الجهاز'
+            : 'موقوفة — لن يصلك أي تنبيه'),
         value: on,
         onChanged: (v) => PushService.setEnabled(v),
       ),
@@ -587,8 +615,8 @@ class _DesktopNotifyTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: DesktopNotifyService.enabled,
       builder: (context, on, _) => SwitchListTile(
-        secondary: Icon(Icons.desktop_windows_outlined,
-            color: on ? WaslColors.teal : context.textFaint),
+        secondary: TintIcon(Icon(Icons.desktop_windows_outlined,
+            color: on ? WaslColors.teal : context.textFaint)),
         title: const Text('إشعارات سطح المكتب'),
         subtitle: Text(on
             ? 'إشعار محلي عند رسالة جديدة والتطبيق ليس في المقدمة — '
@@ -612,7 +640,7 @@ class _WebPushTile extends StatelessWidget {
     return ValueListenableBuilder<String>(
       valueListenable: WebPushService.status,
       builder: (context, st, _) => ListTile(
-        leading: const Icon(Icons.phonelink_ring_rounded, color: WaslColors.indigo),
+        leading: const TintIcon(Icon(Icons.phonelink_ring_rounded, color: WaslColors.indigo)),
         title: const Text('إشعارات المتصفح'),
         subtitle: Text(st),
         trailing: const Icon(Icons.chevron_left),
@@ -642,8 +670,8 @@ class _PwaTile extends StatelessWidget {
       builder: (context, can, _) => ValueListenableBuilder<String>(
         valueListenable: PwaService.workerStatus,
         builder: (context, ws, __) => ListTile(
-          leading: const Icon(Icons.add_to_home_screen_rounded,
-              color: WaslColors.violet),
+          leading: const TintIcon(Icon(Icons.add_to_home_screen_rounded,
+              color: WaslColors.violet)),
           title: const Text('تثبيت التطبيق على الويب'),
           subtitle: Text(can
               ? 'ثبّته نافذة مستقلة بأيقونته — $ws'
@@ -678,14 +706,12 @@ class _LinkPreviewTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: LinkPreviewService.enabled,
       builder: (context, on, _) => SwitchListTile(
-        secondary: Icon(Icons.link_rounded,
-            color: on ? WaslColors.teal : context.textFaint),
+        secondary: TintIcon(Icon(Icons.link_rounded,
+            color: on ? WaslColors.teal : context.textFaint)),
         title: const Text('معاينة الروابط'),
         subtitle: Text(on
-            ? 'العنوان والصورة المصغرة للروابط العامة. إفصاح: الرابط يمر عبر '
-                'خادم وصل عند توليد المعاينة فقط، ولا يُخزّن عنده إطلاقاً — '
-                'والنتيجة تُحفظ على جهازك 24 ساعة ثم تُحذف'
-            : 'المعاينة موقفة — لا يمر أي رابط عبر أي مكان'),
+            ? 'عنوان وصورة مصغّرة للروابط — لا يُخزَّن الرابط عندنا'
+            : 'موقفة'),
         value: on,
         onChanged: (v) async {
           await LinkPreviewService.setEnabled(v);
@@ -711,12 +737,12 @@ class _SmartOrderTile extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: SmartOrderService.enabled,
       builder: (context, on, _) => SwitchListTile(
-        secondary: Icon(Icons.low_priority_rounded,
-            color: on ? WaslColors.teal : context.textFaint),
+        secondary: TintIcon(Icon(Icons.low_priority_rounded,
+            color: on ? WaslColors.teal : context.textFaint)),
         title: const Text('الترتيب الذكي للمحادثات'),
         subtitle: Text(on
-            ? SmartOrderService.disclosure
-            : 'القائمة بترتيب الخادم الأصلي (الأحدث أولاً)'),
+            ? 'من تكلّمهم أكثر يظهرون أولاً — يُحسب على جهازك'
+            : 'الأحدث أولاً'),
         value: on,
         onChanged: (v) async {
           await SmartOrderService.setEnabled(v);
@@ -740,9 +766,9 @@ class _OnDeviceModelTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.memory_rounded, color: WaslColors.violet),
-      title: const Text('تقييم نموذج على الجهاز (بحثي)'),
-      subtitle: const Text(OnDeviceModelService.disclosure),
+      leading: const TintIcon(Icon(Icons.memory_rounded, color: WaslColors.violet)),
+      title: const Text('ذكاء على جهازك'),
+      subtitle: const Text('تجريبي — هل يقدر جهازك يشغّل نموذجاً محلياً؟'),
       onTap: () => _showEvaluation(context),
     );
   }
@@ -863,7 +889,7 @@ class _AppIconTileState extends State<_AppIconTile> {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.grid_view_rounded, color: WaslColors.violet),
+      leading: const TintIcon(Icon(Icons.grid_view_rounded, color: WaslColors.violet)),
       title: const Text('أيقونة التطبيق'),
       subtitle: Text(_busy
           ? 'جارٍ التغيير…'
@@ -919,7 +945,7 @@ class _LanguageTile extends StatelessWidget {
     return ValueListenableBuilder<String>(
       valueListenable: LocaleService.lang,
       builder: (context, current, _) => ListTile(
-        leading: const Icon(Icons.translate_rounded, color: WaslColors.teal),
+        leading: const TintIcon(Icon(Icons.translate_rounded, color: WaslColors.teal)),
         title: const Text('لغة التطبيق'),
         subtitle: Text(l10nLanguageNames[current] ?? 'العربية'),
         trailing: const Icon(Icons.chevron_left),
@@ -975,10 +1001,9 @@ class _MetricsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.speed_rounded, color: WaslColors.indigo),
-      title: const Text('مؤشرات الأداء على جهازك'),
-      subtitle: const Text(
-          'زمن الفتح البارد وزمن تأكيد الخادم — مقيسة محلياً ولا تُرفع لأي مكان'),
+      leading: const TintIcon(Icon(Icons.speed_rounded, color: WaslColors.indigo)),
+      title: const Text('أداء التطبيق'),
+      subtitle: const Text('سرعة الفتح والإرسال — تبقى على جهازك'),
       trailing: const Icon(Icons.chevron_left),
       onTap: () => _showMetrics(context),
     );
