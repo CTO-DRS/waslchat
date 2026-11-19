@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'wasl_mascot.dart';
+import '../services/app_studio_service.dart';
 
 /// إجمالي الرسائل غير المقروءة عبر المحادثات — يشغّل شارة تبويب
 /// «المحادثات» في الشريط السفلي (تتحدث مع كل تحميل للقائمة).
@@ -81,15 +83,27 @@ class GlassEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 92,
-              height: 92,
-              decoration: BoxDecoration(
-                color: context.glass,
-                shape: BoxShape.circle,
-                border: Border.all(color: context.hairline),
-              ),
-              child: Icon(icon, size: 40, color: context.iconStd),
+            // «وصول» يؤنس الحالة الفارغة (1.13.0) مع أيقونة القسم بجانبه
+            SizedBox(
+              width: 120,
+              height: 112,
+              child: Stack(clipBehavior: Clip.none, children: [
+                const Center(child: WaslMascot(size: 104, mood: MascotMood.sleepy)),
+                PositionedDirectional(
+                  end: 0,
+                  bottom: 4,
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: context.surfaceAlt,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: context.hairline),
+                    ),
+                    child: Icon(icon, size: 19, color: context.iconStd),
+                  ),
+                ),
+              ]),
             ),
             const SizedBox(height: 18),
             Text(title,
@@ -227,6 +241,28 @@ class UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasUrl = url != null && url!.isNotEmpty;
+    // استوديو التطبيق (1.13.0): صورة بمربع ناعم بدل الدائرة عند اختيارها
+    if (AppStudioService.style.value.avatarShape == StudioAvatarShape.squircle) {
+      return Container(
+        width: radius * 2,
+        height: radius * 2,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(radius * 0.62),
+          image: hasUrl
+              ? DecorationImage(
+                  image: NetworkImage(url!), fit: BoxFit.cover, onError: (_, __) {})
+              : null,
+        ),
+        child: hasUrl
+            ? null
+            : icon != null
+                ? Icon(icon, color: Colors.white, size: radius)
+                : Text(name.isNotEmpty ? name.characters.first : '?',
+                    style: TextStyle(color: Colors.white, fontSize: radius * 0.75)),
+      );
+    }
     return CircleAvatar(
       radius: radius,
       backgroundColor: color,
@@ -296,4 +332,77 @@ class DevBadge extends StatelessWidget {
             style: const TextStyle(
                 fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFD97706))),
       );
+}
+
+
+/// هيكل تحميل لامع بدل الدائرة الدوّارة (1.13.0): صفوف رمادية يمر عليها
+/// بريق خفيف — ثابتة عند إيقاف الحركة.
+class WaslSkeletonList extends StatefulWidget {
+  const WaslSkeletonList({super.key, this.rows = 8});
+  final int rows;
+
+  @override
+  State<WaslSkeletonList> createState() => _WaslSkeletonListState();
+}
+
+class _WaslSkeletonListState extends State<WaslSkeletonList>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1300));
+
+  @override
+  void initState() {
+    super.initState();
+    if (AppStudioService.motionOn) _c.repeat();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = context.hairline.withValues(alpha: 0.35);
+    final hi = context.hairline.withValues(alpha: 0.8);
+    Widget bar(double w, double h) => Container(
+        width: w,
+        height: h,
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(h / 2)));
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) => ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (r) => LinearGradient(
+          colors: [base, hi, base],
+          stops: const [0.0, 0.5, 1.0],
+          begin: Alignment(-1.6 + 3.2 * _c.value, 0),
+          end: Alignment(-0.6 + 3.2 * _c.value, 0),
+        ).createShader(r),
+        child: child,
+      ),
+      child: ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: widget.rows,
+        itemBuilder: (_, i) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(children: [
+            Container(
+                width: 52,
+                height: 52,
+                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                bar(120.0 + (i % 3) * 30, 12),
+                const SizedBox(height: 8),
+                bar(200.0 - (i % 4) * 25, 10),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 }

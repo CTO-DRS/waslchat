@@ -113,13 +113,16 @@ class MainActivity : FlutterFragmentActivity() {
                                     PackageManager.DONT_KILL_APP
                                 )
                             }
-                            // كلا الالقبين تُضبط دفعة واحدة — لا حالة وسطية
-                            if (alias == "MainActivityGradient") {
-                                enableOne("MainActivityGradient", true)
-                                enableOne("MainActivityClassic", false)
-                            } else {
-                                enableOne("MainActivityClassic", true)
-                                enableOne("MainActivityGradient", false)
+                            // كل الألقاب تُضبط دفعة واحدة: المطلوب يُفعَّل والباقي يُعطَّل
+                            val all = listOf(
+                                "MainActivityClassic", "MainActivityGradient",
+                                "MainActivityDark", "MainActivityLight",
+                                "MainActivityGold", "MainActivityNeon"
+                            )
+                            val target = if (all.contains(alias)) alias else "MainActivityClassic"
+                            enableOne(target, true)
+                            for (name in all) {
+                                if (name != target) enableOne(name, false)
                             }
                             result.success(true)
                         } catch (e: Exception) {

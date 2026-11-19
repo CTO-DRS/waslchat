@@ -161,7 +161,7 @@ class _AiScreenState extends State<AiScreen> {
               const SizedBox(width: 8),
               Container(
                 decoration:
-                    const BoxDecoration(shape: BoxShape.circle, gradient: WaslColors.gradient),
+                    BoxDecoration(shape: BoxShape.circle, gradient: WaslColors.gradient),
                 child: IconButton(
                   onPressed: _thinking ? null : _send,
                   icon: const Icon(Icons.arrow_upward_rounded, color: Colors.white),

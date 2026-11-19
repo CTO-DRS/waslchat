@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'services/app_studio_service.dart';
+import 'widgets/studio_backdrop.dart';
+
 class WaslColors {
   static const indigo = Color(0xFF6366F1);
   static const teal = Color(0xFF14B8A6);
@@ -19,11 +22,19 @@ class WaslColors {
   static const ink4 = Color(0xFF7D87A0); // نص شبه معطل على الفاتح — WCAG AA كبير ≥3:1 (صُدّل 1.2.0)
   static const lightBubble = Color(0xFFE7EBF5); // فقاعة الطرف الآخر على الفاتح
 
-  static const gradient = LinearGradient(
+  /// تدرج الهوية الأصلي الثابت (نيلة ← تركواز)
+  static const brandGradient = LinearGradient(
     colors: [indigo, teal],
     begin: Alignment.topRight,
     end: Alignment.bottomLeft,
   );
+
+  /// تدرج الهوية الحالي — يتبع ألوان «استوديو التطبيق» (1.13.0)،
+  /// ويساوي [brandGradient] حرفياً في الافتراضي.
+  static LinearGradient get gradient => AppStudioService.style.value.gradient;
+
+  /// اللون الأساسي الحالي من الاستوديو (نيلة افتراضياً)
+  static Color get accent => AppStudioService.style.value.accentColor;
 }
 
 /// ألوان دلالية تتبع سطوع الثيم الحالي — استخدمها بدل Colors.white* و
@@ -63,48 +74,148 @@ extension WaslCtx on BuildContext {
 }
 
 class WaslTheme {
-  static ThemeData get dark => ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: WaslColors.indigo,
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: WaslColors.darkBg,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: false,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: WaslColors.glass,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
-        ),
-      );
+  static ThemeData get dark => build(Brightness.dark, StudioStyle.defaults);
 
-  static ThemeData get light => ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        colorScheme: ColorScheme.fromSeed(seedColor: WaslColors.indigo),
-        scaffoldBackgroundColor: const Color(0xFFF2F4FA),
-        appBarTheme: const AppBarTheme(
+  static ThemeData get light => build(Brightness.light, StudioStyle.defaults);
+
+  /// يبني الثيم من اختيارات «استوديو التطبيق» (1.13.0). القيم الافتراضية
+  /// تنتج الثيم السابق نفسه حرفياً — كل إضافة تُضاف فقط عند تغييرها.
+  static ThemeData build(Brightness b, StudioStyle s) {
+    final dark = b == Brightness.dark;
+    final d = StudioStyle.defaults;
+    final scheme = dark
+        ? ColorScheme.fromSeed(seedColor: s.accentColor, brightness: Brightness.dark)
+        : ColorScheme.fromSeed(seedColor: s.accentColor);
+    final baseBg = dark ? WaslColors.darkBg : const Color(0xFFF2F4FA);
+    final surface = dark ? WaslColors.darkSurface : WaslColors.lightSurface;
+    final glass = dark ? WaslColors.glass : WaslColors.lightGlass;
+    final hair = dark ? Colors.white24 : Colors.black.withValues(alpha: 0.10);
+    final fg = dark ? Colors.white : WaslColors.ink;
+
+    final Color scaffold = switch (s.backdrop) {
+      StudioBackdrop.plain => baseBg,
+      StudioBackdrop.pure => dark ? Colors.black : Colors.white,
+      _ => Colors.transparent, // الخلفية تُرسم خلف كل صفحة
+    };
+
+    final appBar = switch (s.appBar) {
+      StudioAppBar.transparent => const AppBarTheme(
           backgroundColor: Colors.transparent,
           elevation: 0,
           centerTitle: false,
         ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0x0F6366F1), // نيلة خفيفة تعمل على الفاتح
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
+      StudioAppBar.glass => AppBarTheme(
+          backgroundColor: glass,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
         ),
-      );
+      StudioAppBar.solid => AppBarTheme(
+          backgroundColor: surface,
+          surfaceTintColor: Colors.transparent,
+          foregroundColor: fg,
+          elevation: 0,
+          centerTitle: false,
+        ),
+      StudioAppBar.gradient => AppBarTheme(
+          backgroundColor: s.accentColor,
+          foregroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+        ),
+    };
+
+    final cardDefault = s.surface == d.surface && s.roundness == d.roundness;
+    final card = cardDefault
+        ? null
+        : CardThemeData(
+            color: switch (s.surface) {
+              StudioSurface.glass => glass,
+              StudioSurface.solid || StudioSurface.elevated => surface,
+              StudioSurface.outlined => Colors.transparent,
+            },
+            elevation: s.surface == StudioSurface.elevated ? 4 : 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(s.r(16)),
+              side: s.surface == StudioSurface.outlined
+                  ? BorderSide(color: hair)
+                  : BorderSide.none,
+            ),
+          );
+
+    final density = switch (s.density) {
+      StudioDensity.compact => VisualDensity.compact,
+      StudioDensity.comfortable => null,
+      StudioDensity.spacious => const VisualDensity(horizontal: 1, vertical: 1),
+    };
+
+    final needsWrap = s.backdrop != StudioBackdrop.plain &&
+        s.backdrop != StudioBackdrop.pure;
+    final transitions = (needsWrap || s.motion != StudioMotion.full)
+        ? StudioPageTransitions(wrap: needsWrap, motion: s.motion)
+        : null;
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: b,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: scaffold,
+      appBarTheme: appBar,
+      cardTheme: card,
+      visualDensity: density,
+      pageTransitionsTheme: transitions,
+      navigationBarTheme: (s.navLabels && s.accent == d.accent)
+          ? null
+          : NavigationBarThemeData(
+              labelBehavior: s.navLabels
+                  ? NavigationDestinationLabelBehavior.alwaysShow
+                  : NavigationDestinationLabelBehavior.alwaysHide,
+            ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: dark ? WaslColors.glass : const Color(0x0F6366F1), // نيلة خفيفة تعمل على الفاتح
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(s.r(18)),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+}
+
+/// انتقالات الصفحات حسب الاستوديو: ترسم خلفية التطبيق خلف كل صفحة،
+/// وتخفّف الحركة أو توقفها حسب «مستوى الحركة».
+class StudioPageTransitions extends PageTransitionsTheme {
+  const StudioPageTransitions({required this.wrap, required this.motion});
+  final bool wrap;
+  final StudioMotion motion;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final c = wrap ? StudioBackdropView(child: child) : child;
+    switch (motion) {
+      case StudioMotion.off:
+        return c;
+      case StudioMotion.reduced:
+        return FadeTransition(opacity: animation, child: c);
+      case StudioMotion.full:
+        return super.buildTransitions(route, context, animation, secondaryAnimation, c);
+    }
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is StudioPageTransitions && other.wrap == wrap && other.motion == motion;
+
+  @override
+  int get hashCode => Object.hash(wrap, motion);
 }
 
 /// وضع المظهر (داكن/فاتح/النظام) مع حفظه محلياً — الوضع الفاتح مكتمَل منذ 0.7.1.

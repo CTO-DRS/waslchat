@@ -51,6 +51,9 @@ import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
 import '../widgets/tone_picker_sheet.dart';
+import '../services/app_studio_service.dart';
+import '../widgets/studio_backdrop.dart';
+import 'chat_studio_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/group_avatar.dart';
 import '../widgets/link_preview_card.dart';
@@ -177,6 +180,16 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
 
   /// آخر نسخة كاملة من الرسائل (للتصدير النصي من قائمة ⋮)
   List<Map<String, dynamic>> _allMsgs = const [];
+
+  // استوديو المحادثة (1.13.0): تخصيص هذه المحادثة فوق اختيار التطبيق
+  late final ValueNotifier<ChatStyle> _chatStyle =
+      ChatStudioService.of(widget.conversationId);
+  void _onStudio() {
+    if (mounted) setState(() {});
+  }
+
+  BubbleLook get _look =>
+      BubbleLook.resolve(AppStudioService.style.value, _chatStyle.value);
 
   // القفز والإبراز (0.21.0): معرض الوسائط يفتح المحادثة على وسيط محدد
   final _itemScroll = ItemScrollController();
@@ -674,6 +687,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   @override
   void initState() {
     super.initState();
+    _chatStyle.addListener(_onStudio);
+    AppStudioService.style.addListener(_onStudio);
     // استبعادات التذكير الذكي المحفوظة (9 ب) — تُحمَّل محلياً بلا شبكة
     _secure
         .read(key: 'wasl_promise_dismissed_${widget.conversationId}')
@@ -1006,6 +1021,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     _recorder.dispose();
     _text.dispose();
     _searchCtrl.dispose();
+    _chatStyle.removeListener(_onStudio);
+    AppStudioService.style.removeListener(_onStudio);
     super.dispose();
   }
 
@@ -1164,6 +1181,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }
     final editing = _editing;
     final replyTo = _replyTo;
+    // لمسة 1.13.0: اهتزاز إرسال خفيف، واحتفال بأول رسالة في محادثة جديدة
+    AppStudioService.thump();
+    if (editing == null && _allMsgs.isEmpty && !widget.isChannel) {
+      ConfettiBurst.show(context);
+    }
     var payload = content;
     if (_e2e) {
       final isDm = !widget.isGroup && widget.otherId != null;
@@ -1793,11 +1815,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
         margin: const EdgeInsets.symmetric(vertical: 3),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
         constraints: BoxConstraints(maxWidth: width),
-        decoration: BoxDecoration(
-          gradient: mine ? WaslColors.gradient : null,
-          color: mine ? null : context.bubbleOther,
-          borderRadius: BorderRadius.circular(20),
-        ),
+        decoration: _look.decoration(mine: mine, otherBase: context.bubbleOther),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -3026,6 +3044,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
               title: 'رمز الأمان',
               subtitle: _verified ? 'موثّق ✓' : 'تأكّد أنك تكلّم الشخص الصحيح',
               onTap: () => go(ctx, _showSafetyNumber)),
+        SheetTile(
+            icon: Icons.palette_rounded,
+            color: WaslColors.violet,
+            title: 'استوديو المحادثة',
+            subtitle: 'خلفية وألوان وخط هذه المحادثة',
+            onTap: () => go(ctx, _openChatStudio)),
         if (!kIsWeb)
           SheetTile(
               icon: Icons.music_note_rounded,
@@ -3413,6 +3437,47 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     _loadMembers();
   }
 
+  void _openChatStudio() => Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) =>
+          ChatStudioScreen(conversationId: widget.conversationId, title: _title)));
+
+  /// شريط الكتابة حسب «استوديو التطبيق»
+  InputDecoration _composerDecoration(String hint) {
+    final s = AppStudioService.style.value;
+    switch (s.input) {
+      case StudioInput.rounded:
+        return InputDecoration(hintText: hint);
+      case StudioInput.pill:
+        return InputDecoration(
+          hintText: hint,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+        );
+      case StudioInput.outlined:
+        return InputDecoration(
+          hintText: hint,
+          filled: false,
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(s.r(18)),
+              borderSide: BorderSide(color: context.hairline)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(s.r(18)),
+              borderSide: BorderSide(color: context.hairline)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(s.r(18)),
+              borderSide: BorderSide(color: s.accentColor, width: 1.5)),
+        );
+      case StudioInput.minimal:
+        return InputDecoration(
+          hintText: hint,
+          filled: false,
+          border: UnderlineInputBorder(borderSide: BorderSide(color: context.hairline)),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: context.hairline)),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasText = _text.text.trim().isNotEmpty;
@@ -3597,11 +3662,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             ),
           Expanded(
             // خلفية المحادثة المختارة (الإعدادات ← المظهر ← خلفية المحادثة)
-            child: ValueListenableBuilder<int>(
-              valueListenable: WallpaperService.index,
-              builder: (context, _wp, _) => CustomPaint(
-                painter: WallpaperPainter(WallpaperService.current,
-                    dark: Theme.of(context).brightness == Brightness.dark),
+            // استوديو المحادثة: صورة/خلفية هذه المحادثة وحجم خطها
+            child: ChatBackground(
+              chat: _chatStyle.value,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(
+                        FontScaleService.scale.value * (_chatStyle.value.fontScale ?? 1.0))),
                 child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _stream,
               builder: (context, snap) {
@@ -3709,10 +3776,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
                         constraints: BoxConstraints(
                             maxWidth: MediaQuery.of(context).size.width * 0.75),
-                        decoration: BoxDecoration(
-                          gradient: mine ? WaslColors.gradient : null,
-                          color: mine ? null : context.bubbleOther,
-                          borderRadius: BorderRadius.circular(20),
+                        decoration: _look.decoration(mine: mine, otherBase: context.bubbleOther).copyWith(
                           // الإبراز عند القفز (معرض الوسائط): إطار فاتح يذوب
                           border: _highlightId == m['id']
                               ? Border.all(color: Colors.tealAccent, width: 2.5)
@@ -3951,15 +4015,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
                           maxLines: 5,
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _sendText(),
-                          decoration: InputDecoration(
-                              hintText: l10nT('chats_type_message',
-                                  LocaleService.lang.value)),
+                          decoration: _composerDecoration(l10nT(
+                              'chats_type_message', LocaleService.lang.value)),
                         ),
                 ),
                 const SizedBox(width: 8),
                 hasText
                     ? Container(
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                             shape: BoxShape.circle, gradient: WaslColors.gradient),
                         child: IconButton(
                           tooltip: 'إرسال الرسالة',

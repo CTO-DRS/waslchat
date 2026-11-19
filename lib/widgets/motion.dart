@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_studio_service.dart';
+
 /// الحركة (المرحلة 5 — v0.14.0): بدائل دخول خفيفة موحّدة — ظهور بانزلاق
 /// وتلاشٍ للفقاعات والقوائم، مع ذاكرة «شُوهد سابقاً» حتى لا تُعاد الحركة عند
 /// كل إعادة بناء للقائمة (فقط للعناصر الجديدة فعلاً).
@@ -20,6 +22,8 @@ class MotionBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // استوديو التطبيق (1.13.0): «الحركة متوقفة» تعرض العنصر مباشرة
+    if (!AppStudioService.motionOn) return child;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: const Duration(milliseconds: 260),
@@ -45,6 +49,8 @@ class MotionStagger extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // استوديو التطبيق (1.13.0): «الحركة متوقفة» تعرض العنصر مباشرة
+    if (!AppStudioService.motionOn) return child;
     final delay = (index.clamp(0, 10)) * 28;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
@@ -66,6 +72,8 @@ class MotionScaleIn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // استوديو التطبيق (1.13.0): «الحركة متوقفة» تعرض العنصر مباشرة
+    if (!AppStudioService.motionOn) return child;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.85, end: 1),
       duration: const Duration(milliseconds: 220),

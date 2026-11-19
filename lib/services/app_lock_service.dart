@@ -1,4 +1,8 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show ModalRoute, RouteObserver;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -42,6 +46,96 @@ class AppLockService {
       return 'تعذّر حفظ الإعداد';
     }
     return null;
+  }
+
+  // ---------- رمز PIN خاص بالتطبيق (1.13.0) ----------
+  // يُحفظ مُملَّحاً ومُجزّأً (SHA-256) فقط — لا يُحفظ الرمز نفسه أبداً.
+  static const _pinKey = 'app_lock_pin_v1';
+  static int _wrong = 0;
+  static DateTime? _cooldownUntil;
+
+  static Future<String> hashPin(String pin, List<int> salt) async {
+    final h = await Sha256().hash([...salt, ...utf8.encode(pin)]);
+    return base64Encode(h.bytes);
+  }
+
+  /// رمز صالح: 4 إلى 6 أرقام
+  static bool validPin(String pin) => RegExp(r'^[0-9]{4,6}$').hasMatch(pin);
+
+  static Future<bool> hasPin() async {
+    try {
+      return (await _storage.read(key: _pinKey)) != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> setPin(String pin) async {
+    if (!validPin(pin)) return false;
+    final r = Random.secure();
+    final salt = List<int>.generate(16, (_) => r.nextInt(256));
+    final h = await hashPin(pin, salt);
+    try {
+      await _storage.write(key: _pinKey, value: '${base64Encode(salt)}:$h');
+      await _storage.write(key: '${_pinKey}_len', value: '${pin.length}');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// طول الرمز المحفوظ (4 افتراضياً) — للتحقق مرة واحدة عند اكتماله
+  static Future<int> pinLength() async {
+    try {
+      return int.tryParse(await _storage.read(key: '${_pinKey}_len') ?? '') ?? 4;
+    } catch (_) {
+      return 4;
+    }
+  }
+
+  static Future<void> removePin() async {
+    try {
+      await _storage.delete(key: '${_pinKey}_len');
+      await _storage.delete(key: _pinKey);
+    } catch (_) {}
+  }
+
+  /// ثوانٍ متبقية من مهلة المحاولات الخاطئة (0 = مسموح)
+  static int get cooldownSeconds {
+    final u = _cooldownUntil;
+    if (u == null) return 0;
+    final left = u.difference(DateTime.now()).inSeconds;
+    return left > 0 ? left : 0;
+  }
+
+  /// يتحقق من الرمز. بعد 5 محاولات خاطئة مهلة 30 ثانية.
+  static Future<bool> checkPin(String pin) async {
+    if (cooldownSeconds > 0) return false;
+    String? raw;
+    try {
+      raw = await _storage.read(key: _pinKey);
+    } catch (_) {}
+    if (raw == null) return false;
+    final ok = await verifyStored(raw, pin);
+    if (ok) {
+      _wrong = 0;
+    } else if (++_wrong >= 5) {
+      _wrong = 0;
+      _cooldownUntil = DateTime.now().add(const Duration(seconds: 30));
+    }
+    return ok;
+  }
+
+  @visibleForTesting
+  static Future<bool> verifyStored(String raw, String pin) async {
+    final i = raw.indexOf(':');
+    if (i <= 0) return false;
+    try {
+      final salt = base64Decode(raw.substring(0, i));
+      return await hashPin(pin, salt) == raw.substring(i + 1);
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<bool> authenticate({String reason = 'افتح وصل شات'}) async {

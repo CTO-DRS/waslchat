@@ -39,6 +39,9 @@ import 'profile_screen.dart';
 import 'starred_screen.dart';
 import '../services/tone_service.dart';
 import 'voice_studio_screen.dart';
+import 'app_studio_screen.dart';
+import 'welcome_screen.dart';
+import '../widgets/wasl_mascot.dart';
 import 'security_screens.dart';
 
 String _modeLabel(ThemeMode m) => switch (m) {
@@ -198,6 +201,8 @@ class SettingsScreen extends StatelessWidget {
             ),
           ]),
           const SheetSectionLabel('المظهر'),
+          const _StudioBanner(),
+          const SizedBox(height: 8),
           GlassGroup([
             SheetTile(
               icon: Icons.dark_mode_rounded,
@@ -214,6 +219,16 @@ class SettingsScreen extends StatelessWidget {
             const _WallpaperTile(),
             const _AppIconTile(),
             const _LanguageTile(),
+            SheetTile(
+              icon: Icons.waving_hand_rounded,
+              color: const Color(0xFF3B82F6),
+              title: 'جولة الترحيب',
+              subtitle: 'شاهد جولة «وصول» التعريفية من جديد',
+              trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => WelcomeScreen(
+                      replay: true, onDone: () async {}))),
+            ),
           ]),
           const SheetSectionLabel('الإشعارات'),
           GlassGroup([
@@ -313,6 +328,48 @@ class SettingsScreen extends StatelessWidget {
             ]),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// بطاقة «استوديو التطبيق» البارزة أعلى قسم المظهر (1.13.0)
+class _StudioBanner extends StatelessWidget {
+  const _StudioBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const AppStudioScreen())),
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: LinearGradient(colors: [
+              WaslColors.accent.withValues(alpha: 0.28),
+              WaslColors.gradient.colors.last.withValues(alpha: 0.18),
+            ]),
+            border: Border.all(color: WaslColors.accent.withValues(alpha: 0.45)),
+          ),
+          child: Row(children: [
+            const WaslMascot(size: 58, mood: MascotMood.happy),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('استوديو التطبيق',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 2),
+                Text('الألوان والخلفيات والأشرطة والفقاعات والأيقونة — كل شيء على ذوقك',
+                    style: TextStyle(fontSize: 12.5, color: context.textSecondary)),
+              ]),
+            ),
+            Icon(Icons.chevron_left_rounded, color: context.textFaint),
+          ]),
+        ),
       ),
     );
   }
@@ -941,9 +998,7 @@ class _AppIconTileState extends State<_AppIconTile> {
       title: const Text('أيقونة التطبيق'),
       subtitle: Text(_busy
           ? 'جارٍ التغيير…'
-          : _current == 'gradient'
-              ? 'النمط الحالي: المتدرجة'
-              : 'النمط الحالي: الكلاسيكية'),
+          : 'النمط الحالي: ${AppIconService.byId(_current).label}'),
       trailing: const Icon(Icons.chevron_left),
       onTap: _busy
           ? null
@@ -958,20 +1013,21 @@ class _AppIconTileState extends State<_AppIconTile> {
                     const ListTile(
                         title: Text('أيقونة التطبيق',
                             style: TextStyle(fontWeight: FontWeight.w800))),
-                    for (final (v, label) in const [
-                      ('classic', 'الكلاسيكية — الخضراء المعتمدة'),
-                      ('gradient', 'المتدرجة — بديل ألوان وصل'),
-                    ])
+                    for (final v in AppIconService.variants)
                       ListTile(
-                        leading: Icon(
-                            _current == v
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(v.asset, width: 38, height: 38),
+                        ),
+                        title: Text(v.label),
+                        trailing: Icon(
+                            _current == v.id
                                 ? Icons.radio_button_checked
                                 : Icons.radio_button_off,
                             color: WaslColors.teal),
-                        title: Text(label),
                         onTap: () {
-                          Navigator.pop(ctx, v);
-                          _pick(v);
+                          Navigator.pop(ctx, v.id);
+                          _pick(v.id);
                         },
                       ),
                   ]),
