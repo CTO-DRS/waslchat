@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>وصل شات · كتالوج البوتات المجتمعية</title>
+    <meta name="description" content="كتالوج بوتات مجتمعية موثق على واجهة وصل شات: قوالب جاهزة للترحيب والحضور والاقتراحات، موقّعة HMAC-SHA256 وتُفحص قبل العرض." />
+    <meta name="theme-color" content="#070B1F" />
+    <link rel="canonical" href="https://waslchat.app/bots/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap"
+    />
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        background: #070B1F;
+        color: #eef1ff;
+        font-family: "IBM Plex Sans Arabic", system-ui, sans-serif;
+        margin: 0;
+        line-height: 1.9;
+      }
+      .wrap { max-width: 46rem; margin: 0 auto; padding: clamp(1rem, 4vw, 2.5rem); }
+      a { color: #2ee6c5; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .brand { display: flex; align-items: center; gap: .6rem; padding-block: 1rem 2rem; }
+      .brand strong { font-size: 1.05rem; }
+      h1 { font-size: clamp(1.4rem, 5vw, 2rem); margin: 0 0 .4rem; }
+      h2 { font-size: clamp(1.05rem, 4vw, 1.3rem); color: #2ee6c5; margin: 2.2rem 0 .6rem; }
+      p.lead { color: #a9b0cf; font-size: 1rem; margin: 0 0 1rem; }
+      .card {
+        background: #1a2246;
+        border: 1px solid #2a3466;
+        border-radius: 14px;
+        padding: clamp(.9rem, 3vw, 1.3rem);
+        margin-block: .9rem;
+      }
+      .card h3 { margin: 0 0 .4rem; font-size: 1rem; color: #8b7cff; }
+      .card p { margin: 0; font-size: .92rem; color: #c9d1f0; }
+      .badge {
+        display: inline-block;
+        background: rgba(46, 230, 197, .12);
+        color: #2ee6c5;
+        border: 1px solid rgba(46, 230, 197, .35);
+        border-radius: 999px;
+        font-size: .78rem;
+        padding: .1rem .7rem;
+        margin-inline-start: .4rem;
+      }
+      pre {
+        background: #0c1130;
+        border: 1px solid #2a3466;
+        border-radius: 12px;
+        padding: 1rem;
+        overflow-x: auto;
+        font-size: .8rem;
+        line-height: 1.7;
+        direction: ltr;
+        text-align: left;
+      }
+      ul { padding-inline-start: 1.2rem; color: #c9d1f0; font-size: .95rem; }
+      footer { border-top: 1px solid #2a3466; margin-top: 3rem; padding-block: 1.2rem; color: #a9b0cf; font-size: .85rem; }
+      @media (max-width: 480px) { .wrap { padding: 1rem; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true"><path fill="#2EE6C5" d="M32 6C16.5 6 5 16.6 5 29.6c0 7.2 3.4 13.5 8.9 17.8L11.5 58l12.9-6.6c2.4.6 5 .9 7.6.9 15.5 0 27-10.6 27-23.6S47.5 6 32 6z"/><circle cx="21" cy="30" r="3.6" fill="#070B1F"/><circle cx="32" cy="30" r="3.6" fill="#070B1F"/><circle cx="43" cy="30" r="3.6" fill="#070B1F"/></svg>
+        <strong>وصل شات</strong>
+        <a href="/" style="margin-inline-start:auto; font-size:.9rem">الرئيسية</a>
+      </div>
+
+      <h1>كتالوج البوتات المجتمعية <span class="badge">إصدار 1.21.0</span></h1>
+      <p class="lead">
+        بوتات جاهزة بقوالب موثقة تعمل في قنوات المجتمعات وغرفها — كل بيان
+        موقّع بـHMAC-SHA256 وتُفحص حدود قوالبها قبل العرض لا بعده. هذه
+        الصفحة توثق الصيغة العامة؛ الكتالوج الحي يُدار من شاشة البوتات داخل
+        التطبيق على واجهة HMAC القائمة نفسها.
+      </p>
+
+      <h2>القوالب الجاهزة الثلاثة</h2>
+      <div class="card">
+        <h3>ترحيب</h3>
+        <p>من 1 إلى 3 رسائل، كل رسالة حتى 200 حرف، ومتغير <code dir="ltr">{name}</code> يستبدل باسم المستقبل عند الترحيب.</p>
+      </div>
+      <div class="card">
+        <h3>حضور</h3>
+        <p>من 1 إلى 2 جلسة، بصيغة <code dir="ltr">HH:mm</code>، والبداية قبل النهاية — يعلن أوقات الحضور كما وثقها صاحب البوت.</p>
+      </div>
+      <div class="card">
+        <h3>اقتراحات</h3>
+        <p>من 3 إلى 5 عناصر، كل عنصر حتى 80 حرفاً — قائمة مقترحات ثابتة يعرضها البوت لمجتمعه.</p>
+      </div>
+
+      <h2>كيف يوثَّق البيان؟</h2>
+      <p class="lead">
+        نفس بوابة الويب هوك القائمة منذ البداية: توقيع <code dir="ltr">X-Wasl-Signature</code>
+        بصيغة <code dir="ltr">sha256=HMAC(جسم البيان، السرّ)</code>، ومقارنة
+        زمن-ثابت، والترميز القانوني هو ترميز JSON القياسي للبيان — ومن يقبل
+        البيان يتحقق بالدالة نفسها فلا خلاف ترميز ولا بيان معبث يمر.
+      </p>
+      <pre>{
+  "version": 1,
+  "bots": [
+    {
+      "manifest": {
+        "username": "helper_bot",
+        "displayName": "المساعد",
+        "description": "بوت ترحيب لمجتمعات وصل",
+        "templates": [
+          { "type": "welcome",
+            "messages": ["أهلاً {name}!", "كيف أساعدك اليوم؟"] }
+        ]
+      },
+      "signature": "sha256=…"
+    }
+  ]
+}</pre>
+      <ul>
+        <li>الاسم البرمجي يلتزم صيغة الواجهة: ينتهي بـ<code dir="ltr">_bot</code>.</li>
+        <li>الترتيب القياسي تصاعدياً بالاسم البرمجي شرط اعتماد — لا كتالوج يتبدل بترتيب وصوله.</li>
+        <li>التكرار مرفوض والسعة 12 بوتاً للكتالوج و3 لكل غرفة.</li>
+        <li>الفشل يعيد أسبابه مجمعة لا أولها — لا استثناءات مسربة.</li>
+      </ul>
+
+      <h2>حدود صادقة</h2>
+      <p class="lead">
+        المحرك النقي <code dir="ltr">wasl_bots</code> بلا شبكة ولا ملفات:
+        بايتات داخل ونتائج خارج، فالتوقيع والفحص قابلان للتشغيل محلياً بنفسك.
+        وربط الغرف الحي عبر خدمة التطبيق يُنشر بكود التطبيق المفتوح في
+        المستودع، والبوتات تعمل فعلياً في القنوات وغرف المجتمعات (محتواها
+        صريح بالتصميم) — الغرف المشفرة طرف-لطرف نصها لا يفكه بوت أصلاً.
+      </p>
+
+      <footer>
+        وصل شات — تواصل بلا حدود، بخصوصية تامة ·
+        <a href="/privacy/">الخصوصية والشروط</a> ·
+        المحرك النقي <a href="https://github.com/CTO-DRS/wasl-chat">مفتوح للقراءة</a>
+      </footer>
+    </div>
+  </body>
+</html>
