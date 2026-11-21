@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 2.0.1+91
+version: 2.0.2+92
 
 environment:
   sdk: '>=3.9.0 <4.0.0'
@@ -25,6 +25,8 @@ dependencies:
   qr_flutter: ^4.1.0
   # ماسح QR بالكاميرا — إصدار مثبّت بتنفيذ أصلي مباشر بلا كود C (تسهيلاً للبناء)
   mobile_scanner: 3.5.7
+  # 2.0.2: روابط waslchat.app/@user — فتح محادثة المستخدم مباشرة من الرابط
+  app_links: ^6.3.0
   cryptography: ^2.9.0
   # 1.15.0: الكبرى 11 مقفولة خلف بوابة win32 (يطلب flutter_secure_storage_windows
   # win32 ^6 والمثبّت file_picker يطلب ^5) — رُقّينا إلى 10.3.4 وهِي متوافقة

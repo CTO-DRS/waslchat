@@ -23,6 +23,9 @@ import 'services/offline_queue_service.dart';
 import 'services/pwa_service.dart';
 import 'services/shared_image_hub.dart';
 import 'services/web_push_service.dart';
+import 'services/deep_link_service.dart';
+import 'services/username_service.dart';
+import 'services/block_service.dart';
 import 'services/app_studio_service.dart';
 import 'theme.dart';
 import 'screens/welcome_screen.dart';
@@ -30,6 +33,7 @@ import 'widgets/wasl_mascot.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/security_screens.dart';
+import 'screens/chat_screen.dart';
 import 'services/push_service.dart';
 import 'services/tone_service.dart';
 import 'widgets/lock_gate.dart';
@@ -68,6 +72,9 @@ Future<void> main() async {
   // من كاش عامل الصفحة مرة واحدة (ويب حصراً) وتستهلكها أول دردشة تفتح
   unawaited(SharedImageHub.pull());
   WebPushService.init();
+  // 2.0.2: روابط waslchat.app/@user — النقر على رابط الملف يفتح المحادثة
+  // مباشرة داخل التطبيق إن كان مثبتاً (App Links + intent من صفحة الويب)
+  DeepLinkService.init(_openProfileLink);
   _initCrashlytics();
   // جولة الترحيب (1.13.1): جلسة محفوظة عند الفتح = مستخدم قديم، تُعلَّم بصمت
   final restored = supabase.auth.currentSession?.user.id;
@@ -120,6 +127,33 @@ FirebaseCrashlytics? _safeCrashlytics() {
   } catch (_) {
     return null;
   }
+}
+
+/// 2.0.2: فتح محادثة @user من رابط waslchat.app/@user — نفس تدفق البحث في
+/// new_chat_screen. للسجّلين فقط؛ لغير المسجّل يفتح التطبيق عادياً.
+Future<void> _openProfileLink(String username) async {
+  try {
+    final me = supabase.auth.currentUser;
+    if (me == null) return;
+    final user = await UsernameService.lookup(username);
+    if (user == null || user['id'] == me.id) return;
+    if (BlockService.isBlocked(user['id'] as String)) return;
+    final isBot = user['is_bot'] == true;
+    final convId = await supabase
+        .rpc('create_direct_chat', params: {'other_id': user['id']});
+    final nav = navigatorKey.currentState;
+    if (nav == null || !nav.mounted) return;
+    await nav.pushReplacement(MaterialPageRoute(
+      builder: (_) => ChatScreen(
+        conversationId: convId as String,
+        title: (user['display_name'] ?? user['username']) as String,
+        otherId: user['id'] as String,
+        // محادثات البوتات غير مشفرة — البوت يقرأها عبر واجهته (بصدق)
+        isBot: isBot,
+        encrypted: !isBot,
+      ),
+    ));
+  } catch (_) {}
 }
 
 class WaslApp extends StatelessWidget {

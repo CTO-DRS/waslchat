@@ -55,6 +55,14 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="app.waslchat" android:host="login-callback"/>
             </intent-filter>
+            <!-- 2.0.2: روابط الملفات الشخصية — waslchat.app/@user يفتح التطبيق
+                 مباشرة (Android App Links) والتحقق عبر assetlinks.json في الموقع -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="waslchat.app" android:pathPrefix="/@"/>
+            </intent-filter>
         </activity>
         <!-- أيقونة المشغّل (0.21.0): الإطلاق عبر لقبين — الكلاسيكية مفعّلة
              افتراضياً والمتدرجة البديلة معطّلة، والتبديل عبر wasl/appicon
