@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:material_ui/material_ui.dart';
+
+// ملاحظة: material_ui يعيد تصدير flutter/material كاملاً — لا نستورد
+// flutter/material هنا مباشرة تفادياً لتعارض الأسماء (نمط media_bubbles)
 
 /// منتقي الموقع على الخريطة (2.3.1): بلاط OSM حقيقي 3×3 مع سحب وتكبير
 /// ونقر لتحديد أي نقطة — والنتيجة إحداثيات صماء تمر بنفس مسار التشفير
