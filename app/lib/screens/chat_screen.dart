@@ -687,6 +687,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   DateTime _lastTypingSent = DateTime(2000);
   DateTime? _othersReadUpTo;
   String? _lastMarkedId;
+  Timer? _readTicker;
 
   @override
   void initState() {
@@ -776,7 +777,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     }, onError: (_) {});
 
     PresenceService.online.addListener(_onPresence);
-    supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+    unawaited(_markRead());
+    // نبضة قراءة كل 15 ثانية ما دامت الشاشة مفتوحة — تضمن سحب الشارة حتى لو
+    // فُوّت حدث لحظي أو ضاع إرسال صامت أثناء قفل الشاشة أو انقطاع شعيرية (2.0.3)
+    _readTicker = Timer.periodic(
+        const Duration(seconds: 15), (_) => unawaited(_markRead()));
   }
 
   void _onPresence() {
@@ -800,7 +805,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     final id = last['id'] as String;
     if (id == _lastMarkedId || last['sender_id'] == _me) return;
     _lastMarkedId = id;
-    supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+    unawaited(_markRead());
+  }
+
+  /// تعليم المقروء مع إعادة المحاولة — كان الإرسال الناري الصامت يضيع عند أي
+  /// فشل لحظي فتبقى شارة غير المقروء عالقة رغم قراءة الرسائل (2.0.3)
+  Future<void> _markRead() async {
+    for (var i = 0; i < 3; i++) {
+      try {
+        await supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+        return;
+      } catch (_) {
+        if (i == 2) return;
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    }
   }
 
   Future<void> _loadMeta() async {
@@ -1020,11 +1039,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     VoiceReadService.stop();
     _ticker?.cancel();
     _typingSweep?.cancel();
+    _readTicker?.cancel();
     _partsSub?.cancel();
     _reactSub?.cancel();
     PresenceService.online.removeListener(_onPresence);
     supabase.removeChannel(_room);
-    supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+    unawaited(_markRead());
     _recorder.dispose();
     _text.dispose();
     _searchCtrl.dispose();
