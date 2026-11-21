@@ -1,10 +1,9 @@
-import 'dart:math' as math;
+import 'dart:math' show atan, cos, log, pi, sinh, tan;
 
 import 'package:geolocator/geolocator.dart';
 import 'package:material_ui/material_ui.dart';
 
-// ملاحظة: material_ui يعيد تصدير flutter/material كاملاً — لا نستورد
-// flutter/material هنا مباشرة تفادياً لتعارض الأسماء (نمط media_bubbles)
+import '../theme.dart';
 
 /// منتقي الموقع على الخريطة (2.3.1): بلاط OSM حقيقي 3×3 مع سحب وتكبير
 /// ونقر لتحديد أي نقطة — والنتيجة إحداثيات صماء تمر بنفس مسار التشفير
@@ -20,9 +19,9 @@ class LocationPick {
 (double, double) _worldPx(double lat, double lng, int z) {
   final n = 256.0 * (1 << z);
   final x = (lng + 180) / 360 * n;
-  final rad = lat * math.pi / 180;
+  final rad = lat * pi / 180;
   final y =
-      (1 - math.log(math.tan(rad) + 1 / math.cos(rad)) / math.pi) / 2 * n;
+      (1 - log(tan(rad) + 1 / cos(rad)) / pi) / 2 * n;
   return (x, y);
 }
 
@@ -31,7 +30,7 @@ class LocationPick {
   final lng = wx / n * 360 - 180;
   final yy = wy / n;
   final lat =
-      math.atan(math.sinh(math.pi * (1 - 2 * yy))) * 180 / math.pi;
+      atan(sinh(pi * (1 - 2 * yy))) * 180 / pi;
   return (lat, lng);
 }
 
