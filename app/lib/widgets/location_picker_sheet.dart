@@ -1,4 +1,7 @@
-import 'dart:math' show atan, cos, log, pi, sinh, tan;
+import 'dart:math' show atan, cos, exp, log, pi, tan;
+
+/// sinh غير موجودة في dart:math — الصيغة القياسية عبر exp
+double _sinh(double x) => (exp(x) - exp(-x)) / 2;
 
 import 'package:geolocator/geolocator.dart';
 import 'package:material_ui/material_ui.dart';
@@ -30,7 +33,7 @@ class LocationPick {
   final lng = wx / n * 360 - 180;
   final yy = wy / n;
   final lat =
-      atan(sinh(pi * (1 - 2 * yy))) * 180 / pi;
+      atan(_sinh(pi * (1 - 2 * yy))) * 180 / pi;
   return (lat, lng);
 }
 
