@@ -5,7 +5,9 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart' show SecretKey;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
+import 'dart:math' show cos, log, pi, tan;
 import 'package:file_picker/file_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
@@ -347,7 +349,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
           t != 'file' &&
           t != 'video' &&
           t != 'image' &&
-          t != 'voice') {
+          t != 'voice' &&
+          t != 'location') {
         continue;
       }
       if (m['deleted_at'] != null) continue;
@@ -1329,7 +1332,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     ).where((a) {
       if (a.id == 'forward' && !allowForward) return false;
       if (a.id == 'edit' && !_canEdit(m)) return false;
-      if (a.id == 'copy' && text == null) return false;
+      if (a.id == 'copy' && text == null && kind != 'location') return false;
       if (a.id == 'translate' && text == null) return false;
       return true;
     }).toList();
@@ -1414,6 +1417,16 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         });
         return;
       case 'copy':
+        // الموقع: النسخ يجلب الإحداثيات الصماء لا النص المشفر
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          final loc = _locParts(_textOf(m) ?? '');
+          if (loc != null) {
+            await Clipboard.setData(
+                ClipboardData(text: '${loc.$1},${loc.$2}'));
+            _snack('نُسخت الإحداثيات');
+          }
+          return;
+        }
         final t = _textOf(m);
         if (t == null) return;
         await Clipboard.setData(ClipboardData(text: t));
@@ -1432,9 +1445,29 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         _forward(m);
         return;
       case 'share':
+        // الموقع: مشاركة رابط الخريطة كنص عبر ورقة النظام
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          final loc = _locParts(_textOf(m) ?? '');
+          if (loc != null) {
+            await SharePlus.instance.share(ShareParams(
+                text:
+                    '${loc.$3.isEmpty ? 'موقع' : loc.$3} — ${_locUrl(loc.$1, loc.$2)}',
+                subject: 'موقع من وصل شات'));
+          }
+          return;
+        }
         await _barShare(m);
         return;
       case 'open':
+        // الموقع: فتح الخريطة الخارجية بدل فتح الوسائط
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          final loc = _locParts(_textOf(m) ?? '');
+          if (loc != null) {
+            await launchUrl(Uri.parse(_locUrl(loc.$1, loc.$2)),
+                mode: LaunchMode.externalApplication);
+          }
+          return;
+        }
         await _openMedia(m);
         return;
       case 'speed':
@@ -1633,6 +1666,192 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         key: 'wasl_hidden_${widget.conversationId}',
         value: _hiddenIds.join(','));
     _snack('أُخفيت الرسالة لديك فقط');
+  }
+
+  /// تفكيك محتوى الموقع (2.3.0): «lat,lng|وصف» — يعاد null عند التلف أو
+  /// الإحداثيات خارج النطاق؛ نحتاجه للفقاعة والشريط والنسخ والمشاركة
+  (double, double, String)? _locParts(String raw) {
+    final parts = raw.split('|');
+    final c = parts.first.split(',');
+    if (c.length < 2) return null;
+    final lat = double.tryParse(c[0].trim());
+    final lng = double.tryParse(c[1].trim());
+    if (lat == null || lng == null) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return (lat, lng, parts.length > 1 ? parts.sublist(1).join('|') : '');
+  }
+
+  String _locUrl(double lat, double lng) =>
+      'https://maps.google.com/?q=$lat,$lng';
+
+  /// فقاعة الموقع (2.3.0): بلاطة خرائط OSM حقيقية محسوبة من الإحداثيات
+  /// + دبوس فوقها + الوصف والإحداثيات — النقر يفتح الخريطة الخارجية،
+  /// وعند فشل تحميل البلاطة تظهر بطاقة إحداثيات أنيقة بدلها
+  Widget _locationBubble(Map<String, dynamic> m) {
+    final mine = m['sender_id'] == _me;
+    final loc = _locParts(_textOf(m) ?? '');
+    if (loc == null) {
+      return Text('موقع تالف',
+          style: TextStyle(
+              color: mine ? Colors.white60 : context.textTertiary,
+              fontStyle: FontStyle.italic));
+    }
+    final (lat, lng, label) = loc;
+    const z = 14;
+    final n = 1 << z;
+    final xt = (((lng + 180) / 360) * n).floor().clamp(0, n - 1);
+    final rad = lat * pi / 180;
+    final yt =
+        ((1 - (log(tan(rad) + 1 / cos(rad)) / pi)) / 2 * n).floor().clamp(0, n - 1);
+    final tile = 'https://tile.openstreetmap.org/$z/$xt/$yt.png';
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => launchUrl(Uri.parse(_locUrl(lat, lng)),
+          mode: LaunchMode.externalApplication),
+      child: Container(
+        width: 240,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: mine ? Colors.black.withValues(alpha: 0.18) : context.glass,
+          border: Border.all(color: context.hairline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(alignment: Alignment.center, children: [
+              Image.network(tile,
+                  width: 240,
+                  height: 140,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                        width: 240,
+                        height: 140,
+                        color: WaslColors.indigo.withValues(alpha: 0.25),
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.map_rounded,
+                            size: 42, color: WaslColors.teal),
+                      )),
+              const Icon(Icons.location_on_rounded,
+                  size: 34,
+                  color: Colors.redAccent,
+                  shadows: [Shadow(blurRadius: 6, color: Colors.black45)]),
+            ]),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label.isEmpty ? 'موقع' : label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: mine ? Colors.white : context.textTertiary)),
+                    Text('${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: mine ? Colors.white70 : context.textFaint)),
+                  ]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// مشاركة الموقع الحالي (2.3.0): تحديد عبر GPS ثم تأكيد صريح من
+  /// المستخدم، وتشفير الإحداثيات بنفس مسار النص تماماً (جلسة متدرجة
+  /// للخاص ومفتاح المحادثة للمجموعات) ثم إدراج type=location
+  Future<void> _sendMyLocation() async {
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    if (!widget.canPost || widget.isChannel) return;
+    _snack('جارٍ تحديد موقعك…');
+    Position pos;
+    try {
+      pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 12)));
+    } catch (_) {
+      _snack('تعذّر تحديد الموقع — تحقق من صلاحية الموقع وتشغيل GPS');
+      return;
+    }
+    final lat = double.parse(pos.latitude.toStringAsFixed(6));
+    final lng = double.parse(pos.longitude.toStringAsFixed(6));
+    final label = 'موقعي الحالي';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('مشاركة موقعك؟'),
+        content: Text('الإحداثيات: $lat, $lng\nستُشفَّر وتُرسل إلى هذه المحادثة.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('إلغاء')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('إرسال')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final replyTo = _replyTo;
+    final content = '$lat,$lng|$label';
+    var payload = content;
+    if (_e2e) {
+      final isDm = !widget.isGroup && widget.otherId != null;
+      if (isDm) {
+        try {
+          final p = await E2eService.encryptDmText(
+              widget.conversationId, widget.otherId!, content);
+          if (p == null) {
+            _snack(_keyMissingMsg());
+            return;
+          }
+          payload = p;
+        } catch (_) {
+          _snack('تعذّر تشفير الموقع');
+          return;
+        }
+      } else {
+        final key = await _convKey();
+        if (key == null) {
+          _snack(_keyMissingMsg());
+          return;
+        }
+        try {
+          payload =
+              await E2eService.encryptText(key, widget.conversationId, content);
+        } catch (_) {
+          _snack('تعذّر تشفير الموقع');
+          return;
+        }
+      }
+    }
+    setState(() => _replyTo = null);
+    AppStudioService.thump();
+    try {
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'location',
+        'content': payload,
+        if (replyTo != null) 'reply_to': replyTo['id'],
+      });
+    } catch (e) {
+      final hint = ModerationService.sendErrorHint(e);
+      if (hint != null || BlockService.isBlockedError(e)) {
+        _snack(hint ?? 'لا يمكن الإرسال — الحظر مفعّل بينكما');
+      } else {
+        _snack('تعذّر إرسال الموقع');
+      }
+    }
   }
 
   void _toggleSelect(Map<String, dynamic> m) {
@@ -2450,6 +2669,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
             Navigator.pop(ctx);
             _pickFile();
           }),
+          // الموقع (2.3.0): GPS + تأكيد المستخدم — الإحداثيات تُشفَّر كالنص
+          SheetAction(Icons.location_on_rounded, 'موقعي', WaslColors.teal, () {
+            Navigator.pop(ctx);
+            _sendMyLocation();
+          }),
           // ردود بوتات الكتالوج (1.22.0): بوت الكتالوج هنا لا يقرأ شيئاً —
           // نص يصوغه صاحب الغرفة من قالب موثق ويرسله باسمه، فتجوع أي غرفة
           // جماعية يملك الإرسال فيها (المشفرة يشملها: لا يتسرب منها نص)
@@ -2761,6 +2985,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       return _viewOnceBody(m);
     }
     switch (m['type'] as String? ?? 'text') {
+      case 'location':
+        return _locationBubble(m);
       case 'image':
         return ImageBubble(loader: () => _mediaBytes(m), protected: m['protected'] == true);
       case 'voice':
@@ -3832,6 +4058,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     bool ok;
     if (type == 'text') {
       ok = await ForwardService.send(target: target, type: 'text', text: _textOf(m));
+    } else if (type == 'location') {
+      // توجيه الموقع يحافظ على نوعه — نفس مسار النص المشفر
+      ok = await ForwardService.send(
+          target: target, type: 'location', text: _textOf(m));
     } else {
       final bytes = await _mediaBytes(m);
       ok = bytes != null &&

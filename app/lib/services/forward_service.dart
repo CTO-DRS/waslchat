@@ -60,6 +60,26 @@ class ForwardService {
         });
         return true;
       }
+      // الموقع (2.3.0): يوجَّه بنفس مسار النص المشفر ويحافظ على نوعه
+      if (type == 'location') {
+        if (text == null || !E2eService.withinPlainLimit(text)) return false;
+        final String payload;
+        if (dm) {
+          final p = await E2eService.encryptDmText(
+              conv, target['other_id'] as String, text);
+          if (p == null) return false;
+          payload = p;
+        } else {
+          payload = await E2eService.encryptText(key, conv, text);
+        }
+        await supabase.from('messages').insert({
+          'conversation_id': conv,
+          'sender_id': me,
+          'type': 'location',
+          'content': payload,
+        });
+        return true;
+      }
       if (bytes == null) return false;
       final Uint8List enc;
       String meta = '';
