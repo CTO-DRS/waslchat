@@ -688,6 +688,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
   DateTime? _othersReadUpTo;
   String? _lastMarkedId;
   Timer? _readTicker;
+  bool _peerInRoom = false;
+  Map<String, dynamic>? _lastMine;
+  StreamSubscription<List<Map<String, dynamic>>>? _lastMineSub;
 
   @override
   void initState() {
@@ -740,7 +743,25 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
             setState(() => _typing[uid] = DateTime.now());
           },
         )
-        .subscribe();
+        // حضور غرفة المحادثة (2.0.4): هل يشاهد الطرف الآخر هذه المحادثة الآن؟
+        .onPresenceSync((_) {
+          if (widget.isGroup || widget.otherId == null) return;
+          var inRoom = false;
+          for (final s in _room.presenceState()) {
+            for (final p in s.presences) {
+              final id = p.payload['user_id'];
+              if (id == widget.otherId) inRoom = true;
+            }
+          }
+          if (mounted && inRoom != _peerInRoom) {
+            setState(() => _peerInRoom = inRoom);
+          }
+        })
+        .subscribe((status, _) async {
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        await _room.track({'user_id': _me});
+      }
+    });
     _typingSweep = Timer.periodic(const Duration(seconds: 1), (_) {
       final now = DateTime.now();
       final before = _typing.length;
@@ -762,6 +783,21 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       }
       if (mounted) setState(() => _othersReadUpTo = minRead);
     });
+
+    // آخر رسالة أرسلتها هنا (2.0.4) — لسرد حالة التسليم الذكي تحت الاسم
+    if (!widget.isGroup) {
+      _lastMineSub = supabase
+          .from('messages')
+          .stream(primaryKey: ['id'])
+          .eq('conversation_id', widget.conversationId)
+          .eq('sender_id', _me)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .listen((rows) {
+        if (!mounted) return;
+        setState(() => _lastMine = rows.isEmpty ? null : rows.first);
+      }, onError: (_) {});
+    }
 
     _reactSub = supabase
         .from('message_reactions')
@@ -996,14 +1032,44 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
       if (_names.isEmpty) return null;
       return widget.isChannel ? '${_names.length} متابع' : '${_names.length} أعضاء';
     }
-    return PresenceService.isOnline(widget.otherId) ? 'متصل الآن' : null;
+    // 2.0.4: سرد التسليم الذكي — لا يشرح أي تطبيق آخر حالة رسلك بالكلام
+    if (widget.isBot) return null;
+    if (_peerInRoom) return 'متصل الآن — يشاهد هذه المحادثة';
+    if (PresenceService.isOnline(widget.otherId)) return 'متصل الآن';
+    final lm = _lastMine;
+    if (lm == null) return null;
+    final created = DateTime.parse(lm['created_at'] as String);
+    final read = _othersReadUpTo != null && !created.isAfter(_othersReadUpTo!);
+    if (read) return 'قرأ رسالتك الأخيرة';
+    if (PresenceService.isOnline(widget.otherId)) {
+      return 'وصل رسلك جهازه — لم يفتح المحادثة بعد';
+    }
+    return 'جهازه غير متصل الآن — سيصل رسلك عند اتصاله';
   }
 
+  /// هل وصلت الرسالة جهاز الطرف؟ (2.0.4) — مقياس صادق: اتصال الطرف الآن
+  /// يعني أن تطبيقه استقبلها (لحظياً أو بالمزامنة). لا نزوّر حالة لم نرها.
+  bool _delivered(Map<String, dynamic> m) {
+    if (widget.isGroup) {
+      // المجموعة: يكفي أن أحد الأعضاء الآخرين متصل الآن
+      final others = _names.keys.where((id) => id != _me);
+      return others.any(PresenceService.isOnline);
+    }
+    return PresenceService.isOnline(widget.otherId);
+  }
+
+  /// مؤشرات التسليم الذكية (2.0.4):
+  /// ✓ أُرسلت (جهاز الطرف مغلق) — ✓✓ أُسلّمت (جهازه متصل ولم يفتح بعد)
+  /// — ✓✓ بالأزرق قُرئت
   Widget _ticks(Map<String, dynamic> m) {
     final created = DateTime.parse(m['created_at'] as String);
     final read = _othersReadUpTo != null && !created.isAfter(_othersReadUpTo!);
-    return Icon(read ? Icons.done_all_rounded : Icons.done_rounded,
-        size: 15, color: read ? const Color(0xFF7DF9FF) : Colors.white70);
+    final delivered = read || _delivered(m);
+    return Icon(
+      delivered ? Icons.done_all_rounded : Icons.done_rounded,
+      size: 15,
+      color: read ? const Color(0xFF7DF9FF) : Colors.white70,
+    );
   }
 
   @override
@@ -1041,6 +1107,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware {
     _typingSweep?.cancel();
     _readTicker?.cancel();
     _partsSub?.cancel();
+    _lastMineSub?.cancel();
     _reactSub?.cancel();
     PresenceService.online.removeListener(_onPresence);
     supabase.removeChannel(_room);
