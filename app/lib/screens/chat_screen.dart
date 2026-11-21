@@ -1532,7 +1532,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     TimeOfDay initial = const TimeOfDay(hour: 9, minute: 0);
     bool tomorrow = false;
     if (parsed != null) {
-      initial = parsed.time;
+      initial = TimeOfDay(hour: parsed.hour, minute: parsed.minute);
       tomorrow = parsed.tomorrow;
     }
     final picked = await showTimePicker(context: context, initialTime: initial);

@@ -158,13 +158,16 @@ class AdaptiveActions {
       if (h == 12) h = 0;
     }
     final tomorrow = RegExp(r'غدا|بكرة|بكره|tomorrow').hasMatch(s);
-    return WhenHint(TimeOfDay(hour: h, minute: min), tomorrow);
+    // ساعة ودقيقة كأعداد صماء — تجنباً لازدواج صنف TimeOfDay بين
+    // material_ui و material في هذا المشروع
+    return WhenHint(h, min, tomorrow);
   }
 }
 
-/// وقت مفهوم من النص + هل يشير إلى الغد (فئة بلا سجلات لتوافق الترجمات)
+/// وقت مفهوم من النص (ساعة 0-23 ودقيقة) + هل يشير إلى الغد
 class WhenHint {
-  const WhenHint(this.time, this.tomorrow);
-  final TimeOfDay time;
+  const WhenHint(this.hour, this.minute, this.tomorrow);
+  final int hour;
+  final int minute;
   final bool tomorrow;
 }
