@@ -1,0 +1,14 @@
+name: wasl_mls
+description: "نواة MLS للجمعات الضخمة وفق RFC 9420 (شجرة تدوير + TreeKEM بأظرفة resolution + أوراق غير مدمجة + جدولة epochs + توقيع Ed25519) — نقية فوق cryptography بلا أي كود C، بعلامات wasl-mls منفصلة عن سلسلة الجلسات."
+version: 1.0.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dependencies:
+  cryptography: ^2.9.0
+
+dev_dependencies:
+  test: ^1.25.0

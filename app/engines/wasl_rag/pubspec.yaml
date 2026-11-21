@@ -1,0 +1,11 @@
+name: wasl_rag
+description: "محرك RAG صفر شبكة: استرجاع محقون وحزمة سياق بميزانية ومولّد محلي مسند — الإجابة بلا إسناد صحيح تسقط ولا تُعرض، والفهرسة الخلفية تتوقف على بوابة الجهاز."
+version: 1.0.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dev_dependencies:
+  test: ^1.25.0

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "556011433659",
+    "project_id": "wasl-chat-ac7d3",
+    "storage_bucket": "wasl-chat-ac7d3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:556011433659:android:96ae8ac5cca4b42227439e",
+        "android_client_info": {
+          "package_name": "app.waslchat.wasl_chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAbsPINNSb5kg1NTm9fNQ1pjFaMqK6yB1U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

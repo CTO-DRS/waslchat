@@ -1,0 +1,11 @@
+name: wasl_model_fetch
+description: "تنزيل موثق لنموذج لغوي على الجهاز: دفق يُحقن بلا شبكة داخلية، بصمة SHA-256 نقيّة تحسب على الطاير وتتحقق قبل إعادة التسمية الذرية — نقية بلا اعتماديات."
+version: 1.0.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dev_dependencies:
+  test: ^1.25.0

@@ -1,0 +1,82 @@
+name: wasl_chat
+description: "وصل شات - تطبيق مراسلة وتواصل"
+publish_to: 'none'
+version: 2.0.0+90
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  supabase_flutter: ^2.18.3
+  image_picker: ^1.2.4
+  record: ^7.2.0
+  just_audio: ^0.10.6
+  path_provider: ^2.1.6
+  # مخزن بوتات الكتالوج المحلي (1.22.0) — التثبيت على جهاز المالك
+  # 2.0.0: أحدث pub.dev 2.5.6 (فحص 2026-11-20) والقيد يرفع معه
+  shared_preferences: ^2.5.6
+  firebase_core: ^5.2.0
+  firebase_messaging: ^17.1.0
+  firebase_crashlytics: ^6.1.0
+  qr_flutter: ^4.1.0
+  # ماسح QR بالكاميرا — إصدار مثبّت بتنفيذ أصلي مباشر بلا كود C (تسهيلاً للبناء)
+  mobile_scanner: 3.5.7
+  cryptography: ^2.9.0
+  # 1.15.0: الكبرى 11 مقفولة خلف بوابة win32 (يطلب flutter_secure_storage_windows
+  # win32 ^6 والمثبّت file_picker يطلب ^5) — رُقّينا إلى 10.3.4 وهِي متوافقة
+  flutter_secure_storage: ^10.3.4
+  file_picker: 8.3.7
+  video_player: ^2.14.1
+  open_filex: ^5.0.0
+  url_launcher: ^6.3.3
+  local_auth: ^3.0.2
+  web: ^1.1.2
+  speech_to_text: ^7.5.0
+  # مكالمات WebRTC صوتية ومرئية (المرحلة 6) — الاتصال مباشر بين الجهازين
+  flutter_webrtc: ^1.6.3
+  flutter_local_notifications: 19.4.2
+  # 1.15.0: الكبرى 13 مقفولة خلف بوابة JNI نفسها — الثابت file_picker يطلب
+  # win32 ^5.9 وكل إصدارات share_plus 13 تطلب win32 ^6 (مفحوص pub.dev 2026-11-19)
+  # الكود يستخدم واجهة v13 الجديدة SharePlus.instance.share أصلاً — الترقية جاهزة
+  share_plus: ^12.0.2
+  image: ^4.13.1
+  # المرحلة 8 ب (0.21.0): القراءة الصوتية للرسائل عربياً على الجهاز
+  flutter_tts: ^4.2.5
+  # ويدجت «آخر المحادثات» — يكتب بيانات لخدمة أندرويد الأصلية
+  home_widget: 0.10.0
+  # القفز الدقيق إلى رسالة معينة (معرض الوسائط يفتح المحادثة على الوسيط)
+  scrollable_positioned_list: 0.3.8
+  # التذكيرات الذكية المحلية (0.23.0) — جدولة إشعار تذكير في وقت الموعد
+  # (حزمة نقية بلا كود أصلي، وهي تابعة flutter_local_notifications أصلاً)
+  # 1.15.0: الثابت flutter_local_notifications 19.4.2 يطلب timezone ^0.10 —
+  # كلاهما مقفولان معاً خلف بوابة بناء أندرويد الحقيقية (قرار JNI الموثق في GRAND_PLAN_3)
+  timezone: ^0.10.0
+  # المرحلة 10 (0.24.0): ML-KEM (FIPS 203) لبدء جلسات ما بعد الكم الهجين مع X3DH
+  # حزمة نقية Dart صفر اعتماديات مع متجهات NIST KAT مرفقة — بلا كود C إطلاقاً
+  pqcrypto: ^0.4.4
+  # المرحلة 17 (1.14.0): Flutter 3.50 أهمل package:flutter/material.dart —
+  # الترحيل الآلي (dart fix) إلى الحزم الأولى الرسمية الجديدة
+  material_ui: ^1.11.1
+  cupertino_ui: ^1.1.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  # استوديو الصوت (1.12.0): أصوات وألحان تُدمج على الجهاز
+  assets:
+    - assets/tones/
+    # استوديو التطبيق (1.13.0): معاينات أيقونات المشغّل
+    - assets/app_icons/
+
+# نسخ بدون كود C أصلي (jni) لتسهيل البناء
+dependency_overrides:
+  path_provider_android: 2.2.23
+  shared_preferences_android: 2.4.28

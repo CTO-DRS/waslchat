@@ -1,0 +1,84 @@
+# وصل سيرفر — طبقة وصل فوق توزيعة Supabase الرسمية (2.0.0)
+#
+# الصدق أولاً: هذا الملف **لا يستبدل** توزيعة Supabase self-hosted الرسمية
+# (docs/SELF_HOSTING.md §2) — بل ينشر فوقها العناصر الخاصة بوصل:
+#   1) edge-runtime: دوال وصل السبع (push · ai · moderation-ai · bots-api ·
+#      event-reminders · link-preview · media-cleanup) من supabase/functions/
+#   2) coturn: TURN للمكالمات خلف NAT المتماثل
+#   3) backup: نسخة احتياطية يومية للقاعدة ومجلد الوسائط باحتجاز 14 يوماً
+#
+# المتطلبات قبله (SELF_HOSTING.md §1-§2): توزيعة Supabase تعمل + دومين + TLS
+# عبر وكيلك العكسي — لا TLS هنا ولا أسرار مضمّنة في أي ملف (scrub_engines.py).
+#
+# الانطلاق: cp .env.example .env ثم عدّل القيم ثم ./deploy.sh
+
+services:
+  edge-runtime:
+    image: supabase/edge-runtime:latest
+    restart: unless-stopped
+    depends_on: []
+    environment:
+      # أسرار الدوال تُقرأ من .env — كل دالة تذكر أسرارها في ترويسة ملفها
+      # (docs/SELF_HOSTING.md §5 جدول الأسرار — المصدر الحقيقي للفحص)
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+    volumes:
+      # دوال وصل السبع من المستودع نفسه — بلا صور مخصصة ولا كود مبني مسبقاً
+      - ../supabase/functions:/app/functions:ro
+    ports:
+      - '127.0.0.1:9099:8081' # وجّه وكيلك العكسي: /functions/v1/* إلى هذا المنفذ
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O- http://localhost:8081/ >/dev/null 2>&1 || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host # TURN يحتاج نطاق المنافذ العالية على المضيف مباشرة
+    command:
+      - -n
+      - --realm=${TURN_REALM}
+      - --listening-port=3478
+      - --min-port=${TURN_MIN_PORT}
+      - --max-port=${TURN_MAX_PORT}
+      - --lt-cred-mech
+      - --user=${TURN_USER}:${TURN_PASSWORD}
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+    # افتح في جدار الخادم: UDP/TCP 3478 وUDP من TURN_MIN_PORT إلى TURN_MAX_PORT
+
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
+      # مجلد وسائط توزيعة Supabase — عدّل الاسم ليتطابق مع مشروع compose
+      # الخاص بها (عادة <اسم_المجلد>_storage) — بلا بايتات الوسائط تبقى
+      # النصوص فقط مفهومة (SELF_HOSTING.md §8)
+      - ${STORAGE_VOLUME}:/media:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "وصل backup: نسخة كل ${BACKUP_INTERVAL_HOURS:-24} ساعة باحتجاز ${BACKUP_RETENTION_DAYS:-14} يوماً"
+        while true; do
+          ts=$$(date +%F)
+          pg_dump -h ${POSTGRES_HOST} -U postgres -Fc -f /backups/wasl-$$ts.dump ${POSTGRES_DB} && \
+            tar -czf /backups/media-$$ts.tar.gz -C /media . && \
+            echo "نسخة $$ts أُنجزت" || echo "فشلت نسخة $$ts — راجع السجل بصدق"
+          find /backups -mtime +${BACKUP_RETENTION_DAYS:-14} -delete 2>/dev/null || true
+          sleep $$((${BACKUP_INTERVAL_HOURS:-24} * 3600))
+        done

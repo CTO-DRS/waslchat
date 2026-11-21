@@ -1,0 +1,11 @@
+name: wasl_fieldgate
+description: "بوابة القياس الميداني: عتبات معلنة قبل القياس وحكم يجتاز أو مؤجل بلا وسيط، وسجل يمنع قلب المؤجل منشوراً، وتقرير شفافية بأرقام القياس كما هي."
+version: 1.0.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dev_dependencies:
+  test: ^1.25.0

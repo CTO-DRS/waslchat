@@ -1,0 +1,1244 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:material_ui/material_ui.dart';
+
+import '../config.dart';
+import '../services/app_icon_service.dart';
+import '../services/app_lock_service.dart';
+import '../services/desktop_notify_service.dart';
+import '../services/jank_service.dart';
+import '../services/l10n.dart';
+import '../services/link_preview_service.dart';
+import '../services/locale_service.dart';
+import '../services/media_service.dart';
+import '../services/metrics_service.dart';
+import '../services/offline_queue_service.dart';
+import '../services/on_device_model_service.dart';
+import '../services/platform_name.dart';
+import '../services/presence_service.dart';
+import '../services/realtime_hub_service.dart';
+import '../services/push_service.dart';
+import '../services/pwa_service.dart';
+import '../services/smart_order_service.dart';
+import '../services/update_service.dart';
+import '../services/web_push_service.dart';
+import '../theme.dart';
+import '../services/e2e_service.dart';
+import '../widgets/common.dart';
+import '../widgets/wasl_sheet.dart';
+import 'admin_screen.dart';
+import 'shield_screen.dart';
+import 'beta_screen.dart';
+import 'backup_export_screen.dart';
+import 'e2e_key_screen.dart';
+import 'hijri_occasions_screen.dart';
+import 'bots_screen.dart';
+import 'feedback_screen.dart';
+import 'key_log_screen.dart';
+import 'linked_devices_screen.dart';
+import 'profile_screen.dart';
+import 'starred_screen.dart';
+import '../services/tone_service.dart';
+import 'voice_studio_screen.dart';
+import 'app_studio_screen.dart';
+import 'welcome_screen.dart';
+import '../widgets/wasl_mascot.dart';
+import 'security_screens.dart';
+
+String _modeLabel(ThemeMode m) => switch (m) {
+      ThemeMode.dark => 'داكن',
+      ThemeMode.light => 'فاتح',
+      ThemeMode.system => 'حسب النظام',
+    };
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  static Widget _nav(BuildContext context, IconData icon, Color color, String title,
+          String? subtitle, Widget Function() page) =>
+      SheetTile(
+        icon: icon,
+        color: color,
+        title: title,
+        subtitle: subtitle,
+        trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+        onTap: () =>
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => page())),
+      );
+
+  Future<void> _pickTheme(BuildContext context) async {
+          final m = await showModalBottomSheet<ThemeMode>(
+            context: context,
+            backgroundColor: context.surfaceAlt,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+            builder: (ctx) => SafeArea(
+              child: Wrap(children: [
+                const ListTile(
+                  title: Text('المظهر',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                for (final m in ThemeMode.values)
+                  ListTile(
+                    leading: Icon(
+                        ThemeService.mode.value == m
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: WaslColors.teal),
+                    title: Text(_modeLabel(m)),
+                    onTap: () => Navigator.pop(ctx, m),
+                  ),
+              ]),
+            ),
+          );
+          if (m != null) ThemeService.set(m);
+  }
+
+  Future<void> _checkUpdate(BuildContext context) async {
+          final u = await UpdateService.check();
+          if (!context.mounted) return;
+          if (u == null) {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('لديك أحدث إصدار')));
+            return;
+          }
+          final go = await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('تحديث متوفر'),
+              content: Text(
+                  'الإصدار ${u['version'] ?? ''} متاح الآن.${((u['notes'] as String?) ?? '').isEmpty ? '' : '\n\n${u['notes']}'}'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('لاحقاً')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(c, true),
+                    child: const Text('تحميل الآن')),
+              ],
+            ),
+          );
+          if (go == true) await UpdateService.openDownload();
+  }
+
+  Future<void> _logout(BuildContext context) async {
+          // بلا نسخة احتياطية سيضيع المفتاح عند الخروج: ننبّه أولاً
+          final st = await E2eService.checkKeys();
+          if (!context.mounted) return;
+          if (st == E2eKeyState.needsBackup) {
+            final go = await showDialog<bool>(
+              context: context,
+              builder: (c) => AlertDialog(
+                title: const Text('مفتاح التشفير غير محفوظ'),
+                content: const Text(
+                    'إن خرجت الآن فلن تقرأ رسائلك المشفّرة عند الدخول مجدداً. احفظ نسخة احتياطية أولاً؟'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(c, true),
+                      child: const Text('اخرج على أي حال')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(c, false),
+                      child: const Text('احفظ النسخة')),
+                ],
+              ),
+            );
+            if (!context.mounted) return;
+            if (go != true) {
+              await checkE2eKeys(context, fromSettings: true);
+              return;
+            }
+          }
+          await E2eService.wipeLocal();
+          await PushService.unregister();
+          await PresenceService.stop();
+          await supabase.auth.signOut();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+          title: const Text('الإعدادات', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800))),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+        children: [
+          const _ProfileCard(),
+          const SizedBox(height: 10),
+          const _SecurityBadge(),
+          FutureBuilder<bool>(
+            future: AdminScreen.isAdmin(),
+            builder: (context, snap) => snap.data != true
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: GlassGroup([
+                      _nav(context, Icons.admin_panel_settings_rounded, WaslColors.teal,
+                          'لوحة الإدارة', 'المستخدمون والتوثيق والحظر والإحصاءات',
+                          () => const AdminScreen()),
+                    ]),
+                  ),
+          ),
+          SheetSectionLabel(l10nT('settings_privacy', LocaleService.lang.value)),
+          GlassGroup([
+            _nav(context, Icons.shield_rounded, Colors.redAccent, 'Wasl Shield',
+                'الحماية من الابتزاز والتهديد، وبلاغ سرّي للمدير', () => const ShieldScreen()),
+            const _AppLockTile(),
+            _nav(context, Icons.shield_outlined, WaslColors.indigo, 'التحقق بخطوتين',
+                'رمز إضافي عند الدخول', () => const TwoFactorScreen()),
+            SheetTile(
+              icon: Icons.key_rounded,
+              color: WaslColors.violet,
+              title: 'مفتاح التشفير',
+              subtitle: 'احفظه لتقرأ رسائلك على جوال جديد',
+              trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+              onTap: () => checkE2eKeys(context, fromSettings: true),
+            ),
+            _nav(context, Icons.devices_other_rounded, WaslColors.teal,
+                l10nT('settings_devices', LocaleService.lang.value),
+                null, () => const LinkedDevicesScreen()),
+            SheetTile(
+              icon: Icons.password_rounded,
+              color: const Color(0xFF0EA5E9),
+              title: 'تغيير كلمة المرور',
+              trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+              onTap: () => openChangePassword(context),
+            ),
+          ]),
+          SheetSectionLabel(l10nT('settings_appearance', LocaleService.lang.value)),
+          const _StudioBanner(),
+          const SizedBox(height: 8),
+          GlassGroup([
+            SheetTile(
+              icon: Icons.dark_mode_rounded,
+              color: WaslColors.violet,
+              title: 'الوضع',
+              trailing: ValueListenableBuilder<ThemeMode>(
+                valueListenable: ThemeService.mode,
+                builder: (_, m, _) =>
+                    Text(_modeLabel(m), style: TextStyle(color: context.textFaint)),
+              ),
+              onTap: () => _pickTheme(context),
+            ),
+            const _FontSizeTile(),
+            const _WallpaperTile(),
+            const _AppIconTile(),
+            const _LanguageTile(),
+            SheetTile(
+              icon: Icons.waving_hand_rounded,
+              color: const Color(0xFF3B82F6),
+              title: 'جولة الترحيب',
+              subtitle: 'شاهد جولة «وصول» التعريفية من جديد',
+              trailing: Icon(Icons.chevron_left_rounded, color: context.textFaint),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => WelcomeScreen(
+                      replay: true, onDone: () async {}))),
+            ),
+          ]),
+          SheetSectionLabel(l10nT('settings_notifications', LocaleService.lang.value)),
+          GlassGroup([
+            const _NotificationsTile(),
+            if (!kIsWeb)
+              SheetTile(
+                icon: Icons.music_note_rounded,
+                color: WaslColors.teal,
+                title: 'استوديو الصوت',
+                subtitle: 'نغمات «وصل شات» بأصوات وألحان، أو اصنع نغمتك',
+                trailing: ValueListenableBuilder<String>(
+                  valueListenable: ToneService.global,
+                  builder: (_, t, _) => Text(ToneService.byId(t).label,
+                      style: TextStyle(color: context.textFaint)),
+                ),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const VoiceStudioScreen())),
+              ),
+            if (!kIsWeb &&
+                DesktopNotifyRules.platformSupported(
+                    kIsWeb: false, ioLabel: devicePlatformLabel()))
+              const _DesktopNotifyTile(),
+            if (kIsWeb) const _WebPushTile(),
+          ]),
+          const SheetSectionLabel('المحادثات'),
+          GlassGroup([
+            _nav(context, Icons.star_rounded, const Color(0xFFF59E0B), 'الرسائل المميزة',
+                null, () => const StarredScreen()),
+            const _SmartOrderTile(),
+            const _LinkPreviewTile(),
+            _nav(context, Icons.backup_rounded, WaslColors.indigo, 'النسخة الاحتياطية',
+                'نسخة كاملة مشفّرة بكلمة سر تختارها', () => const BackupExportScreen()),
+            _nav(context, Icons.event_available_rounded, WaslColors.teal, 'المناسبات الهجرية',
+                'تذكير برمضان والعيدين', () => const HijriOccasionsScreen()),
+            if (kIsWeb) const _PwaTile(),
+          ]),
+          const SheetSectionLabel('ما زالت تحت التطوير'),
+          GlassGroup([
+            SheetTile(
+              icon: Icons.auto_awesome,
+              color: WaslColors.violet,
+              title: 'وصل AI',
+              subtitle: 'الملخّص والترجمة والصياغة والردود الذكية — من «المزيد» داخل أي محادثة',
+              trailing: const DevBadge(short: true),
+            ),
+            _nav(context, Icons.smart_toy_rounded, WaslColors.violet, 'البوتات والمطوّرون',
+                null, () => const BotsScreen()),
+            const _OnDeviceModelTile(),
+            const _MetricsTile(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+              child: Text('هذه الميزات تعمل لكنها ما زالت تتحسّن، وقد تتغيّر أو تخطئ أحياناً.',
+                  style: TextStyle(fontSize: 12, color: context.textFaint)),
+            ),
+          ]),
+          const SheetSectionLabel('للمحترفين'),
+          GlassGroup([
+            _nav(context, Icons.fact_check_rounded, WaslColors.teal, 'سجل المفاتيح',
+                'كل تغيير في مفاتيح حسابك', () => const KeyLogScreen()),
+          ]),
+          const SheetSectionLabel('المساعدة'),
+          GlassGroup([
+            _nav(context, Icons.rate_review_rounded, WaslColors.teal, 'أرسل ملاحظة',
+                'خلل أو فكرة — تصلنا مباشرة', () => const FeedbackScreen()),
+            _nav(context, Icons.science_rounded, WaslColors.violet, 'انضم للمختبرين',
+                'جرّب الميزات قبل الجميع', () => const BetaScreen()),
+            SheetTile(
+              icon: Icons.system_update_alt_rounded,
+              color: WaslColors.indigo,
+              title: 'البحث عن تحديث',
+              trailing: Text('${AppConfig.appVersion}',
+                  style: TextStyle(color: context.textFaint)),
+              onTap: () => _checkUpdate(context),
+            ),
+          ]),
+          const SizedBox(height: 18),
+          GlassGroup([
+            SheetTile(
+              icon: Icons.logout_rounded,
+              danger: true,
+              title: l10nT('settings_logout', LocaleService.lang.value),
+              onTap: () => _logout(context),
+            ),
+          ]),
+          const SizedBox(height: 22),
+          Center(
+            child: Column(children: [
+              ShaderMask(
+                shaderCallback: (r) => WaslColors.gradient.createShader(r),
+                child: const Text('وصل شات',
+                    style: TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
+              ),
+              const SizedBox(height: 2),
+              Text('الإصدار ${AppConfig.appVersion} (${AppConfig.appBuild})',
+                  style: TextStyle(fontSize: 12, color: context.textFaint)),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// بطاقة «استوديو التطبيق» البارزة أعلى قسم المظهر (1.13.0)
+class _StudioBanner extends StatelessWidget {
+  const _StudioBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const AppStudioScreen())),
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: LinearGradient(colors: [
+              WaslColors.accent.withValues(alpha: 0.28),
+              WaslColors.gradient.colors.last.withValues(alpha: 0.18),
+            ]),
+            border: Border.all(color: WaslColors.accent.withValues(alpha: 0.45)),
+          ),
+          child: Row(children: [
+            const WaslMascot(size: 58, mood: MascotMood.happy),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('استوديو التطبيق',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 2),
+                Text('الألوان والخلفيات والأشرطة والفقاعات والأيقونة — كل شيء على ذوقك',
+                    style: TextStyle(fontSize: 12.5, color: context.textSecondary)),
+              ]),
+            ),
+            Icon(Icons.chevron_left_rounded, color: context.textFaint),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// شارة الحماية: سطر واثق واحد بدل مصطلحات تقنية
+class _SecurityBadge extends StatelessWidget {
+  const _SecurityBadge();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(colors: [
+            WaslColors.teal.withValues(alpha: 0.16),
+            WaslColors.indigo.withValues(alpha: 0.10),
+          ]),
+          border: Border.all(color: WaslColors.teal.withValues(alpha: 0.30)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.verified_user_rounded, color: WaslColors.teal, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('رسائلك محمية، والمحادثات الخاصة مشفّرة بين الطرفين',
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: context.textSecondary)),
+          ),
+        ]),
+      );
+}
+
+/// بطاقة الملف الشخصي أعلى الإعدادات (اضغط للتعديل)
+class _ProfileCard extends StatefulWidget {
+  const _ProfileCard();
+
+  @override
+  State<_ProfileCard> createState() => _ProfileCardState();
+}
+
+class _ProfileCardState extends State<_ProfileCard> {
+  Map<String, dynamic>? _p;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final uid = supabase.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      final p = await supabase
+          .from('profiles')
+          .select('username, display_name, bio, avatar_url')
+          .eq('id', uid)
+          .single();
+      if (mounted) setState(() => _p = p);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (_p?['display_name'] ?? _p?['username'] ?? 'مستخدم') as String;
+    final bio = _p?['bio'] as String?;
+    return Material(
+      color: context.glass,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () async {
+          await Navigator.push(
+              context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+          _load();
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            UserAvatar(name: name, url: _p?['avatar_url'] as String?, radius: 30),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                    (bio != null && bio.isNotEmpty)
+                        ? bio
+                        : (supabase.auth.currentUser?.email ?? ''),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: context.textTertiary)),
+              ]),
+            ),
+            Icon(Icons.edit_outlined, color: context.textFaint),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// بلاطة حجم الخط: صغير/عادي/كبير/أكبر — تطبق فوراً على كل التطبيق
+class _FontSizeTile extends StatelessWidget {
+  const _FontSizeTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const TintIcon(Icon(Icons.text_fields_rounded, color: WaslColors.indigo)),
+      title: const Text('حجم الخط'),
+      subtitle: ValueListenableBuilder<double>(
+        valueListenable: FontScaleService.scale,
+        builder: (_, s, _) => Text(
+            'حالياً: ${(FontScaleService.options.firstWhere((o) => o.$1 == s, orElse: () => (1.0, 'عادي')).$2)}'),
+      ),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: () async {
+        await showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: context.surfaceAlt,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+          builder: (ctx) => SafeArea(
+            child: ValueListenableBuilder<double>(
+              valueListenable: FontScaleService.scale,
+              builder: (ctx, s, _) => Wrap(children: [
+                const ListTile(
+                  title: Text('حجم الخط',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                // عيّنة مباشرة بحجم المعاينة
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text('هكذا ستبدو رسائلك بمقاس هذا الخيار',
+                      style: TextStyle(
+                          fontSize: 15 * s, color: ctx.textSecondary)),
+                ),
+                for (final (v, label) in FontScaleService.options)
+                  ListTile(
+                    leading: Icon(
+                        s == v ? Icons.radio_button_checked : Icons.radio_button_off,
+                        color: WaslColors.teal),
+                    title: Text(label),
+                    onTap: () {
+                      FontScaleService.set(v);
+                      Navigator.pop(ctx);
+                    },
+                  ),
+              ]),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// بلاطة خلفية المحادثة: خلفيات مضمنة (تدرج + نقاط) تُرسم خلف رسائل كل محادثة
+class _WallpaperTile extends StatelessWidget {
+  const _WallpaperTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const TintIcon(Icon(Icons.wallpaper_rounded, color: WaslColors.teal)),
+      title: const Text('خلفية المحادثة'),
+      subtitle: ValueListenableBuilder<int>(
+        valueListenable: WallpaperService.index,
+        builder: (_, i, _) => Text(WallpaperService.wallpapers[i].name),
+      ),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: () async {
+        await showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: context.surfaceAlt,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+          builder: (ctx) => SafeArea(
+            child: ValueListenableBuilder<int>(
+              valueListenable: WallpaperService.index,
+              builder: (ctx, sel, _) => Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('خلفية المحادثة',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 6),
+                  Text('تُرسم خلف رسائل كل المحادثات — مضمنة داخل التطبيق',
+                      style: TextStyle(fontSize: 12, color: ctx.textTertiary)),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 14,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (var i = 0; i < WallpaperService.wallpapers.length; i++)
+                        _WallpaperPreview(
+                          wp: WallpaperService.wallpapers[i],
+                          dark: Theme.of(ctx).brightness == Brightness.dark,
+                          selected: sel == i,
+                          onTap: () {
+                            WallpaperService.set(i);
+                            Navigator.pop(ctx);
+                          },
+                        ),
+                    ],
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WallpaperPreview extends StatelessWidget {
+  const _WallpaperPreview(
+      {required this.wp,
+      required this.dark,
+      required this.selected,
+      required this.onTap});
+  final WaslWallpaper wp;
+  final bool dark;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Column(children: [
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+                color: selected ? WaslColors.teal : context.hairline,
+                width: selected ? 2.5 : 1),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: CustomPaint(
+              painter: WallpaperPainter(wp, dark: dark),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: 72,
+          child: Text(wp.name,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  color: selected ? WaslColors.teal : context.textSecondary)),
+        ),
+      ]),
+    );
+  }
+}
+
+/// بلاطة قفل التطبيق: بصمة الجهاز أو رمز قفله (المرحلة 2)
+class _AppLockTile extends StatefulWidget {
+  const _AppLockTile();
+
+  @override
+  State<_AppLockTile> createState() => _AppLockTileState();
+}
+
+class _AppLockTileState extends State<_AppLockTile> {
+  bool _enabled = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppLockService.isEnabled().then((v) {
+      if (mounted) setState(() => _enabled = v);
+    });
+  }
+
+  Future<void> _toggle(bool v) async {
+    setState(() => _busy = true);
+    final err = await AppLockService.setEnabled(v);
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        if (err == null) _enabled = v;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(err ??
+              (v ? 'فُعّل قفل التطبيق' : 'أُلغي قفل التطبيق'))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary: const TintIcon(Icon(Icons.fingerprint_rounded, color: WaslColors.violet)),
+      title: const Text('قفل التطبيق'),
+      subtitle: const Text('بالبصمة أو رمز الجوال'),
+      value: _enabled,
+      onChanged: _busy ? null : _toggle,
+    );
+  }
+}
+
+/// مفتاح الإشعارات العام: إيقافه يحذف رمز الجهاز من الخادم فوراً
+/// فلا تصل أي تنبيهات، وتشغيله يعيد التسجيل ويطلب الصلاحيات.
+class _NotificationsTile extends StatelessWidget {
+  const _NotificationsTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: PushService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: TintIcon(Icon(
+            on ? Icons.notifications_active_outlined : Icons.notifications_off_outlined,
+            color: WaslColors.indigo)),
+        title: const Text('الإشعارات'),
+        subtitle: Text(on
+            ? 'مفعّلة على هذا الجهاز'
+            : 'موقوفة — لن يصلك أي تنبيه'),
+        value: on,
+        onChanged: (v) => PushService.setEnabled(v),
+      ),
+    );
+  }
+}
+
+/// إشعارات سطح المكتب (المرحلة 12): مفتاح على المنصات المكتبية حصراً —
+/// إشعار محلي عند وصول رسالة والتطبيق ليس في المقدمة، من قناة Realtime
+/// نفسها بلا أي خدمة خارجية جديدة.
+class _DesktopNotifyTile extends StatelessWidget {
+  const _DesktopNotifyTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesktopNotifyService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: TintIcon(Icon(Icons.desktop_windows_outlined,
+            color: on ? WaslColors.teal : context.textFaint)),
+        title: const Text('إشعارات سطح المكتب'),
+        subtitle: Text(on
+            ? 'إشعار محلي عند رسالة جديدة والتطبيق ليس في المقدمة — '
+                'بلا خادم جديد، من قناة الرسائل نفسها'
+            : 'الإشعارات موقوفة — التطبيق في المقدمة يكفي ولا إشعار خارجي'),
+        value: on,
+        onChanged: (v) => DesktopNotifyService.setEnabled(v),
+      ),
+    );
+  }
+}
+
+/// إشعارات المتصفح (المرحلة 12): Web Push مستقل عن Firebase — النقر
+/// يطلب الصلاحية ويسجّل الاشتراك على جهازك، والنص يعلن الحالة بصدق
+/// بما فيها «بانتظار تفعيل الخادم» قبل خطوات المالك.
+class _WebPushTile extends StatelessWidget {
+  const _WebPushTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: WebPushService.status,
+      builder: (context, st, _) => ListTile(
+        leading: const TintIcon(Icon(Icons.phonelink_ring_rounded, color: WaslColors.indigo)),
+        title: const Text('إشعارات المتصفح'),
+        subtitle: Text(st),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: () async {
+          final ok = await WebPushService.enable();
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(ok
+                    ? 'سُجّل اشتراك هذا المتصفح للإشعارات'
+                    : WebPushService.status.value)));
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة الويب التقدمي (المرحلة 12): زر تثبيت يظهر حين يقدّمه المتصفح
+/// وتقرير Service Worker الصادق — بلا ادعاء بعمل كامل دون اتصال.
+class _PwaTile extends StatelessWidget {
+  const _PwaTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: PwaService.installable,
+      builder: (context, can, _) => ValueListenableBuilder<String>(
+        valueListenable: PwaService.workerStatus,
+        builder: (context, ws, _) => ListTile(
+          leading: const TintIcon(Icon(Icons.add_to_home_screen_rounded,
+              color: WaslColors.violet)),
+          title: const Text('تثبيت التطبيق على الويب'),
+          subtitle: Text(can
+              ? 'ثبّته نافذة مستقلة بأيقونته — $ws'
+              : PwaService.standalone.value
+                  ? 'مثبّت أصلاً — يعمل نافذة مستقلة · $ws'
+                  : 'زر التثبيت يظهر حين يقدّمه المتصفح · $ws'),
+          trailing: can
+              ? const Icon(Icons.download_for_offline_outlined)
+              : null,
+          onTap: can
+              ? () async {
+                  final r = await PwaService.install();
+                  if (context.mounted && r == 'accepted') {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('ثُبّت وصل شات على جهازك')));
+                  }
+                }
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
+/// بلاطة معاينة الروابط (0.21.0): مفتاح تعطيل عام + الإفصاح الصادق الحرفي
+/// عن ما يمر عبر الخادم — مكتوب هنا لن يقرأه إلا من يريد.
+class _LinkPreviewTile extends StatelessWidget {
+  const _LinkPreviewTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: LinkPreviewService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: TintIcon(Icon(Icons.link_rounded,
+            color: on ? WaslColors.teal : context.textFaint)),
+        title: const Text('معاينة الروابط'),
+        subtitle: Text(on
+            ? 'عنوان وصورة مصغّرة للروابط — لا يُخزَّن الرابط عندنا'
+            : 'موقفة'),
+        value: on,
+        onChanged: (v) async {
+          await LinkPreviewService.setEnabled(v);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(v
+                    ? 'فُعّلت معاينة الروابط'
+                    : 'أُوقفت المعاينة ومُسح الكاش المحلي')));
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة الترتيب الذكي للمحادثات (المرحلة 9 أ — 0.22.0): مفتاح تعطيل واحد
+/// يعيد ترتيب الخادم الأصلي فوراً، والإفصاح الحرفي معروض في الوصف.
+class _SmartOrderTile extends StatelessWidget {
+  const _SmartOrderTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: SmartOrderService.enabled,
+      builder: (context, on, _) => SwitchListTile(
+        secondary: TintIcon(Icon(Icons.low_priority_rounded,
+            color: on ? WaslColors.teal : context.textFaint)),
+        title: const Text('الترتيب الذكي للمحادثات'),
+        subtitle: Text(on
+            ? 'من تكلّمهم أكثر يظهرون أولاً — يُحسب على جهازك'
+            : 'الأحدث أولاً'),
+        value: on,
+        onChanged: (v) async {
+          await SmartOrderService.setEnabled(v);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(v
+                    ? 'فُعّل الترتيب الذكي — المثبّت يبقى أولاً'
+                    : 'عاد الترتيب الأصلي')));
+          }
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة التقييم البحثي لنموذج لغة على الجهاز (المرحلة 9 ب — 0.23.0):
+/// تقرأ ذاكرة الجهاز محلياً وتعرض المرشح ومعايير القرار — بلا أي تنزيل.
+class _OnDeviceModelTile extends StatelessWidget {
+  const _OnDeviceModelTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const TintIcon(Icon(Icons.memory_rounded, color: WaslColors.violet)),
+      title: const Text('ذكاء على جهازك'),
+      subtitle: const Text('تجريبي — هل يقدر جهازك يشغّل نموذجاً محلياً؟'),
+      onTap: () => _showEvaluation(context),
+    );
+  }
+
+  void _showEvaluation(BuildContext context) {
+    final ram = OnDeviceModelService.readTotalRamMb();
+    final v = OnDeviceModelService.verdict(ramMb: ram);
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: context.surfaceAlt,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.memory_rounded, color: WaslColors.violet),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('نموذج لغة على الجهاز — تقييم بحثي',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Text('ذاكرة جهازك المقروءة محلياً: ${ram == null ? 'غير متاحة على هذه المنصة' : '$ram م.ب'}',
+                style: const TextStyle(fontSize: 13.5)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: v.level == 'eligible'
+                    ? WaslColors.teal.withValues(alpha: 0.10)
+                    : context.glass,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(v.title,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                const SizedBox(height: 4),
+                Text(v.detail,
+                    style: const TextStyle(fontSize: 12.5, height: 1.5)),
+                if (v.recommended != null) ...[
+                  const SizedBox(height: 6),
+                  Text('الحجم التقديري: ${v.recommended!.sizeMb} م.ب — ${v.recommended!.notes}',
+                      style: const TextStyle(fontSize: 12, color: WaslColors.teal)),
+                ],
+              ]),
+            ),
+            const SizedBox(height: 12),
+            const Text('معايير القرار المكتوبة:',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 4),
+            for (final c in OnDeviceModelService.criteria)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('• ', style: TextStyle(fontSize: 12.5)),
+                  Expanded(child: Text(c, style: const TextStyle(fontSize: 12.5, height: 1.4))),
+                ]),
+              ),
+            const SizedBox(height: 10),
+            const Text('كَتالوج المرشحين (قياسات تصميمية لا وعود تنزيل):',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 4),
+            for (final m in OnDeviceModelService.catalog)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text('${m.label} — ${m.sizeMb} م.ب · يحتاج ذاكرة ≥ ${m.ramNeedMb} م.ب',
+                    style: const TextStyle(fontSize: 12.5)),
+              ),
+            const SizedBox(height: 12),
+            Text('لا يُنزَّل أي شيء تلقائياً ولا يُفرض على أحد — ربط محرك الاستدلال الفعلي بقرار الأداء المقاس على جهاز متوسط، موثق في docs/ON_DEVICE_LLM.md',
+                style: TextStyle(color: context.textFaint, fontSize: 11.5, height: 1.5)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// بلاطة أيقونة التطبيق (0.21.0): البديل المتدرج أو الكلاسيكية —
+/// التبديل يعيد إطلاق أيقونة المُشغّل على أندرويد (activity-alias).
+class _AppIconTile extends StatefulWidget {
+  const _AppIconTile();
+
+  @override
+  State<_AppIconTile> createState() => _AppIconTileState();
+}
+
+class _AppIconTileState extends State<_AppIconTile> {
+  String _current = 'classic';
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppIconService.current().then((v) {
+      if (mounted) setState(() => _current = v);
+    });
+  }
+
+  Future<void> _pick(String v) async {
+    if (v == _current || _busy) return;
+    setState(() => _busy = true);
+    final ok = await AppIconService.set(v);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (ok) _current = v;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'تم تغيير أيقونة التطبيق'
+            : 'تعذّر التغيير على هذا الجهاز')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const TintIcon(Icon(Icons.grid_view_rounded, color: WaslColors.violet)),
+      title: const Text('أيقونة التطبيق'),
+      subtitle: Text(_busy
+          ? 'جارٍ التغيير…'
+          : 'النمط الحالي: ${AppIconService.byId(_current).label}'),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: _busy
+          ? null
+          : () => showModalBottomSheet<String>(
+                context: context,
+                backgroundColor: context.surfaceAlt,
+                shape: const RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(24))),
+                builder: (ctx) => SafeArea(
+                  child: Wrap(children: [
+                    const ListTile(
+                        title: Text('أيقونة التطبيق',
+                            style: TextStyle(fontWeight: FontWeight.w800))),
+                    for (final v in AppIconService.variants)
+                      ListTile(
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.asset(v.asset, width: 38, height: 38),
+                        ),
+                        title: Text(v.label),
+                        trailing: Icon(
+                            _current == v.id
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_off,
+                            color: WaslColors.teal),
+                        onTap: () {
+                          Navigator.pop(ctx, v.id);
+                          _pick(v.id);
+                        },
+                      ),
+                  ]),
+                ),
+              ),
+    );
+  }
+}
+
+// ==================== المرحلة 12 ب (0.29.0) ====================
+
+/// بلاطة لغة التطبيق: العربية أم التصميم، وإنجليزية وفرنسية أساسية —
+/// التبديل لحظي واتجاه الواجهة يتبع اللغة، والإفصاح الصادق معروض.
+class _LanguageTile extends StatelessWidget {
+  const _LanguageTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: LocaleService.lang,
+      builder: (context, current, _) => ListTile(
+        leading: const TintIcon(Icon(Icons.translate_rounded, color: WaslColors.teal)),
+        title: Text(l10nT('settings_language', LocaleService.lang.value)),
+        subtitle: Text(l10nLanguageNames[current] ?? 'العربية'),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: () async {
+          final pick = await showModalBottomSheet<String>(
+            context: context,
+            backgroundColor: context.surfaceAlt,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+            builder: (ctx) => SafeArea(
+              child: Wrap(children: [
+                const ListTile(
+                  title: Text('لغة التطبيق',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                for (final code in l10nSupported)
+                  ListTile(
+                    leading: Icon(
+                        LocaleService.lang.value == code
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: WaslColors.teal),
+                    title: Text(l10nLanguageNames[code] ?? code),
+                    onTap: () => Navigator.pop(ctx, code),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: Text(
+                    l10nT('settings_language_note', LocaleService.lang.value),
+                    style: TextStyle(
+                        fontSize: 12, color: context.textFaint, height: 1.6),
+                  ),
+                ),
+              ]),
+            ),
+          );
+          if (pick != null) await LocaleService.set(pick);
+        },
+      ),
+    );
+  }
+}
+
+/// بلاطة مؤشرات الأداء (0.29.0): أرقام حقيقية مقاسة على جهازك حصراً —
+/// فتح بارد وتأكيد خادم وعدّ أخطاء، بمنهجية مكتوبة معروضة وإعادة تعيين.
+class _MetricsTile extends StatelessWidget {
+  const _MetricsTile();
+
+  static String _fmt(int ms) => ms >= 1000
+      ? '${(ms / 1000).toStringAsFixed(1)} ثانية'
+      : '$ms مللي ثانية';
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const TintIcon(Icon(Icons.speed_rounded, color: WaslColors.indigo)),
+      title: const Text('أداء التطبيق'),
+      subtitle: const Text('سرعة الفتح والإرسال — تبقى على جهازك'),
+      trailing: const Icon(Icons.chevron_left),
+      onTap: () => _showMetrics(context),
+    );
+  }
+
+  void _showMetrics(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        // المرحلة 13 أ (1.1.0): ثلاثة مصادر أرقام تتحدث لحظياً —
+        // المؤشرات القائمة والسقوط الإطاري الجديد وذاكرة الوسائط المضبوطة
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            MetricsService.version,
+            JankService.version,
+            MediaCacheService.version,
+            OfflineQueueService.count,
+          ]),
+          builder: (context, _) {
+            final s = MetricsService.snapshot;
+            final j = JankService.store;
+            final row = (String label, String value) => Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                  child: Row(children: [
+                    Expanded(child: Text(label)),
+                    Text(value,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: [FontFeature.tabularFigures()])),
+                  ]),
+                );
+            return SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: Text('مؤشرات الأداء على جهازك',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                ),
+                row('الفتح البارد (أحدث)', _fmt(s.coldLastMs)),
+                row('الفتح البارد (متوسط ${s.coldCount} عينة)', _fmt(s.coldAvgMs)),
+                row('تأكيد الخادم (متوسط ${s.deliverCount} عينة)',
+                    _fmt(s.deliverAvgMs)),
+                row('تأكيد الخادم (أعلى 95%)', _fmt(s.deliverP95Ms)),
+                row('أخطاء محلية عبرت معالجات Flutter', '${s.errors}'),
+                row('عدد مرات فتح التطبيق', '${s.opens}'),
+                const Divider(height: 20, indent: 20, endIndent: 20),
+                row('نسبة الإطارات المتعثرة (آخر ${j.frames.length} إطار)',
+                    '${j.jankRatioPercent()}%'),
+                row('متوسط زمن الإطار (بناء + رستر)', _fmt(j.avgMs())),
+                row('الإطارات أعلى 95%', _fmt(j.percentile(0.95))),
+                row('أثقل إطار في النافذة', _fmt(j.worstMs())),
+                const Divider(height: 20, indent: 20, endIndent: 20),
+                row('ذاكرة روابط الوسائط (الأحدث يبقى)',
+                    '${MediaCacheService.lru.length}/${MediaCacheService.cap}'),
+                row('إصابات الذاكرة / إخفاقها',
+                    '${MediaCacheService.lru.hits} / ${MediaCacheService.lru.misses}'),
+                row('إخلاءات بالسقف', '${MediaCacheService.lru.evictions}'),
+                row('محفوظات الطابور بلا شبكة', '${OfflineQueueService.count.value}'),
+                const Divider(height: 20, indent: 20, endIndent: 20),
+                row('قناة Realtime الواحدة (1.2.0)',
+                    RealtimeHubService.isLive ? 'حية' : 'غير حية الآن'),
+                row(RealtimeHubService.registry.statsLabel(),
+                    '${RealtimeHubService.registry.attachCount('call-watch') + RealtimeHubService.registry.attachCount('device-security') + RealtimeHubService.registry.attachCount('chats-list') + RealtimeHubService.registry.attachCount('calls-history')} إلحاقاً'),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text('سقف ذاكرة روابط الوسائط — الأحدث استعمالاً يبقى والأقدم يُخلى، والمسح لا يمس أصولك على الخادم أبداً:',
+                        style: TextStyle(fontSize: 12.5)),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(children: [
+                    for (final cap in MediaCacheService.allowedCaps) ...[
+                      ChoiceChip(
+                        label: Text('$cap'),
+                        selected: MediaCacheService.cap == cap,
+                        onSelected: (_) => MediaCacheService.setCap(cap),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    const Spacer(),
+                    TextButton.icon(
+                      icon: const Icon(Icons.cleaning_services_rounded, size: 16),
+                      label: const Text('مسح الذاكرة'),
+                      onPressed: () => MediaCacheService.clear(),
+                    ),
+                  ]),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Text(
+                    'المنهجية الصادقة: الفتح البارد من أول سطر في التشغيل إلى نهاية رسم أول إطار، '
+                    'وزمن «تأكيد الخادم» هو دورة طلب الإدراج واستجابته وليس زمن وصول الرسالة للطرف الآخر، '
+                    'والأخطاء هي عدّ ما عبر معالجات الخطأ في جهازك (ليست معدل أعطال Crashlytics الذي يقرؤه المالك من وحدة التحكم). '
+                    'الإطار المتعثر هو ما تجاوز 32 مللي ثانية (أبطأ من نصف معدل 60fps) وزمنه مجموع البناء والرستر، '
+                    'وذاكرة الوسائط تخزن روابط موقعة مؤقتة فقط لا بايتات ملفات. '
+                    'كل الأرقام تخزن محلياً في جهازك ولا يُرفع أي منها لأي خادم.',
+                    style: TextStyle(fontSize: 11.5, height: 1.7),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 16),
+                  child: Wrap(spacing: 6, children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                      label: const Text('إعادة تعيين المؤشرات'),
+                      onPressed: () async {
+                        await MetricsService.reset();
+                        await JankService.reset();
+                      },
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text('إغلاق'),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ]),
+                ),
+              ]),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
