@@ -1441,6 +1441,13 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         setState(() => VoiceRateService.cycle());
         _snack('سرعة التشغيل: ${VoiceRateService.rate}x — تُطبَّق عند التشغيل القادم');
         return;
+      case 'link':
+        final p = m['media_url'] as String?;
+        if (p == null) return;
+        final url = await MediaService.signedUrl(p);
+        await Clipboard.setData(ClipboardData(text: url));
+        _snack('نُسخ رابط مؤقت — صالح لفترة محدودة');
+        return;
       case 'more':
         _messageActions(m);
         return;
@@ -1480,7 +1487,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     }
   }
 
-  /// طبقة الذكاء السياقي (2.2.0): اقتراحات محلية، لا تنفيذ تلقائي —
+  /// طبقة الذكاء السياقي (2.2.x): اقتراحات محلية، لا تنفيذ تلقائي —
   /// كل اقتراح ينتظر موافقة المستخدم ثم ينفذ إجراءاً حقيقياً
   Future<void> _runSuggestion(ContextSuggestion s, Map<String, dynamic> m) async {
     setState(() => _selectedMsg = null);
@@ -1497,6 +1504,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
           await launchUrl(u, mode: LaunchMode.externalApplication);
         }
         return;
+      case 'map':
+        await launchUrl(
+            Uri.parse('https://maps.google.com/?q=${Uri.encodeComponent(s.value)}'),
+            mode: LaunchMode.externalApplication);
+        return;
+      case 'attach':
+        _showAttachSheet();
+        return;
+      case 'reminder':
+        await _scheduleWhenReminder(s.value);
+        return;
       case 'reply':
         setState(() {
           _replyTo = m;
@@ -1504,6 +1522,31 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         });
         return;
     }
+  }
+
+  /// تذكير سياقي: نفهم الوقت من النص محلياً ونعرضه على منتقي الوقت —
+  /// الجدولة إشعار محلي حقيقي عبر PushService.scheduleLocalReminder،
+  /// وإن لم يُفهم الوقت بدأ المنتقي من 9:00 والقرار للمستخدم دائماً
+  Future<void> _scheduleWhenReminder(String when) async {
+    final parsed = AdaptiveActions.parseWhen(when);
+    TimeOfDay initial =
+        parsed != null ? parsed.$1 : const TimeOfDay(hour: 9, minute: 0);
+    final picked = await showTimePicker(context: context, initialTime: initial);
+    if (picked == null || !mounted) return;
+    final now = DateTime.now();
+    var fire =
+        DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+    if (parsed?.$2 == true) fire = fire.add(const Duration(days: 1));
+    if (!fire.isAfter(now)) fire = fire.add(const Duration(days: 1));
+    final snippet = when.length > 60 ? '${when.substring(0, 60)}…' : when;
+    final err = await PushService.scheduleLocalReminder(
+      title: 'تذكير من وصل — ${widget.title}',
+      body: 'الموعد: $snippet',
+      fireAt: fire,
+    );
+    if (!mounted) return;
+    _snack(err ??
+        'فُعّل التذكير: ${fire.day}/${fire.month} — ${fire.hour}:${fire.minute.toString().padLeft(2, '0')}');
   }
 
   /// تفاصيل الرسالة (2.2.0): النوع والوقت والمرسل والحالة — بيانات حقيقية فقط
