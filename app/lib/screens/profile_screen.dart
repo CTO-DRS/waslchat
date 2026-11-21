@@ -26,6 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final String _me = supabase.auth.currentUser!.id;
   String _username = '';
   String? _avatar;
+  String? _cover;
   bool _loading = true;
   bool _saving = false;
   bool _uploading = false;
@@ -51,7 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final p = await supabase
           .from('profiles')
-          .select('username, display_name, bio, avatar_url')
+          .select('username, display_name, bio, avatar_url, cover_url')
           .eq('id', _me)
           .single();
       if (!mounted) return;
@@ -60,6 +61,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _name.text = (p['display_name'] ?? '') as String;
         _bio.text = (p['bio'] ?? '') as String;
         _avatar = p['avatar_url'] as String?;
+        _cover = p['cover_url'] as String?;
         _loading = false;
       });
     } catch (_) {
@@ -107,6 +109,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) setState(() => _avatar = null);
     } catch (_) {
       _snack('تعذّر حذف الصورة');
+    }
+  }
+
+  /// خلفية الملف (2.0.2): صورة عريضة تظهر أعلى بطاقة الرابط العام
+  /// waslchat.app/@user — نفس سلّة الصور داخل مجلد المستخدم بمسار cover_
+  Future<void> _pickCover() async {
+    final x = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1280,
+        maxHeight: 720,
+        imageQuality: 82);
+    if (x == null) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await x.readAsBytes();
+      final png = x.name.toLowerCase().endsWith('.png');
+      final path =
+          '$_me/cover_${DateTime.now().millisecondsSinceEpoch}.${png ? 'png' : 'jpg'}';
+      final store = supabase.storage.from('avatars');
+      await store.uploadBinary(path, bytes,
+          fileOptions: FileOptions(contentType: png ? 'image/png' : 'image/jpeg'));
+      final url = store.getPublicUrl(path);
+      final old = _cover;
+      await supabase.from('profiles').update({'cover_url': url}).eq('id', _me);
+      if (old != null && old.contains('/avatars/$_me/cover_')) {
+        final oldPath =
+            old.substring(old.indexOf('/avatars/$_me/cover_') + '/avatars/'.length);
+        store.remove([oldPath]).ignore();
+      }
+      if (mounted) setState(() => _cover = url);
+    } catch (_) {
+      _snack('تعذّر رفع الخلفية');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _removeCover() async {
+    final old = _cover;
+    if (old == null) return;
+    try {
+      await supabase.from('profiles').update({'cover_url': null}).eq('id', _me);
+      if (old.contains('/avatars/$_me/cover_')) {
+        final oldPath =
+            old.substring(old.indexOf('/avatars/$_me/cover_') + '/avatars/'.length);
+        supabase.storage.from('avatars').remove([oldPath]).ignore();
+      }
+      if (mounted) setState(() => _cover = null);
+    } catch (_) {
+      _snack('تعذّر حذف الخلفية');
     }
   }
 
@@ -355,6 +407,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Center(
                     child: TextButton(
                         onPressed: _removeAvatar, child: const Text('إزالة الصورة')),
+                  ),
+                // خلفية الملف (2.0.2): تظهر في بطاقة الرابط العام على الويب
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _uploading ? null : _pickCover,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SizedBox(
+                      height: 110,
+                      width: double.infinity,
+                      child: _cover == null
+                          ? Container(
+                              color: context.surfaceAlt,
+                              alignment: Alignment.center,
+                              child: _uploading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2))
+                                  : Text('اضف خلفية ملفك تظهر في رابطك العام',
+                                      style: TextStyle(
+                                          color: context.textFaint, fontSize: 12)),
+                            )
+                          : Image.network(_cover!,
+                              fit: BoxFit.cover, width: double.infinity),
+                    ),
+                  ),
+                ),
+                if (_cover != null)
+                  Center(
+                    child: TextButton(
+                        onPressed: _removeCover, child: const Text('إزالة الخلفية')),
                   ),
                 const SizedBox(height: 8),
                 Center(
