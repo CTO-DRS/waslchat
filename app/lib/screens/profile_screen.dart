@@ -1,12 +1,16 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import '../services/block_service.dart';
+import '../services/qr_scanner.dart';
 import '../services/username_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'chat_screen.dart';
 
 /// تعديل الملف الشخصي: الصورة والاسم الظاهر والنبذة
 class ProfileScreen extends StatefulWidget {
@@ -215,6 +219,107 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _snack('نُسخ رابط ملفك: $link');
   }
 
+  /// رمز QR الخاص بي: يظهر رابطك العام — من يمسحه يجدك ويتحدث معك مباشرة،
+  /// ومن نفس الورقة يمكن مسح رمز الطرف الآخر لفتح محادثته.
+  void _showMyQr() {
+    final link = UsernameService.profileLink(_username);
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: QrImageView(data: link, size: 220),
+            ),
+            const SizedBox(height: 12),
+            Text(link,
+                style: TextStyle(fontSize: 12, color: context.textTertiary)),
+            const SizedBox(height: 4),
+            const Text('امسح الرمز بكاميرا أي مستخدم وصل لفتح محادثتك معه.',
+                style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _scanUserQr();
+                },
+                icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                label: const Text('مسح رمز الطرف الآخر'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: link));
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  _snack('نُسخ رابط ملفك');
+                },
+                icon: const Icon(Icons.link_rounded, size: 16),
+                label: const Text('نسخ الرابط'),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// مسح رمز الطرف الآخر → فتح محادثة مباشرة (نفس تدفق البحث في new_chat_screen)
+  Future<void> _scanUserQr() async {
+    final raw = await scanQrCode(context);
+    if (!mounted || raw == null || raw.isEmpty) return;
+    final name = UsernameService.parseFromInput(raw);
+    if (name == null) {
+      _snack('الرمز لا يحتوي رابط وصل شات');
+      return;
+    }
+    try {
+      final user = await UsernameService.lookup(name);
+      if (!mounted) return;
+      if (user == null) {
+        _snack('لا يوجد مستخدم بهذا الرمز');
+        return;
+      }
+      if (user['id'] == _me) {
+        _snack('هذا رمزك أنت');
+        return;
+      }
+      if (BlockService.isBlocked(user['id'] as String)) {
+        _snack('لا يمكن فتح محادثة مع مستخدم محظور');
+        return;
+      }
+      final isBot = user['is_bot'] == true;
+      final convId = await supabase
+          .rpc('create_direct_chat', params: {'other_id': user['id']});
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            conversationId: convId as String,
+            title: (user['display_name'] ?? user['username']) as String,
+            otherId: user['id'] as String,
+            // محادثات البوتات غير مشفرة — البوت يقرأها عبر واجهته (بصدق)
+            isBot: isBot,
+            encrypted: !isBot,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) _snack('تعذّر فتح المحادثة من الرمز');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -274,6 +379,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       onPressed: _copyProfileLink,
                       icon: const Icon(Icons.link_rounded, size: 16),
                       label: Text('نسخ رابط waslchat.app/@$_username',
+                          style: const TextStyle(fontSize: 12.5)),
+                    ),
+                  ),
+                if (_username.isNotEmpty)
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: _showMyQr,
+                      icon: const Icon(Icons.qr_code_2_rounded, size: 16),
+                      label: Text('رمز QR الخاص بي ومسح رموز الآخرين',
                           style: const TextStyle(fontSize: 12.5)),
                     ),
                   ),
