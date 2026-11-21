@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../config.dart';
 import '../services/app_icon_service.dart';
+import '../services/privacy_service.dart';
 import '../services/app_lock_service.dart';
 import '../services/desktop_notify_service.dart';
 import '../services/jank_service.dart';
@@ -162,6 +163,8 @@ class SettingsScreen extends StatelessWidget {
           const _ProfileCard(),
           const SizedBox(height: 10),
           const _SecurityBadge(),
+          const SizedBox(height: 10),
+          const _LivePrivacyCard(),
           FutureBuilder<bool>(
             future: AdminScreen.isAdmin(),
             builder: (context, snap) => snap.data != true
@@ -403,6 +406,65 @@ class _SecurityBadge extends StatelessWidget {
           ),
         ]),
       );
+}
+
+/// بطاقة الخصوصية الحية (2.1.0): ماذا يشارك تطبيقك عنك لحظياً؟
+/// قرارات على جهازك — الإيقاف يمنع المشاركة فعلاً لدى الآخرين.
+class _LivePrivacyCard extends StatefulWidget {
+  const _LivePrivacyCard();
+  @override
+  State<_LivePrivacyCard> createState() => _LivePrivacyCardState();
+}
+
+class _LivePrivacyCardState extends State<_LivePrivacyCard> {
+  @override
+  void initState() {
+    super.initState();
+    PrivacyService.load().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  SwitchListTile _row(String key, ValueNotifier<bool> n, String title,
+          String sub, IconData ic, Color c) =>
+      SwitchListTile(
+        secondary: Icon(ic, color: c),
+        title:
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
+        value: n.value,
+        activeColor: WaslColors.teal,
+        onChanged: (v) async {
+          await PrivacyService.set(key, v);
+          setState(() => n.value = v);
+        },
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassGroup([
+      const ListTile(
+        leading:
+            Icon(Icons.visibility_off_outlined, color: WaslColors.violet),
+        title: Text('الخصوصية الحية',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        subtitle:
+            Text('ماذا يشارك تطبيقك عنك لحظياً؟', style: TextStyle(fontSize: 12)),
+      ),
+      _row('wasl_priv_reads', PrivacyService.shareReads, 'إشعارات القراءة',
+          'إيقافها يمنع تعليم رسائلك مقروءة عند الطرف',
+          Icons.done_all_rounded, WaslColors.teal),
+      _row('wasl_priv_presence', PrivacyService.sharePresence,
+          'حالة الاتصال', 'إيقافها يخفي «متصل الآن» عن الجميع',
+          Icons.wifi_rounded, WaslColors.indigo),
+      _row('wasl_priv_typing', PrivacyService.shareTyping, 'حالة الكتابة',
+          'إيقافها يمنع بث «يكتب الآن…»',
+          Icons.keyboard_rounded, const Color(0xFF0EA5E9)),
+      _row('wasl_priv_fx', PrivacyService.liveFx, 'المؤشرات الحيوية',
+          'الهالة وشارة العودة — محلية على جهازك فقط',
+          Icons.bolt_rounded, const Color(0xFFF59E0B)),
+    ]);
+  }
 }
 
 /// بطاقة الملف الشخصي أعلى الإعدادات (اضغط للتعديل)
