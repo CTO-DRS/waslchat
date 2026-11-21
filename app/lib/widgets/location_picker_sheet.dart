@@ -1,12 +1,12 @@
 import 'dart:math' show atan, cos, exp, log, pi, tan;
 
-/// sinh غير موجودة في dart:math — الصيغة القياسية عبر exp
-double _sinh(double x) => (exp(x) - exp(-x)) / 2;
-
 import 'package:geolocator/geolocator.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../theme.dart';
+
+/// sinh غير موجودة في dart:math — الصيغة القياسية عبر exp
+double _sinh(double x) => (exp(x) - exp(-x)) / 2;
 
 /// منتقي الموقع على الخريطة (2.3.1): بلاط OSM حقيقي 3×3 مع سحب وتكبير
 /// ونقر لتحديد أي نقطة — والنتيجة إحداثيات صماء تمر بنفس مسار التشفير
