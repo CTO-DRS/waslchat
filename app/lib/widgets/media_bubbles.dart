@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/webio/web_files.dart';
+import '../services/adaptive_actions.dart';
 import '../services/app_lock_service.dart';
 import '../services/shield_service.dart';
 import '../theme.dart';
@@ -297,6 +298,8 @@ class _VoiceBubbleState extends State<VoiceBubble> {
           await _player.setFilePath(f.path);
         }
         _ready = true;
+        // السرعة المشتركة (2.2.0): يضبطها شريط الإجراءات التكيفي
+        await _player.setSpeed(VoiceRateService.rate);
       }
       if (_player.processingState == ProcessingState.completed) {
         await _player.seek(Duration.zero);

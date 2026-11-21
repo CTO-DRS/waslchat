@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -53,6 +54,7 @@ import '../services/media_service.dart';
 import '../services/moderation_service.dart';
 import '../services/presence_service.dart';
 import '../services/privacy_service.dart';
+import '../services/adaptive_actions.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
 import '../widgets/tone_picker_sheet.dart';
@@ -705,6 +707,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   late final AnimationController _dotsCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 1100))
     ..repeat();
+  // 2.2.0: «حذف لدي» (إخفاء محلي) + قفل منع التنفيذ المزدوج للإجراءات
+  Set<String> _hiddenIds = {};
+  bool _barBusy = false;
 
   @override
   void initState() {
@@ -723,6 +728,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     _loadJourney();
     _secure.read(key: 'wasl_bar_always_${widget.conversationId}').then((v) {
       if (v == '1' && mounted) setState(() => _barAlways = true);
+    }).catchError((_) {});
+    // 2.2.0: قائمة الإخفاء المحلي («حذف لدي») لهذه المحادثة
+    _secure.read(key: 'wasl_hidden_${widget.conversationId}').then((v) {
+      if (v != null && v.isNotEmpty && mounted) {
+        setState(() => _hiddenIds = v.split(',').toSet());
+      }
     }).catchError((_) {});
         _stream = supabase
         .from('messages')
@@ -1296,6 +1307,287 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     );
   }
 
+  /// الشريط التكيفي (2.2.0): إجراءات حسب نوع الرسالة وصلاحياتها — يظهر عند
+  /// الحاجة فقط، يتكيف مع عرض الشاشة، لمس ≥40، تلميحات لقارئ الشاشة، اهتزاز
+  /// لمسي خفيف، ومنع التنفيذ المزدوج. بلا أي اتصال بالخادم للعرض.
+  Widget _inlineBar(Map<String, dynamic> m) {
+    final mine = m['sender_id'] == _me;
+    final kind = AdaptiveActions.kindOf(m);
+    final text = kind == 'text' ? _textOf(m) : null;
+    final suggestions = AdaptiveActions.suggest(text);
+    final allowForward = _e2e &&
+        !widget.isChannel &&
+        m['view_once'] != true &&
+        m['protected'] != true;
+    // العدد المعروض يتكيف مع عرض الشاشة — الباقي ينتقل إلى «المزيد»
+    final screenW = MediaQuery.of(context).size.width;
+    final maxVisible = (screenW < 360 ? 4 : (screenW < 480 ? 5 : 7)).clamp(3, 7);
+    final eligible = AdaptiveActions.actionsFor(
+      kind: kind,
+      mine: mine,
+      canPost: widget.canPost,
+    ).where((a) {
+      if (a.id == 'forward' && !allowForward) return false;
+      if (a.id == 'edit' && !_canEdit(m)) return false;
+      if (a.id == 'copy' && text == null) return false;
+      if (a.id == 'translate' && text == null) return false;
+      return true;
+    }).toList();
+    final head = eligible.take(maxVisible - 1).toList();
+    final moreCount = eligible.length - head.length;
+    void run(VoidCallback f) {
+      if (_barBusy) return; // منع التنفيذ المزدوج بالنقر المتكرر
+      HapticFeedback.selectionClick();
+      f();
+    }
+
+    Widget btn(AdaptiveAction a) => Tooltip(
+          message: a.label,
+          waitDuration: const Duration(milliseconds: 350),
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => run(() => _runBarAction(a.id, m)),
+              child: Icon(a.icon, size: 19, color: Colors.white70),
+            ),
+          ),
+        );
+    return MotionScaleIn(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            color: context.glass,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: context.hairline),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (suggestions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 4, 6, 0),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    for (final s in suggestions)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: ActionChip(
+                          avatar: Icon(s.icon, size: 13, color: WaslColors.teal),
+                          label: Text(s.label,
+                              style: const TextStyle(fontSize: 11.5)),
+                          backgroundColor:
+                              WaslColors.teal.withValues(alpha: 0.12),
+                          side: BorderSide(
+                              color: WaslColors.teal.withValues(alpha: 0.35)),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => run(() => _runSuggestion(s, m)),
+                        ),
+                      ),
+                  ]),
+                ),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final a in head) btn(a),
+                btn(AdaptiveAction('more', Icons.more_horiz_rounded,
+                    moreCount > 0 ? 'المزيد ($moreCount)' : 'المزيد')),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _runBarAction(String id, Map<String, dynamic> m) async {
+    setState(() => _selectedMsg = null);
+    switch (id) {
+      case 'react':
+        _emojiSheet(m);
+        return;
+      case 'reply':
+        setState(() {
+          _replyTo = m;
+          _editing = null;
+        });
+        return;
+      case 'copy':
+        final t = _textOf(m);
+        if (t == null) return;
+        await Clipboard.setData(ClipboardData(text: t));
+        _snack('تم النسخ');
+        return;
+      case 'translate':
+        final t = _textOf(m);
+        if (t == null) return;
+        final arabic = RegExp(r'[\u0600-\u06FF]').hasMatch(t);
+        _showAiResult('الترجمة', AiService.translate(t, arabic ? 'en' : 'ar'));
+        return;
+      case 'edit':
+        _startEdit(m);
+        return;
+      case 'forward':
+        _forward(m);
+        return;
+      case 'share':
+        await _barShare(m);
+        return;
+      case 'open':
+        await _openMedia(m);
+        return;
+      case 'speed':
+        setState(() => VoiceRateService.cycle());
+        _snack('سرعة التشغيل: ${VoiceRateService.rate}x — تُطبَّق عند التشغيل القادم');
+        return;
+      case 'more':
+        _messageActions(m);
+        return;
+    }
+  }
+
+  /// مشاركة/حفظ وسيط حقيقي: تنزيل وفك تشفير ثم ورقة مشاركة النظام
+  /// (وتتيح الحفظ في المعرض أو الملفات من النظام نفسه)
+  Future<void> _barShare(Map<String, dynamic> m) async {
+    if (_barBusy) return;
+    _barBusy = true;
+    try {
+      final bytes = await _mediaBytes(m);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الوسيط');
+        return;
+      }
+      final meta = _metaOf(m);
+      var name = (meta?['name'] as String?) ??
+          switch (m['type']) {
+            'image' => 'image.jpg',
+            'video' => 'video.mp4',
+            'voice' => 'voice.m4a',
+            _ => 'file',
+          };
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final dir = await getTemporaryDirectory();
+      final f = File(
+          '${dir.path}/wasl_${DateTime.now().millisecondsSinceEpoch}_$name');
+      await f.writeAsBytes(bytes, flush: true);
+      await SharePlus.instance.share(ShareParams(
+          files: [XFile(f.path)], subject: 'مشاركة من وصل شات'));
+    } catch (_) {
+      _snack('تعذّر مشاركة الوسيط');
+    } finally {
+      _barBusy = false;
+    }
+  }
+
+  /// طبقة الذكاء السياقي (2.2.0): اقتراحات محلية، لا تنفيذ تلقائي —
+  /// كل اقتراح ينتظر موافقة المستخدم ثم ينفذ إجراءاً حقيقياً
+  Future<void> _runSuggestion(ContextSuggestion s, Map<String, dynamic> m) async {
+    setState(() => _selectedMsg = null);
+    switch (s.kind) {
+      case 'call':
+        await launchUrl(Uri.parse('tel:${s.value}'));
+        return;
+      case 'email':
+        await launchUrl(Uri.parse('mailto:${s.value}'));
+        return;
+      case 'link':
+        final u = Uri.tryParse(s.value);
+        if (u != null) {
+          await launchUrl(u, mode: LaunchMode.externalApplication);
+        }
+        return;
+      case 'reply':
+        setState(() {
+          _replyTo = m;
+          _editing = null;
+        });
+        return;
+    }
+  }
+
+  /// تفاصيل الرسالة (2.2.0): النوع والوقت والمرسل والحالة — بيانات حقيقية فقط
+  void _showDetails(Map<String, dynamic> m) {
+    final created = DateTime.parse(m['created_at'] as String).toLocal();
+    final kind = AdaptiveActions.kindOf(m);
+    final kindLabel = switch (kind) {
+      'image' => 'صورة',
+      'video' => 'فيديو',
+      'voice' => 'رسالة صوتية',
+      'file' => 'ملف',
+      _ => 'نص',
+    };
+    final read = _othersReadUpTo != null &&
+        !created.toUtc().isAfter(_othersReadUpTo!);
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('تفاصيل الرسالة',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 10),
+            _detailRow('النوع', kindLabel),
+            _detailRow('المرسل', _senderName(m['sender_id'] as String?)),
+            _detailRow('الوقت',
+                '${created.hour.toString().padLeft(2, '0')}:${created.minute.toString().padLeft(2, '0')} — ${created.year}/${created.month}/${created.day}'),
+            _detailRow('الحالة',
+                read ? 'قُرئت' : (_delivered(m) ? 'أُسلّمت' : 'بانتظار التسليم')),
+            _detailRow('التفاعلات', '${(_reactions[m['id']] ?? {}).length} تفاعل'),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _detailRow(String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(children: [
+          SizedBox(
+              width: 72,
+              child: Text(k,
+                  style:
+                      TextStyle(color: context.textFaint, fontSize: 12.5))),
+          Expanded(
+              child: Text(v,
+                  style: const TextStyle(
+                      fontSize: 13.5, fontWeight: FontWeight.w600))),
+        ]),
+      );
+
+  /// «حذف لدي» (2.2.0): إخفاء محلي دائم على هذا الجهاز — لا يُحذف عن
+  /// الآخرين ولا من الخادم، بلا أي تغيير في قاعدة البيانات
+  Future<void> _hideForMe(Map<String, dynamic> m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('حذف لدي؟'),
+        content: const Text(
+            'تختفي الرسالة من محادثتك على هذا الجهاز فقط، وتبقى موجودة عند باقي الأعضاء وعلى الخادم. لا يمكن التراجع من هذه الشاشة.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('إخفاء')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      _hiddenIds.add(m['id'] as String);
+      if (_selectedMsg == m['id']) _selectedMsg = null;
+    });
+    await _secure.write(
+        key: 'wasl_hidden_${widget.conversationId}',
+        value: _hiddenIds.join(','));
+    _snack('أُخفيت الرسالة لديك فقط');
+  }
+
   void _toggleSelect(Map<String, dynamic> m) {
     if (m['deleted_at'] != null) return;
     setState(() {
@@ -1346,55 +1638,6 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                     fontSize: 12.5, fontWeight: FontWeight.w600)),
           ]),
         ),
-      ),
-    );
-  }
-
-  /// الشريط المدمج: الإجراءات الشائعة بلمسة واحدة أسفل الرسالة المختارة
-  Widget _inlineBar(Map<String, dynamic> m) {
-    final mine = m['sender_id'] == _me;
-    final isText = (m['type'] ?? 'text') == 'text';
-    Widget btn(IconData ic, VoidCallback onTap) => InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Icon(ic, size: 18, color: Colors.white70),
-          ),
-        );
-    return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        decoration: BoxDecoration(
-          color: context.glass,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: context.hairline),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          btn(Icons.emoji_emotions_outlined, () => _emojiSheet(m)),
-          if (widget.canPost)
-            btn(Icons.reply_rounded, () {
-              setState(() {
-                _selectedMsg = null;
-                _replyTo = m;
-                _editing = null;
-              });
-            }),
-          if (isText)
-            btn(Icons.copy_rounded, () {
-              final t = _textOf(m);
-              if (t == null) return;
-              Clipboard.setData(ClipboardData(text: t));
-              setState(() => _selectedMsg = null);
-              _snack('تم النسخ');
-            }),
-          if (mine) btn(Icons.timeline_rounded, () => _showJourney(m)),
-          if (widget.isGroup)
-            btn(Icons.how_to_reg_outlined, () => _showGroupReads(m)),
-          btn(Icons.more_horiz_rounded, () => _messageActions(m)),
-          btn(Icons.close_rounded, () => setState(() => _selectedMsg = null)),
-        ]),
       ),
     );
   }
@@ -3802,6 +4045,26 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 value: _barAlways ? '1' : '0');
           },
         ),
+        // 2.2.0: تفاصيل الرسالة للوارد + حذف لدي للجميع
+        if (m['sender_id'] != _me)
+          SheetTile(
+            icon: Icons.info_outline_rounded,
+            color: WaslColors.indigo,
+            title: 'تفاصيل الرسالة',
+            onTap: () {
+              Navigator.pop(ctx);
+              _showDetails(m);
+            },
+          ),
+        SheetTile(
+          icon: Icons.visibility_off_outlined,
+          color: Colors.redAccent,
+          title: 'حذف لدي (إخفاء)',
+          onTap: () {
+            Navigator.pop(ctx);
+            _hideForMe(m);
+          },
+        ),
         if (text != null)
           SheetTile(
             icon: Icons.translate_rounded,
@@ -4381,7 +4644,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 unawaited(_ensureDailySummary(all));
                 _scanPromises(all);
                 // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
-                final items = AlbumService.group(msgs);
+                // 2.2.0: «حذف لدي» — المخفي يختفي من العرض فقط؛ تبقى
+                // البيانات كاملة للتأكيد والمقروء والرحلة كما هي
+                final visibleMsgs = msgs
+                    .where((r) => !_hiddenIds.contains(r['id'] as String?))
+                    .toList();
+                final items = AlbumService.group(visibleMsgs);
                 _allMsgs = all;
                 // 2.1.0: تأكيد وصول الوارد + تعلّم صدى رسائلي (للإيصالات)
                 _ackIncoming(all.where((r) => r['sender_id'] != _me).toList());
@@ -4389,7 +4657,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                   if (r['sender_id'] == _me) _echoSeen.add(r['id'] as String);
                 }
                 _maybeJumpToFocus(items);
-                return ScrollablePositionedList.builder(
+                // 2.2.0: النقر في الفراغ يغلق الشريط المحدد — لمسات الفقاعات
+                // والوسائط تسبق هذا المستمع في سباق الإيماءة فلا تتأثر وظائفها
+                return GestureDetector(
+                  onTap: () {
+                    if (_selectedMsg != null) {
+                      setState(() => _selectedMsg = null);
+                    }
+                  },
+                  child: ScrollablePositionedList.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(12),
                   itemCount: items.length,
@@ -4506,7 +4782,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                       ),
                     );
                   },
-                );
+                ),
+              );
               },
             ),
               ),
