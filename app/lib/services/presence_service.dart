@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import 'privacy_service.dart';
 
 /// من المتصل الآن؟ (Supabase Realtime Presence)
 class PresenceService {
@@ -25,6 +26,9 @@ class PresenceService {
       online.value = ids;
     }).subscribe((status, _) async {
       if (status == RealtimeSubscribeStatus.subscribed) {
+        // الخصوصية الحية (2.1.0): بإيقاف مشاركة الاتصال نستقبل القائمة
+        // لكن لا نعلن حضورنا — نظهر للآخرين كغير متصلين
+        if (!PrivacyService.sharePresence.value) return;
         await ch.track({'user_id': uid});
       }
     });
