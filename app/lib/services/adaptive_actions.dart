@@ -63,10 +63,11 @@ class AdaptiveActions {
           const AdaptiveAction('react', Icons.emoji_emotions_outlined, 'تفاعل'),
         ];
       case 'location':
-        // الموقع (2.3.0): فتح الخريطة، الإحداثيات، المشاركة، الرد، التفاعل، التوجيه
+        // الموقع (2.3.1): فتح الخريطة، الإحداثيات، الحفظ، المشاركة، الرد، التفاعل، التوجيه
         return [
           const AdaptiveAction('open', Icons.map_rounded, 'فتح الخريطة'),
           const AdaptiveAction('copy', Icons.copy_rounded, 'نسخ الإحداثيات'),
+          const AdaptiveAction('save', Icons.bookmark_add_outlined, 'حفظ'),
           const AdaptiveAction('share', Icons.ios_share_rounded, 'مشاركة'),
           if (canPost) const AdaptiveAction('reply', Icons.reply_rounded, 'رد'),
           const AdaptiveAction('react', Icons.emoji_emotions_outlined, 'تفاعل'),

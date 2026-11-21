@@ -59,6 +59,7 @@ import '../services/privacy_service.dart';
 import '../services/adaptive_actions.dart';
 import '../services/push_service.dart';
 import '../theme.dart';
+import '../widgets/location_picker_sheet.dart';
 import '../widgets/tone_picker_sheet.dart';
 import '../services/app_studio_service.dart';
 import '../widgets/studio_backdrop.dart';
@@ -1481,6 +1482,29 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         await Clipboard.setData(ClipboardData(text: url));
         _snack('نُسخ رابط مؤقت — صالح لفترة محدودة');
         return;
+      case 'save':
+        // حفظ الموقع إلى «رسائلي المحفوظة» عبر مسار التوجيه المشفر نفسه
+        // (الهدف is_group=true فيستخدم مفتاح المجموعة كما في _forward)
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          try {
+            final savedId = await SavedService.id();
+            final ok = await ForwardService.send(
+                target: {
+                  'conversation_id': savedId,
+                  'is_group': true,
+                  'title': SavedService.title,
+                },
+                type: 'location',
+                text: _textOf(m));
+            _snack(ok
+                ? 'حُفظ الموقع في رسائلي المحفوظة'
+                : 'تعذّر الحفظ (التشفير غير جاهز)');
+          } catch (_) {
+            _snack('تعذّر الحفظ');
+          }
+          return;
+        }
+        return;
       case 'more':
         _messageActions(m);
         return;
@@ -1765,6 +1789,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   /// مشاركة الموقع الحالي (2.3.0): تحديد عبر GPS ثم تأكيد صريح من
   /// المستخدم، وتشفير الإحداثيات بنفس مسار النص تماماً (جلسة متدرجة
   /// للخاص ومفتاح المحادثة للمجموعات) ثم إدراج type=location
+  /// «موقعي» (2.3.1): يحدد GPS ثم يفتح منتقي الخريطة والدرّب مثبت مسبقاً
+  /// على موقعك — فيستطيع المستخدم تصحيح النقطة قبل الإرسال
   Future<void> _sendMyLocation() async {
     if (_isMuted) {
       _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
@@ -1782,25 +1808,31 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       _snack('تعذّر تحديد الموقع — تحقق من صلاحية الموقع وتشغيل GPS');
       return;
     }
-    final lat = double.parse(pos.latitude.toStringAsFixed(6));
-    final lng = double.parse(pos.longitude.toStringAsFixed(6));
-    final label = 'موقعي الحالي';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('مشاركة موقعك؟'),
-        content: Text('الإحداثيات: $lat, $lng\nستُشفَّر وتُرسل إلى هذه المحادثة.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('إلغاء')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('إرسال')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+    if (!mounted) return;
+    final pick = await showLocationPicker(context,
+        initialLat: double.parse(pos.latitude.toStringAsFixed(6)),
+        initialLng: double.parse(pos.longitude.toStringAsFixed(6)));
+    if (pick == null || !mounted) return;
+    await _sendLocationAt(pick.lat, pick.lng, pick.label);
+  }
+
+  /// «على الخريطة» (2.3.1): المنتقي مباشرة بلا GPS — مشاركة أي نقطة
+  /// (مكان عمل، مقر اجتماع) لا موقعك الحالي بالضرورة
+  Future<void> _pickLocation() async {
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    if (!widget.canPost || widget.isChannel) return;
+    final pick = await showLocationPicker(context);
+    if (pick == null || !mounted) return;
+    await _sendLocationAt(pick.lat, pick.lng, pick.label);
+  }
+
+  /// إرسال نقطة موقع: تشفير بنفس مسار النص (جلسة متدرجة للخاص ومفتاح
+  /// المحادثة للمجموعات) ثم إدراج type=location — منتقي الخريطة نفسه
+  /// هو التأكيد: دبوس مرئي على النقطة + وصف قابل للتحرير قبل الإرسال
+  Future<void> _sendLocationAt(double lat, double lng, String label) async {
     final replyTo = _replyTo;
     final content = '$lat,$lng|$label';
     var payload = content;
@@ -2673,6 +2705,11 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
           SheetAction(Icons.location_on_rounded, 'موقعي', WaslColors.teal, () {
             Navigator.pop(ctx);
             _sendMyLocation();
+          }),
+          // الموقع على الخريطة (2.3.1): اختيار أي نقطة لا موقعك الحالي فقط
+          SheetAction(Icons.map_rounded, 'على الخريطة', WaslColors.indigo, () {
+            Navigator.pop(ctx);
+            _pickLocation();
           }),
           // ردود بوتات الكتالوج (1.22.0): بوت الكتالوج هنا لا يقرأ شيئاً —
           // نص يصوغه صاحب الغرفة من قالب موثق ويرسله باسمه، فتجوع أي غرفة
