@@ -143,7 +143,7 @@ class AdaptiveActions {
 
   /// فهم الوقت من نص عربي/إنجليزي: ساعة:دقيقة + ص/م + غداً/اليوم
   /// null = لا وقت مفهوم — والقرار النهائي للمستخدم في منتقي الوقت
-  static (TimeOfDay, bool)? parseWhen(String s) {
+  static WhenHint? parseWhen(String s) {
     final t = RegExp(r'(\d{1,2})\s*[:\.]\s*(\d{2})\s*(صباحا|ص|مساء|م|am|pm)?',
             caseSensitive: false)
         .firstMatch(s);
@@ -158,6 +158,13 @@ class AdaptiveActions {
       if (h == 12) h = 0;
     }
     final tomorrow = RegExp(r'غدا|بكرة|بكره|tomorrow').hasMatch(s);
-    return (TimeOfDay(hour: h, minute: min), tomorrow);
+    return WhenHint(TimeOfDay(hour: h, minute: min), tomorrow);
   }
+}
+
+/// وقت مفهوم من النص + هل يشير إلى الغد (فئة بلا سجلات لتوافق الترجمات)
+class WhenHint {
+  const WhenHint(this.time, this.tomorrow);
+  final TimeOfDay time;
+  final bool tomorrow;
 }
