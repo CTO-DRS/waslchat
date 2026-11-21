@@ -168,6 +168,25 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   final _searchCtrl = TextEditingController();
   String get _query => _searchCtrl.text.trim().toLowerCase();
 
+  // مرشحات البحث (2.4.0): نوع النتائج + مخزون عميق حتى 1000 رسالة يُجلب
+  // مرة عند فتح البحث — والأنواع تشمل الروابط والأرقام بتعابير نمطية
+  String _searchKind = 'all';
+  List<Map<String, dynamic>> _searchCorpus = const [];
+  static const _searchKinds = <(String, String, IconData)>[
+    ('all', 'الكل', Icons.search_rounded),
+    ('text', 'نصوص', Icons.chat_bubble_outline_rounded),
+    ('image', 'صور', Icons.image_outlined),
+    ('video', 'فيديو', Icons.movie_outlined),
+    ('file', 'ملفات', Icons.insert_drive_file_outlined),
+    ('voice', 'صوتيات', Icons.graphic_eq_rounded),
+    ('location', 'مواقع', Icons.location_on_outlined),
+    ('link', 'روابط', Icons.link_rounded),
+    ('phone', 'أرقام', Icons.phone_outlined),
+  ];
+  static final RegExp _linkRe =
+      RegExp(r'(https?://|www\.)[^\s]+', caseSensitive: false);
+  static final RegExp _phoneRe = RegExp(r'\+?\d[\d\s\-()]{7,}\d');
+
   // الحظر: أنا حظرتُ الطرف الآخر في محادثة فردية؟
   bool _iBlockedPeer = false;
 
@@ -1883,6 +1902,70 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       } else {
         _snack('تعذّر إرسال الموقع');
       }
+    }
+  }
+
+  /// مرشحات البحث (2.4.0): مطابقة النوع المختار
+  bool _kindMatch(Map<String, dynamic> m) {
+    final t = m['type'] as String? ?? 'text';
+    switch (_searchKind) {
+      case 'all':
+      case 'text':
+        return t == 'text';
+      case 'link':
+        return t == 'text' && _linkRe.hasMatch(_textOf(m) ?? '');
+      case 'phone':
+        return t == 'text' && _phoneRe.hasMatch(_textOf(m) ?? '');
+      default:
+        return t == _searchKind;
+    }
+  }
+
+  /// النص القابل للبحث حسب النوع: نص الرسالة، اسم الملف/الفيديو من
+  /// الميتا المفكوكة، ووصف الموقع — فتدعم المرشحات والاستعلام معاً
+  String? _searchTextOf(Map<String, dynamic> m) {
+    final t = m['type'] as String? ?? 'text';
+    if (t == 'file' || t == 'video') {
+      final n = _metaOf(m)?['name'] as String?;
+      return (n == null || n.isEmpty) ? null : n;
+    }
+    if (t == 'location') {
+      final loc = _locParts(_textOf(m) ?? '');
+      if (loc == null) return null;
+      return loc.$3.isEmpty ? 'موقع' : loc.$3;
+    }
+    return _textOf(m);
+  }
+
+  /// دمج مخزون البحث العميق مع رسائل الستريم (الأحدث تغلب) بترتيب زمني
+  List<Map<String, dynamic>> _searchBase(List<Map<String, dynamic>> all) {
+    if (_searchCorpus.isEmpty) return all;
+    final byId = <String, Map<String, dynamic>>{};
+    for (final m in _searchCorpus) {
+      byId[m['id'] as String] = m;
+    }
+    for (final m in all) {
+      byId[m['id'] as String] = m;
+    }
+    final list = byId.values.toList();
+    list.sort((a, b) => (a['created_at'] as String? ?? '')
+        .compareTo(b['created_at'] as String? ?? ''));
+    return list;
+  }
+
+  /// جلب مخزون البحث مرة واحدة عند الفتح — بحث في التاريخ العميق
+  Future<void> _loadSearchCorpus() async {
+    try {
+      final rows = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', widget.conversationId)
+          .order('created_at', ascending: false)
+          .limit(1000);
+      if (!mounted) return;
+      setState(() => _searchCorpus = List<Map<String, dynamic>>.from(rows));
+    } catch (_) {
+      // الستريم يبقى المخزون الاحتياطي — لا عطل في البحث عند فشل الجلب
     }
   }
 
@@ -4139,7 +4222,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       children: (ctx) => [
         SheetActionGrid([
           SheetAction(Icons.search_rounded, 'بحث', WaslColors.indigo,
-              () => go(ctx, () => setState(() => _searching = true))),
+              () => go(ctx, () {
+                    setState(() => _searching = true);
+                    _loadSearchCorpus();
+                  })),
           SheetAction(Icons.auto_awesome, 'وصل AI', WaslColors.violet,
               () => go(ctx, _showAiMenu)),
           SheetAction(Icons.photo_library_rounded, 'الوسائط', WaslColors.teal,
@@ -4676,6 +4762,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () => setState(() {
                   _searching = false;
+                  _searchKind = 'all';
+                  _searchCorpus = const [];
                   _searchCtrl.clear();
                 }),
               ),
@@ -4685,6 +4773,42 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                     hintText: 'ابحث في المحادثة…', border: InputBorder.none, filled: false),
+              ),
+              // رقائق مرشحات الأنواع (2.4.0): نصوص/صور/فيديو/ملفات/صوتيات/
+              // مواقع/روابط/أرقام — وتصفية النوع بلا استعلام مسموحة
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(46),
+                child: SizedBox(
+                  height: 46,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(children: [
+                      for (final (k, label, icon) in _searchKinds)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ChoiceChip(
+                            visualDensity: VisualDensity.compact,
+                            avatar: Icon(icon,
+                                size: 16,
+                                color: _searchKind == k
+                                    ? Colors.white
+                                    : context.iconStd),
+                            label: Text(label,
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: _searchKind == k
+                                        ? Colors.white
+                                        : context.textSecondary)),
+                            selected: _searchKind == k,
+                            selectedColor: WaslColors.indigo,
+                            backgroundColor: context.glass,
+                            onSelected: (_) => setState(() => _searchKind = k),
+                          ),
+                        ),
+                    ]),
+                  ),
+                ),
               ),
             )
           : AppBar(
@@ -4896,25 +5020,30 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 }).toList();
                 _byId = {for (final m in all) m['id'] as String: m};
                 final q = _query;
+                // البحث العميق (2.4.0): المخزون الموسّع يغذي القائمة أثناء البحث
+                final pool = _searching ? _searchBase(all) : all;
+                if (_searching) _scheduleDecrypt(pool);
                 final base = _starredOnly
-                    ? all.where((m) => _stars.contains(m['id'])).toList()
-                    : all;
+                    ? pool.where((m) => _stars.contains(m['id'])).toList()
+                    : pool;
                 if (_starredOnly && base.isEmpty) {
                   _scheduleDecrypt(all);
                   return Center(
                       child: Text('لا رسائل مميزة بنجمة هنا',
                           style: TextStyle(color: context.textTertiary)));
                 }
-                final msgs = q.isEmpty
+                final msgs = (!_searching || (q.isEmpty && _searchKind == 'all'))
                     ? base
                     : base.where((m) {
-                        if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') {
+                        if (m['deleted_at'] != null || !_kindMatch(m)) {
                           return false;
                         }
-                        // البحث الذكي (المرحلة 5): تطبيع عربي + تسامح أخطاء + مرادفات
-                        return SmartSearchService.matches(_textOf(m) ?? '', q);
+                        if (q.isEmpty) return true; // تصفية نوع بلا استعلام
+                        // البحث الذكي (المرحلة 5) على النص القابل للبحث حسب
+                        // النوع: تطبيع عربي + تسامح أخطاء + مرادفات
+                        return SmartSearchService.matches(_searchTextOf(m) ?? '', q);
                       }).toList();
-                if (q.isNotEmpty && msgs.isEmpty) {
+                if (_searching && (q.isNotEmpty || _searchKind != 'all') && msgs.isEmpty) {
                   _scheduleDecrypt(all);
                   return Center(
                     child: Padding(

@@ -1,7 +1,7 @@
 name: wasl_chat
 description: "وصل شات - تطبيق مراسلة وتواصل"
 publish_to: 'none'
-version: 2.3.1+99
+version: 2.4.0+100
 
 environment:
   sdk: '>=3.9.0 <4.0.0'
