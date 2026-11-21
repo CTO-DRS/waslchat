@@ -1529,14 +1529,18 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   /// وإن لم يُفهم الوقت بدأ المنتقي من 9:00 والقرار للمستخدم دائماً
   Future<void> _scheduleWhenReminder(String when) async {
     final parsed = AdaptiveActions.parseWhen(when);
-    TimeOfDay initial =
-        parsed != null ? parsed.$1 : const TimeOfDay(hour: 9, minute: 0);
+    TimeOfDay initial = const TimeOfDay(hour: 9, minute: 0);
+    bool tomorrow = false;
+    if (parsed != null) {
+      initial = parsed.time;
+      tomorrow = parsed.tomorrow;
+    }
     final picked = await showTimePicker(context: context, initialTime: initial);
     if (picked == null || !mounted) return;
     final now = DateTime.now();
     var fire =
         DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
-    if (parsed?.$2 == true) fire = fire.add(const Duration(days: 1));
+    if (tomorrow) fire = fire.add(const Duration(days: 1));
     if (!fire.isAfter(now)) fire = fire.add(const Duration(days: 1));
     final snippet = when.length > 60 ? '${when.substring(0, 60)}…' : when;
     final err = await PushService.scheduleLocalReminder(
