@@ -1,0 +1,1 @@
+cd /workspace/tools/an2 && export PATH=/workspace/tools/flutter/bin:$PATH PUB_CACHE=/workspace/tools/pub-cache && unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && flutter analyze --no-pub 2>&1 | tail -8 && flutter test --no-pub 2>&1 | tail -6

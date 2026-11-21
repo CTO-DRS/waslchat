@@ -1,0 +1,357 @@
+[
+ {
+  "test": "setup: create_direct_chat",
+  "pass": true,
+  "detail": "200 b5e1a9dc-298c-4f94-a974-870fce68c690"
+ },
+ {
+  "test": "setup: target uploads media",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "setup: target sends media message",
+  "pass": true,
+  "detail": "201 [{'id': '1e84cb61-8e96-4274-b56b-171e7821be47', 'conversation_id': 'b5e1a9dc-298c-4f94-a974-870fce68c690', 'sender_id': '062fbac1-c678-4f1a-864f-62c076ca1fb0', 'content': '', 'created_at': '2026-1"
+ },
+ {
+  "test": "setup: reporter gets signed url",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "setup: signed url works before revoke",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "abuse: outsider cannot report unrelated user",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'SHIELD_NO_RELATION'}"
+ },
+ {
+  "test": "abuse: outsider cannot report on a conversation he is not in",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'not a member'}"
+ },
+ {
+  "test": "abuse: invalid category rejected",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'bad category'}"
+ },
+ {
+  "test": "report: reporter files urgent blackmail report",
+  "pass": true,
+  "detail": "[{'case_id': 'f9eb7bf0-5e2d-4e95-b681-0edc759108df', 'ref': 'AD39FAAD'}]"
+ },
+ {
+  "test": "report: severity computed server-side = critical",
+  "pass": true,
+  "detail": "critical"
+ },
+ {
+  "test": "report: silent block applied",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "privacy: target sees no cases",
+  "pass": true,
+  "detail": "[]"
+ },
+ {
+  "test": "privacy: outsider sees no cases",
+  "pass": true,
+  "detail": "[]"
+ },
+ {
+  "test": "privacy: reporter sees own case",
+  "pass": true,
+  "detail": "[{'id': 'f9eb7bf0-5e2d-4e95-b681-0edc759108df'}]"
+ },
+ {
+  "test": "privacy: shield_evidence not readable by users",
+  "pass": true,
+  "detail": "200 []"
+ },
+ {
+  "test": "privacy: shield_audit not readable by users",
+  "pass": true,
+  "detail": "200 []"
+ },
+ {
+  "test": "privacy: shield_quarantine not readable by users",
+  "pass": true,
+  "detail": "200 []"
+ },
+ {
+  "test": "privacy: shield_restrictions not readable by users",
+  "pass": true,
+  "detail": "200 []"
+ },
+ {
+  "test": "privacy: no trace of report in target's chat",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "rbac: non-admin denied shield_admin_cases",
+  "pass": true,
+  "detail": "400 {'code': 'P0001', 'details': None, 'hint': None, 'message': 'not_admin'}"
+ },
+ {
+  "test": "rbac: non-admin denied shield_admin_case",
+  "pass": true,
+  "detail": "400 {'code': 'P0001', 'details': None, 'hint': None, 'message': 'not_admin'}"
+ },
+ {
+  "test": "rbac: non-admin denied shield_admin_audit",
+  "pass": true,
+  "detail": "400 {'code': 'P0001', 'details': None, 'hint': None, 'message': 'not_admin'}"
+ },
+ {
+  "test": "rbac: non-admin denied shield_admin_suspend",
+  "pass": true,
+  "detail": "400 {'code': 'P0001', 'details': None, 'hint': None, 'message': 'not_admin'}"
+ },
+ {
+  "test": "rbac: non-admin denied shield_admin_message_reporter",
+  "pass": true,
+  "detail": "400 {'code': 'P0001', 'details': None, 'hint': None, 'message': 'not_admin'}"
+ },
+ {
+  "test": "rbac: internal _shield_log not callable",
+  "pass": true,
+  "detail": "403"
+ },
+ {
+  "test": "rbac: service purge not callable by users",
+  "pass": true,
+  "detail": "403"
+ },
+ {
+  "test": "rbac: admin lists cases",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "notify: admin received instant notification message",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "notify: reporter got confirmation from support",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "evidence: reporter uploads to own case",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "evidence: outsider cannot upload into case",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "evidence: registered",
+  "pass": true,
+  "detail": "fa417a7d-ea9b-4db2-b2af-766ac2e91224"
+ },
+ {
+  "test": "evidence: outsider cannot register evidence",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'not allowed'}"
+ },
+ {
+  "test": "evidence: reporter cannot read back from server",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "evidence: target cannot read",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "evidence: admin cannot read WITHOUT audited open",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "evidence: admin audited open returns path",
+  "pass": true,
+  "detail": "f9eb7bf0-5e2d-4e95-b681-0edc759108df/e3639d38-e9f9-4588-a690-68760d60f3a6.json"
+ },
+ {
+  "test": "evidence: admin reads after audited open, intact",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "audit: evidence open logged",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "revoke: non-admin cannot quarantine",
+  "pass": true,
+  "detail": "403 {'error': 'not_admin'}"
+ },
+ {
+  "test": "revoke: justification required",
+  "pass": true,
+  "detail": "{'error': 'SHIELD_REASON_REQUIRED'}"
+ },
+ {
+  "test": "revoke: admin quarantines media",
+  "pass": true,
+  "detail": "200 {'ok': True, 'quarantined': 1, 'failed': []}"
+ },
+ {
+  "test": "revoke: previously issued signed url dead (cache-bypassed request)",
+  "pass": false,
+  "detail": "200"
+ },
+ {
+  "test": "revoke: exact previously issued url dead within CDN window (<=90s)",
+  "pass": true,
+  "detail": "seconds=40"
+ },
+ {
+  "test": "revoke: target cannot mint new link",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "revoke: quarantine not readable even by admin client",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "revoke: message flagged removed",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "tamper: target cannot unflag removed media",
+  "pass": true,
+  "detail": "204"
+ },
+ {
+  "test": "action: reason too short rejected",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'SHIELD_REASON_REQUIRED'}"
+ },
+ {
+  "test": "action: restrict media",
+  "pass": true,
+  "detail": "204 None"
+ },
+ {
+  "test": "action: restricted target cannot send media",
+  "pass": true,
+  "detail": "400 {'code': 'P0001', 'details': None, 'hint': None, 'message': 'SHIELD_MEDIA_RESTRICTED'}"
+ },
+ {
+  "test": "comms: admin messages reporter as support",
+  "pass": true,
+  "detail": "204 None"
+ },
+ {
+  "test": "comms: admin sees support thread",
+  "pass": true,
+  "detail": "200 [{'id': 'c56c239b-45db-4bf3-9bc1-95a8943bf5f0', 'from_support': True, 'content': 'نحن معك، تم اتخاذ إجراء', 'type': 'text', 'created_at': '2026-11-19T10:57:06.039739+00:00'}, {'id': '10d57c33-6e02"
+ },
+ {
+  "test": "action: suspend target",
+  "pass": true,
+  "detail": "204 None"
+ },
+ {
+  "test": "action: suspended target cannot sign in",
+  "pass": true,
+  "detail": "500"
+ },
+ {
+  "test": "action: admins/official protected from suspension",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'protected'}"
+ },
+ {
+  "test": "audit: update blocked",
+  "pass": true,
+  "detail": "400 {\"message\":\"Failed to run sql query: ERROR:  P0001: SHIELD_AUDIT_IMMUTABLE\\nCONTEXT:  PL/pgSQL function shield_audit"
+ },
+ {
+  "test": "audit: delete blocked",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "audit: hash chain verifies",
+  "pass": true,
+  "detail": "{'ok': True, 'checked': 23}"
+ },
+ {
+  "test": "audit: all actions recorded",
+  "pass": true,
+  "detail": "[]"
+ },
+ {
+  "test": "abuse: rate limit 5/day",
+  "pass": true,
+  "detail": "{'code': 'P0001', 'details': None, 'hint': None, 'message': 'SHIELD_RATE_LIMIT'}"
+ },
+ {
+  "test": "retention: endpoint rejects without secret",
+  "pass": true,
+  "detail": "401"
+ },
+ {
+  "test": "retention: open case evidence never expires",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "test": "settings: user saves own shield settings",
+  "pass": true,
+  "detail": "201"
+ },
+ {
+  "test": "settings: cannot write another user's settings",
+  "pass": true,
+  "detail": "403"
+ },
+ {
+  "test": "report: silent block stops reporter<->target DM (existing block logic)",
+  "pass": true,
+  "detail": "400"
+ },
+ {
+  "test": "settings: shielded sender's media auto-protected",
+  "pass": true,
+  "detail": "201"
+ },
+ {
+  "test": "regression: normal text message unaffected",
+  "pass": true,
+  "detail": "201"
+ },
+ {
+  "test": "regression: my_chats works",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "regression: my_channels works",
+  "pass": true,
+  "detail": "200"
+ },
+ {
+  "test": "regression: my_communities works",
+  "pass": true,
+  "detail": "200"
+ }
+]

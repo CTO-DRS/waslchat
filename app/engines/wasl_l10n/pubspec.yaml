@@ -1,0 +1,10 @@
+name: wasl_l10n
+description: "كتالوج الترجمة النقي ثلاثي اللغات (عربي/إنجليزي/فرنسي) لواجهة وصل شات — خرائط ثابتة بلا حزم خارجية ولا توليد كود، والغائب في لغة يهبط للعربية لا لنص مكسور — نقية."
+version: 2.0.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dev_dependencies:
+  test: ^1.25.0

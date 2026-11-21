@@ -1,0 +1,10 @@
+name: wasl_voice_waves
+description: "موجات «يتحدث» من مستوى الصوت المحلي: استخلاص المستوى من إحصاءات WebRTC الخام بمقياَيه الموحّدين وكاشف هسترة عتبتين يمنع الرمش — نقية بلا Flutter."
+version: 1.9.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dev_dependencies:
+  test: ^1.25.0

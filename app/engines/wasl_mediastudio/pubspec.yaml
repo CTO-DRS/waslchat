@@ -1,0 +1,14 @@
+name: wasl_mediastudio
+description: "استوديو الوسائط الموحد وصل شات — المحرك النقي الثاني عشر: قص وتدوير وقلب وتصغير وتعليقات ودمج شبكي فوق image 4.x المحلية، بحدود معلنة تجمع كل الأسباب، وصفر IO وصفر شبكة (الرفع غير ممكن بنياً)، وتعليقات صادقة (لاتيني بكسل، وغيره حمل للواجهة)."
+version: 1.0.0
+homepage: https://waslchat.app
+repository: https://github.com/CTO-DRS/waslchat
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dependencies:
+  image: ^4.13.1
+
+dev_dependencies:
+  test: ^1.25.0
