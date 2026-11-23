@@ -8,9 +8,8 @@
  * 3) استقبال الإشعارات الفورية (Web Push) وعرضها — الحمولة نص إشعار
  *    عام من دالة push (المحتوى المشفر لا يمر هنا إطلاقاً).
  */
-const SHELL_CACHE = 'wasl-shell-v2'; // v2 (1.21.0): أيقونات قابلة للتحديث — رفع النسخة يجدد القوقعة والأيقونات عند التحديث
+const SHELL_CACHE = 'wasl-shell-v1';
 const ASSET_CACHE = 'wasl-assets-v1';
-const SHARE_CACHE = 'wasl-share-v1'; // Web Share Target (1.21.0): كاش صور المشاركة الواردة
 
 /* قلب الواجهة فقط: مستندات وملفات الجذر — كلها network-first
  * كي لا يخدم التحديث القديم بعد نشر إصدار جديد أبداً. */
@@ -45,64 +44,17 @@ self.addEventListener('activate', (event) => {
             .map((k) => caches.delete(k))
         )
       )
-      .then(() =>
-        Promise.all(
-          keys
-            .filter((k) => k !== SHELL_CACHE && k !== ASSET_CACHE && k !== SHARE_CACHE)
-            .map((k) => caches.delete(k))
-        )
-      )
       .then(() => self.clients.claim())
   );
 });
-
-/* Web Share Target (1.21.0): المتصفح يرسل الصورة المشتركة POST إلى
- * share-target.html — نخزنها في كاش المشاركة بوسم قصير فريد ونعيد
- * توجيه التطبيق إليه بمعامل ?share=، والقراءة لاحقاً بجلب GET من
- * /web/__share__/<وسم>. الملف لا يغادر الجهاز في هذه المرحلة إطلاقاً:
- * التخزين كاش محلي حصراً ولا أي شبكة خارج الأصل. */
-async function handleSharePost(req) {
-  try {
-    const form = await req.formData();
-    const file = form.get('image');
-    if (!(file instanceof File)) return Response.redirect('./', 303);
-    const token =
-      's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const cache = await caches.open(SHARE_CACHE);
-    await cache.put(
-      '__share__/' + token,
-      new Response(file, {
-        headers: { 'content-type': file.type || 'application/octet-stream' }
-      })
-    );
-    return Response.redirect('./?share=' + token, 303);
-  } catch (_) {
-    return Response.redirect('./', 303);
-  }
-}
 
 /* الأصول الثابتة (خطوط وصور وأيقونات النظام): serve من الكاش فوراً
  * وتحديثه في الخلفية (stale-while-revalidate) — سريع ويتصحح ذاتياً. */
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // Supabase وغيرها لا تُمس
-
-  if (req.method === 'POST' && url.pathname.endsWith('/share-target.html')) {
-    event.respondWith(handleSharePost(req));
-    return;
-  }
-  if (req.method === 'GET' && url.pathname.includes('/__share__/')) {
-    // قراءة الصورة المشتركة بالوسم — بلا وسم صالح لا جلب أصلاً (القواعد
-    // النقية تحقق الوسم في التطبيق، وهنا الرد من الكاش المحلي حصراً)
-    event.respondWith(
-      caches
-        .open(SHARE_CACHE)
-        .then((c) => c.match(req).then((r) => r || Response.error()))
-    );
-    return;
-  }
-  if (req.method !== 'GET') return;
 
   if (req.mode === 'navigate') {
     // المستند: شبكة أولاً ثم الكاش ثم index.html — أحدث دائماً إن وصلنا
