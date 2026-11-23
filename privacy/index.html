@@ -66,7 +66,7 @@
               <div>
                 <h3>المحتوى الذي ترسله</h3>
                 <ul>
-                  <li>الرسائل والصور والرسائل الصوتية.</li>
+                  <li>الرسائل والصور والرسائل الصوتية. في المحادثات الخاصة والمجموعات الخاصة تصلنا مشفّرة من طرف لطرف فلا نستطيع قراءتها؛ وفي القنوات والمجتمعات ومحادثات البوتات نخزّنها بلا هذا التشفير.</li>
                   <li>أسماء المجموعات والمجتمعات والقنوات.</li>
                 </ul>
               </div>
@@ -131,7 +131,7 @@
           <section class="section" id="ar-security">
             <div class="head">
               <p class="head__eyebrow">5. الأمان</p>
-              <h2>بياناتك مشفّرة أثناء النقل والتخزين، لكن الرسائل ليست مشفّرة من طرف إلى طرف بعد.</h2>
+              <h2>المحادثات الخاصة والمجموعات الخاصة مشفّرة من طرف لطرف تلقائياً. القنوات والمجتمعات ليست كذلك.</h2>
             </div>
             <div class="prose">
               <ul class="x-list">
@@ -139,8 +139,11 @@
                 <li>أمان على مستوى الصفوف في قاعدة البيانات يحصر كل مستخدم في محادثاته.</li>
                 <li>ملفات الوسائط في تخزين خاص بروابط محدودة المدة.</li>
                 <li>التحقق بخطوتين اختياري.</li>
+                <li><strong>تشفير من طرف لطرف تلقائياً</strong> للرسائل والوسائط في المحادثات الفردية والمجموعات الخاصة (X25519 وHKDF وAES-256-GCM). مفتاحك الخاص يبقى على جهازك، ويمكنك مطابقة رقم الأمان أو رمز QR مع الطرف الآخر.</li>
+                <li><strong>غير مشفّر من طرف لطرف:</strong> القنوات العامة والمجتمعات ومحادثات البوتات والحسابات الرسمية، وكذلك النص الذي تختار إرساله إلى Wasl AI (مثل تلخيص محادثة) لأنه يُفك على جهازك ويُرسل للخادم بعد موافقتك.</li>
+                <li>حتى مع التشفير، يرى الخادم بيانات وصفية مثل: من راسل من، ومتى، وأعضاء المجموعات.</li>
               </ul>
-              <p><strong>الرسائل غير مشفّرة من طرف إلى طرف حتى الآن</strong>، وهذا ضمن خطتنا القادمة. لا يوجد نظام آمن بنسبة 100%.</p>
+              <p>لا يوجد نظام آمن بنسبة 100%.</p>
             </div>
           </section>
 
@@ -236,7 +239,7 @@
               <div>
                 <h3>Content you send</h3>
                 <ul>
-                  <li>Messages, images and voice notes.</li>
+                  <li>Messages, images and voice notes. In private chats and private groups we only store them end-to-end encrypted and cannot read them; in channels, communities and bot chats they are stored without end-to-end encryption.</li>
                   <li>Group, community and channel names.</li>
                 </ul>
               </div>
@@ -301,7 +304,7 @@
           <section class="section" id="en-security">
             <div class="head">
               <p class="head__eyebrow">5. Security</p>
-              <h2>Encrypted in transit and at rest, but messages are not end-to-end encrypted yet.</h2>
+              <h2>Private chats and private groups are end-to-end encrypted by default. Channels and communities are not.</h2>
             </div>
             <div class="prose">
               <ul class="x-list">
@@ -309,8 +312,11 @@
                 <li>Database row-level security limits each user to their own conversations.</li>
                 <li>Media files sit in private storage, served through time-limited links.</li>
                 <li>Optional two-factor authentication.</li>
+                <li><strong>End-to-end encryption by default</strong> for messages and media in one-to-one chats and private groups (X25519, HKDF, AES-256-GCM). Your private key stays on your device, and you can compare a safety number or QR code with the other person.</li>
+                <li><strong>Not end-to-end encrypted:</strong> public channels, communities, bot and official-account chats, and any text you choose to send to Wasl AI (e.g. summarizing a chat), which is decrypted on your device and sent to our server after you confirm.</li>
+                <li>Even with encryption, the server sees metadata such as who messaged whom, when, and group membership.</li>
               </ul>
-              <p><strong>Messages are NOT end-to-end encrypted yet</strong>; it is on our roadmap. No system is 100% secure.</p>
+              <p>No system is 100% secure.</p>
             </div>
           </section>
 
