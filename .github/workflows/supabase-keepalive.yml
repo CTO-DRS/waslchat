@@ -1,0 +1,20 @@
+name: Supabase keep-alive
+on:
+  schedule:
+    - cron: "17 6 */2 * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST
+        env:
+          ANON: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+            "https://hplzbillnbdjtufazrlp.supabase.co/rest/v1/profiles?select=id&limit=1")
+          echo "HTTP $code"
+          test "$code" -lt 500 && test "$code" != "000"
